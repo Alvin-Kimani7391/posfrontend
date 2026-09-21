@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Log in · Kenya POS</title>
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+</head>
+<body>
+  <div class="auth-screen">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <span class="logo-mark" id="logo-mark"></span>
+        <span id="app-name">Kenya POS</span>
+      </div>
+      <h1>Welcome back</h1>
+      <p class="auth-subtitle">Sign in to manage your shop</p>
+
+      <div id="form-alert-slot"></div>
+
+      <div class="tabs" style="margin-bottom: var(--space-5)">
+        <button class="tab-btn active" data-tab="password" type="button">Email / phone</button>
+        <button class="tab-btn" data-tab="pin" type="button">Employee PIN</button>
+      </div>
+
+      <!-- Password login (owner/admin/manager/accountant, or cashier by phone) -->
+      <form id="password-login-form" novalidate>
+        <div class="field">
+          <label for="identifier">Email or phone number</label>
+          <input class="input" type="text" id="identifier" name="identifier" placeholder="you@business.com or 0712345678" required autocomplete="username" autocapitalize="off" />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input class="input" type="password" id="password" name="password" placeholder="••••••••" required autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="password-login-btn">Log in</button>
+      </form>
+
+      <!-- PIN login (cashiers at a shared till) -->
+      <form id="pin-login-form" class="hidden" novalidate>
+        <div class="field">
+          <label for="pin-business-id">Business ID</label>
+          <input class="input" type="text" id="pin-business-id" name="businessId" placeholder="Paste the Business ID from your manager" required autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <span class="field-hint">Your manager can copy this from the Employees page. It's saved on this device after your first login.</span>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="employee-code">Employee code</label>
+            <input class="input" type="text" id="employee-code" name="employeeCode" placeholder="C001" required autocomplete="off" autocapitalize="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label for="pin">PIN</label>
+            <input class="input" type="password" id="pin" name="pin" placeholder="••••" inputmode="numeric" maxlength="8" required autocomplete="off" />
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="pin-login-btn">Log in</button>
+      </form>
+
+      <div class="auth-footer">
+        Don't have a business account yet? <a href="register.html">Create one</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/core/config.js"></script>
+  <script src="js/core/icons.js"></script>
+  <script src="js/core/storage.js"></script>
+  <script src="js/core/api.js"></script>
+  <script src="js/core/permissions.js"></script>
+  <script src="js/core/ui.js"></script>
+  <script src="js/pages/login.js"></script>
+</body>
+</html>

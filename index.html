@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Kenya POS</title>
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <style>
+    .boot-screen {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-4);
+      background: var(--color-bg);
+    }
+    .boot-logo {
+      width: 56px; height: 56px;
+      background: var(--color-primary);
+      color: #fff;
+      border-radius: var(--radius-lg);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .boot-logo svg { width: 28px; height: 28px; }
+  </style>
+</head>
+<body>
+  <div class="boot-screen">
+    <div class="boot-logo" id="boot-logo"></div>
+    <div class="spinner spinner-dark"></div>
+  </div>
+
+  <script src="js/core/config.js"></script>
+  <script src="js/core/icons.js"></script>
+  <script src="js/core/storage.js"></script>
+  <script>
+    document.getElementById('boot-logo').innerHTML = window.Icons.get('store');
+    // Redirect immediately - the boot screen only shows if this takes a beat
+    // (slow connection/first paint), it's not a deliberate splash delay.
+    window.location.replace(window.Storage.isAuthenticated() ? 'dashboard.html' : 'login.html');
+  </script>
+</body>
+</html>

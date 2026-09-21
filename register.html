@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Create your business · Kenya POS</title>
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+</head>
+<body>
+  <div class="auth-screen">
+    <div class="auth-card" style="max-width: 460px">
+      <div class="auth-logo">
+        <span class="logo-mark" id="logo-mark"></span>
+        <span id="app-name">Kenya POS</span>
+      </div>
+      <h1>Set up your shop</h1>
+      <p class="auth-subtitle">Creates your business, a main branch, and your owner account</p>
+
+      <div id="form-alert-slot"></div>
+
+      <form id="register-form" novalidate>
+        <div class="field">
+          <label for="businessName">Business name</label>
+          <input class="input" type="text" id="businessName" name="businessName" placeholder="Mama Njeri Shop" required autocomplete="organization" />
+        </div>
+
+        <div class="field">
+          <label for="ownerName">Your full name</label>
+          <input class="input" type="text" id="ownerName" name="ownerName" placeholder="Njeri Wanjiku" required autocomplete="name" />
+        </div>
+
+        <div class="form-row">
+          <div class="field">
+            <label for="phone">Phone number</label>
+            <input class="input" type="tel" id="phone" name="phone" placeholder="0712345678" required autocomplete="tel" inputmode="tel" />
+            <span class="field-hint">Used to log in and for M-PESA</span>
+          </div>
+          <div class="field">
+            <label for="email">Email <span class="text-muted">(optional)</span></label>
+            <input class="input" type="email" id="email" name="email" placeholder="you@business.com" autocomplete="email" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input class="input" type="password" id="password" name="password" placeholder="At least 8 characters" required autocomplete="new-password" minlength="8" />
+        </div>
+
+        <div class="field">
+          <label for="confirmPassword">Confirm password</label>
+          <input class="input" type="password" id="confirmPassword" name="confirmPassword" placeholder="Re-enter your password" required autocomplete="new-password" minlength="8" />
+        </div>
+
+        <div class="checkbox-row" style="margin-bottom: var(--space-5)">
+          <input type="checkbox" id="agree" name="agree" required />
+          <label for="agree" class="text-sm text-secondary">I agree to be responsible for this business account and its data</label>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="register-btn">Create business account</button>
+      </form>
+
+      <div class="auth-footer">
+        Already have an account? <a href="login.html">Log in</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/core/config.js"></script>
+  <script src="js/core/icons.js"></script>
+  <script src="js/core/storage.js"></script>
+  <script src="js/core/api.js"></script>
+  <script src="js/core/permissions.js"></script>
+  <script src="js/core/ui.js"></script>
+  <script src="js/pages/register.js"></script>
+</body>
+</html>
