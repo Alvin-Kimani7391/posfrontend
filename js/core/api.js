@@ -7,7 +7,7 @@
  * - On a 401 with code UNAUTHENTICATED/expired token, transparently tries
  *   ONE refresh (single-flight - concurrent 401s share the same refresh
  *   call) and retries the original request once.
- * - Throws ApiError so callers can do: catch (err) { err.message, err.code, err.errors }
+ * - Throws ApiError so callers can do: catch (err) { err.message, err.code, err.errors, err.data }
  *
  * Usage:
  *   const { data } = await Api.get('/branches', { page: 1 });
@@ -15,12 +15,16 @@
  */
 (function (window) {
   class ApiError extends Error {
-    constructor(message, { code, status, errors } = {}) {
+    constructor(message, { code, status, errors, data } = {}) {
       super(message);
       this.name = 'ApiError';
       this.code = code || 'ERROR';
       this.status = status;
       this.errors = errors || [];
+      // Carries any `data` payload the backend attached to an error response
+      // (e.g. mpesa.controller.js's { failureType } on a send-time STK
+      // failure) so callers can branch on it without re-parsing anything.
+      this.data = data || null;
     }
   }
 
@@ -100,6 +104,7 @@
         code: payload.code,
         status: res.status,
         errors: payload.errors,
+        data: payload.data,
       });
     }
 

@@ -22,8 +22,31 @@
  *   - Tapping "Scan barcode" opens the camera viewfinder (phone or webcam).
  * Either way, an exact match adds straight to the cart via the existing
  * GET /products/barcode/:barcode lookup - no manual search needed.
+ *
+ * M-PESA STK PUSH: when the business has M-PESA enabled (state.flags.mpesaEnabled,
+ * fetched alongside the shift), the payment modal offers a "Send prompt"
+ * flow instead of a free-text reference field. The reference used on the
+ * eventual payment line is NEVER typed by the cashier - it only gets set
+ * (modal.dataset.mpesaReference) once GET /payments/mpesa/:reference/status
+ * confirms SUCCESS. The backend re-verifies this same reference against a
+ * server-side MpesaTransaction when the sale is finalized, so a cashier
+ * can't fabricate a fake M-PESA payment even if they tamper with the request.
  */
 (function () {
+  const MPESA_FAILURE_LABELS = {
+    wrong_pin: 'Wrong PIN entered',
+    insufficient_funds: 'Insufficient M-PESA balance',
+    cancelled: 'Cancelled by customer',
+    timeout: 'No response in time',
+    in_progress: 'Another request already pending',
+    system_error: 'M-PESA system error',
+    bad_credentials: 'M-PESA not configured correctly',
+    rate_limited: 'Too many requests - try again shortly',
+    wallet_empty: 'PayHero wallet is empty',
+    send_failed: 'Could not reach M-PESA',
+    failed: 'Payment failed',
+  };
+
   const state = {
     view: 'new-sale',
     cart: [], // { product, variant, quantity, discount, overridePriceEnabled, overridePrice }
@@ -31,6 +54,7 @@
     cartDiscount: 0,
     payments: [], // { method, amount, reference, amountTendered }
     currentShift: null,
+    flags: { mpesaEnabled: false, etimsEnabled: false },
     history: { page: 1, limit: 10, search: '', from: '', to: '' },
   };
   let contentEl;
@@ -131,17 +155,23 @@
   }
 
   /* ================================================================== *
-   * Shift banner
+   * Shift banner (+ integration flags, fetched alongside it)
    * ================================================================== */
   async function loadShift() {
     const branchId = window.AppShell.getActiveBranchId();
     if (!branchId) return;
-    try {
-      const { data } = await window.Api.get('/shifts/current', { branchId });
-      state.currentShift = data.shift;
-    } catch {
-      state.currentShift = null;
-    }
+
+    const [shiftResult, flagsResult] = await Promise.allSettled([
+      window.Api.get('/shifts/current', { branchId }),
+      window.Api.get('/settings/integrations/flags'),
+    ]);
+
+    state.currentShift = shiftResult.status === 'fulfilled' ? shiftResult.value.data.shift : null;
+    // Default to disabled rather than throw - a role without payments.view
+    // (shouldn't happen for anyone who can reach this page, but stay safe)
+    // just won't see the M-PESA/eTIMS options.
+    state.flags = flagsResult.status === 'fulfilled' ? flagsResult.value.data : { mpesaEnabled: false, etimsEnabled: false };
+
     renderShiftBanner();
   }
 
@@ -601,7 +631,92 @@
     el.querySelectorAll('[data-remove-payment]').forEach((b) => b.addEventListener('click', () => { state.payments.splice(Number(b.dataset.removePayment), 1); renderCart(); }));
   }
 
+  /* ---- M-PESA STK status panel (used inside the payment modal) ---- */
+  function renderMpesaStatus(modal, viewState, data = {}) {
+    const el = modal.querySelector('#mpesa-stk-status');
+    if (!el) return;
+    const toneClass = { pending: 'badge-info', error: 'badge-danger', warning: 'badge-warning', success: 'badge-success' }[viewState.tone] || 'badge-neutral';
+    el.innerHTML = `
+      <div style="display:flex; gap:var(--space-2); align-items:flex-start; padding:var(--space-3); border-radius:var(--radius-md); background:var(--color-bg)">
+        <span class="badge ${toneClass}">${window.UI.escapeHtml(viewState.label)}</span>
+        <span class="text-sm text-secondary" style="flex:1">${window.UI.escapeHtml(viewState.message)}</span>
+      </div>
+      ${viewState.retry ? `<button type="button" class="btn btn-secondary btn-sm" id="mpesa-retry-btn" style="margin-top:var(--space-2)">Try again</button>` : ''}
+    `;
+    modal.querySelector('#mpesa-retry-btn')?.addEventListener('click', () => modal.querySelector('#mpesa-send-btn').click());
+  }
+
+  function clearMpesaPolling(modal) {
+    if (modal._mpesaPoll) {
+      clearInterval(modal._mpesaPoll);
+      modal._mpesaPoll = null;
+    }
+  }
+
+  function bindMpesaSend(modal) {
+    modal.querySelector('#mpesa-send-btn').addEventListener('click', async () => {
+      const phone = modal.querySelector('[name="mpesaPhone"]').value.trim();
+      const amount = Number(modal.querySelector('[name="amount"]').value);
+      if (!phone || !amount) return window.UI.toast.error('Enter a phone number and amount first');
+
+      delete modal.dataset.mpesaReference;
+      clearMpesaPolling(modal);
+
+      const sendBtn = modal.querySelector('#mpesa-send-btn');
+      window.UI.setButtonLoading(sendBtn, true, 'Sending…');
+      renderMpesaStatus(modal, { tone: 'pending', label: 'Sending', message: 'Sending prompt to customer\u2019s phone…' });
+
+      try {
+        const { data } = await window.Api.post('/payments/mpesa/stk', {
+          branchId: window.AppShell.getActiveBranchId(), phone, amountCents: Math.round(amount * 100),
+        });
+        const reference = data.reference;
+        renderMpesaStatus(modal, { tone: 'pending', label: 'Waiting', message: 'Ask the customer to enter their M-PESA PIN on their phone.' });
+
+        modal._mpesaPoll = setInterval(async () => {
+          let s;
+          try {
+            ({ data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`));
+          } catch {
+            return; // transient network hiccup - keep polling
+          }
+          if (s.status === 'SUCCESS') {
+            clearMpesaPolling(modal);
+            modal.dataset.mpesaReference = reference;
+            renderMpesaStatus(modal, { tone: 'success', label: 'Confirmed', message: s.message });
+            window.UI.toast.success('M-PESA payment confirmed');
+          } else if (s.status === 'FAILED') {
+            clearMpesaPolling(modal);
+            const label = MPESA_FAILURE_LABELS[s.failureType] || 'Payment failed';
+            renderMpesaStatus(modal, { tone: s.failureType === 'timeout' ? 'warning' : 'error', label, message: s.message, retry: true });
+            window.UI.toast.error(label);
+          }
+        }, 3000);
+      } catch (err) {
+        // Send-time failure (bad credentials, rate-limited, wallet empty,
+        // network) - err.data.failureType comes straight from mpesa.controller.js.
+        const failureType = err.data?.failureType;
+        const label = MPESA_FAILURE_LABELS[failureType] || 'Could not send prompt';
+        renderMpesaStatus(modal, { tone: 'error', label, message: err.message, retry: true });
+        window.UI.toast.error(err.message);
+      } finally {
+        window.UI.setButtonLoading(sendBtn, false);
+      }
+    });
+  }
+
   function openAddPaymentModal(suggestedAmount) {
+    const mpesaFieldHtml = state.flags.mpesaEnabled ? `
+      <div class="field" id="mpesa-stk-field" style="display:none">
+        <label>Customer phone (M-PESA)</label>
+        <div class="input-button-row">
+          <input class="input" name="mpesaPhone" placeholder="07XXXXXXXX" />
+          <button type="button" class="btn btn-secondary" id="mpesa-send-btn">Send prompt</button>
+        </div>
+        <div id="mpesa-stk-status" style="margin-top: var(--space-3)"></div>
+      </div>
+    ` : '';
+
     const modal = window.UI.openModal({
       title: 'Add payment',
       bodyHtml: `
@@ -619,6 +734,7 @@
           <div class="field"><label>Amount (KES)</label><input class="input" name="amount" type="number" step="0.01" min="0.01" required value="${suggestedAmount > 0 ? suggestedAmount : ''}" /></div>
           <div class="field" id="tendered-field"><label>Amount tendered (KES) <span class="text-muted">(for change)</span></label><input class="input" name="amountTendered" type="number" step="0.01" min="0" /></div>
           <div class="field" id="reference-field" style="display:none"><label>Reference / code</label><input class="input" name="reference" placeholder="Till number, transaction code, etc" /></div>
+          ${mpesaFieldHtml}
         </form>
       `,
       footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="save">Add</button>`,
@@ -627,17 +743,37 @@
     const methodSelect = modal.querySelector('#payment-method');
     const toggleFields = () => {
       const isCash = methodSelect.value === 'CASH';
+      const isMpesa = methodSelect.value === 'MPESA';
       modal.querySelector('#tendered-field').style.display = isCash ? '' : 'none';
-      modal.querySelector('#reference-field').style.display = isCash ? 'none' : '';
+      modal.querySelector('#reference-field').style.display = isCash || isMpesa ? 'none' : '';
+      const mpesaField = modal.querySelector('#mpesa-stk-field');
+      if (mpesaField) mpesaField.style.display = isMpesa ? '' : 'none';
     };
     methodSelect.addEventListener('change', toggleFields);
     toggleFields();
 
-    modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
+    if (state.flags.mpesaEnabled) bindMpesaSend(modal);
+
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+      clearMpesaPolling(modal);
+      window.UI.closeModal();
+    });
     modal.querySelector('[data-action="save"]').addEventListener('click', () => {
       const form = modal.querySelector('#payment-form');
       if (!form.reportValidity()) return;
       const raw = window.UI.serializeForm(form);
+
+      if (raw.method === 'MPESA') {
+        if (!modal.dataset.mpesaReference) {
+          return window.UI.toast.error('Wait for the M-PESA payment to be confirmed first');
+        }
+        clearMpesaPolling(modal);
+        state.payments.push({ method: 'MPESA', amount: Number(raw.amount), reference: modal.dataset.mpesaReference });
+        window.UI.closeModal();
+        renderCart();
+        return;
+      }
+
       state.payments.push({
         method: raw.method,
         amount: Number(raw.amount),

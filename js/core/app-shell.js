@@ -27,7 +27,8 @@
     
     { key: 'branches', label: 'Branches', icon: 'branches', href: 'branches.html', permission: 'branches.view' },
     { key: 'employees', label: 'Employees', icon: 'employees', href: 'employees.html', permission: 'employees.view' },
-    { key: 'settings', label: 'Settings', icon: 'settings', href: '#', disabled: true, permission: 'settings.view' },
+    { key: 'customers', label: 'Customers', icon: 'employees', href: 'customers.html', permission: 'customers.view' },
+    { key: 'settings', label: 'Settings', icon: 'settings', href: 'settings.html', permission: 'settings.view' },
   ];
 
   // Items shown in the mobile bottom nav (kept short - 5 max is the mobile UX norm).

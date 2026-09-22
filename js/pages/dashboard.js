@@ -1,20 +1,24 @@
 /**
  * dashboard.js
- * "How is the business doing?" in one screen, powered by GET /reports/dashboard.
+ * Two completely different dashboards live here, chosen once at init and
+ * never mixed:
  *
- *  - Takings panel: net sales for the chosen period, how it compares with the
- *    period before it, and how the money came in (cash / M-PESA / card ...).
- *  - KPI tiles, charts (payment mix, top products, profit walk, cashiers,
- *    money position) and stock alerts.
- *  - Profit figures only render when the user has reports.profit - the
- *    dashboard endpoint returns them to anyone with reports.view, so the
- *    frontend must not show them to people who shouldn't see margins.
- *  - Users without reports.view (e.g. cashiers) get a simple "start selling"
- *    screen instead of empty charts.
- *  - The owner's "Employee login details" card (Business ID + login link) is
- *    kept exactly as before.
+ *  - Full dashboard (reports.view): unchanged business-wide view - takings,
+ *    KPIs, charts, stock alerts, the employee login card, the setup
+ *    checklist. Owner/Admin/Manager/Accountant land here.
  *
- * Refreshes itself every minute while "Today" is selected and the tab is visible.
+ *  - Personal dashboard (no reports.view): everyone else (Cashier,
+ *    Storekeeper, any custom role). Built purely from what THIS user's
+ *    permissions actually allow:
+ *      - sales.view/sales.create -> "my sales today" + my payment mix +
+ *        my top items + my recent sales (fetched from GET /reports/me,
+ *        which is self-scoped server-side to this user's own cashierId -
+ *        it is not possible to see another employee's numbers through it).
+ *      - inventory.view -> low stock / out of stock tiles for their branch
+ *        (also returned by /reports/me, gated server-side).
+ *      - shifts.view -> a compact shift status strip.
+ *    A role with none of the above just gets the quick-actions grid and a
+ *    friendly empty state - never a raw blank page.
  */
 (function () {
   const RT = window.ReportTools;
@@ -28,6 +32,9 @@
   let filterBar = null;
   let canReports = false;
   let canProfit = false;
+  let canSelfSales = false;
+  let canSelfInventory = false;
+  let canSelfShift = false;
   let token = 0;
   let timer = null;
 
@@ -40,6 +47,9 @@
     user = window.AppShell.getUser();
     canReports = window.Permissions.can(user, 'reports.view');
     canProfit = window.Permissions.can(user, 'reports.profit');
+    canSelfSales = window.Permissions.can(user, 'sales.view') || window.Permissions.can(user, 'sales.create');
+    canSelfInventory = window.Permissions.can(user, 'inventory.view');
+    canSelfShift = window.Permissions.can(user, 'shifts.view');
     businessId = await ensureBusinessId();
 
     contentEl.innerHTML = pageSkeleton();
@@ -60,6 +70,12 @@
       timer = setInterval(() => {
         if (!document.hidden && filterBar.getState().preset === 'today') load({ silent: true });
       }, 60000);
+    } else {
+      document.getElementById('dash-refresh').addEventListener('click', () => loadPersonal());
+      await loadPersonal();
+      timer = setInterval(() => {
+        if (!document.hidden) loadPersonal({ silent: true });
+      }, 60000);
     }
     loadSetupChecklist();
   }
@@ -78,9 +94,9 @@
       <div class="page-header">
         <div>
           <h1>${greeting()} 👋</h1>
-          <p id="dash-sub">${canReports ? 'Here is how your business is doing.' : 'Ready when you are.'}</p>
+          <p id="dash-sub">${canReports ? 'Here is how your business is doing.' : "Here's what's happening on your shift."}</p>
         </div>
-        ${canReports ? '<div class="page-actions"><button class="btn btn-secondary btn-sm" id="dash-refresh">Refresh</button></div>' : ''}
+        <div class="page-actions"><button class="btn btn-secondary btn-sm" id="dash-refresh">Refresh</button></div>
       </div>
 
       <div class="quick-actions">
@@ -90,17 +106,19 @@
         <a class="qa" href="expenses.html" data-requires-permission="expenses.view">${window.Icons.get('reports')} Expenses</a>
         <a class="qa" href="reports.html" data-requires-permission="reports.view">${window.Icons.get('reports')} Reports</a>
         <a class="qa" href="audit-logs.html" data-requires-permission="audit.view">${window.Icons.get('settings')} Audit log</a>
-      </div>
+        <a class="qa" href="customers.html" data-requires-permission="customers.view">${window.Icons.get('employees')} Customers</a>
+        </div>
 
-      ${canReports ? '<div id="dash-filters"></div><div id="dash-body"></div>' : ''}
+      ${canReports ? '<div id="dash-filters"></div>' : ''}
+      <div id="dash-body"></div>
       <div id="setup-slot"></div>
       ${loginCard()}
     `;
   }
 
-  /* ------------------------------------------------------------------ *
-   * Data
-   * ------------------------------------------------------------------ */
+  /* ==================================================================== *
+   * FULL DASHBOARD (reports.view) - unchanged from before
+   * ==================================================================== */
   async function load({ silent = false } = {}) {
     const body = document.getElementById('dash-body');
     const my = ++token;
@@ -113,7 +131,7 @@
 
     const [cur, prev] = await Promise.allSettled([
       window.Api.get('/reports/dashboard', q),
-      window.Api.get('/reports/dashboard', prevQ), // comparison is optional - a failure just hides the arrows
+      window.Api.get('/reports/dashboard', prevQ),
     ]);
     if (my !== token) return;
 
@@ -136,9 +154,6 @@
       <div class="chart-grid g-1-1"><div class="card chart-card"><div class="skeleton" style="height:240px;margin:20px"></div></div><div class="card chart-card"><div class="skeleton" style="height:240px;margin:20px"></div></div></div>`;
   }
 
-  /* ------------------------------------------------------------------ *
-   * Render
-   * ------------------------------------------------------------------ */
   function render(body, d, prev, st) {
     const s = d.sales;
     const p = d.profit;
@@ -249,6 +264,159 @@
     window.Permissions.applyPermissionGates(body, user);
   }
 
+  /* ==================================================================== *
+   * PERSONAL DASHBOARD (no reports.view) - Cashier, Storekeeper, custom roles
+   * ==================================================================== */
+  function loadingHtmlPersonal() {
+    const tile = '<div class="kpi"><div class="skeleton" style="height:12px;width:50%"></div><div class="skeleton" style="height:28px;width:70%;margin-top:14px"></div></div>';
+    return `<div class="skeleton" style="height:56px;border-radius:var(--radius-md);margin-bottom:var(--space-4)"></div>
+      <div class="takings"><div class="skeleton" style="height:70px"></div></div>
+      <div class="kpi-grid">${tile.repeat(3)}</div>`;
+  }
+
+  async function loadPersonal({ silent = false } = {}) {
+    const body = document.getElementById('dash-body');
+    const my = ++token;
+    if (!silent) body.innerHTML = loadingHtmlPersonal();
+
+    const branchId = window.AppShell.getActiveBranchId();
+
+    const [meRes, shiftRes] = await Promise.allSettled([
+      window.Api.get('/reports/me', branchId ? { branchId } : {}),
+      canSelfShift ? window.Api.get('/shifts/current', branchId ? { branchId } : {}) : Promise.resolve(null),
+    ]);
+    if (my !== token) return;
+
+    if (meRes.status === 'rejected') {
+      if (silent) return;
+      body.innerHTML = `<div class="card">${window.UI.emptyStateHtml({
+        icon: 'alert', title: 'Could not load your stats', message: meRes.reason?.message || 'Please try again.',
+        actionHtml: '<button class="btn btn-secondary" id="dash-retry">Try again</button>',
+      })}</div>`;
+      document.getElementById('dash-retry').addEventListener('click', () => loadPersonal());
+      return;
+    }
+
+    const shift = shiftRes.status === 'fulfilled' && shiftRes.value ? shiftRes.value.data.shift : null;
+    renderPersonal(body, meRes.value.data, shift);
+  }
+
+  function renderPersonal(body, d, shift) {
+    document.getElementById('dash-sub').textContent = "Here's what's happening on your shift.";
+
+    const s = d.sales || {};
+    const inv = d.inventory || null;
+
+    // A role with no sales visibility and no inventory visibility has
+    // nothing personal to show - keep the page honest instead of faking tiles.
+    if (!canSelfSales && !inv) {
+      body.innerHTML = `<div class="card">${window.UI.emptyStateHtml({
+        icon: 'dashboard', title: 'Nothing to show here yet', message: 'Use the quick actions above to get to work.',
+      })}</div>`;
+      window.Permissions.applyPermissionGates(body, user);
+      return;
+    }
+
+    const quiet = canSelfSales && !s.transactionCount;
+    const tiles = [];
+    if (canSelfSales) {
+      tiles.push(RT.kpi({ label: 'Transactions today', value: RT.fmtNum(s.transactionCount || 0), icon: 'sales' }));
+      tiles.push(RT.kpi({ label: 'Average sale', value: fm(s.averageSale || 0) }));
+      tiles.push(RT.kpi({ label: 'Discounts given', value: fm(s.totalDiscount || 0), tone: s.totalDiscount ? 'warning' : 'neutral' }));
+    }
+    if (inv) {
+      tiles.push(RT.kpi({ label: 'Running low', value: RT.fmtNum(inv.lowStockCount || 0), icon: 'inventory', tone: inv.lowStockCount ? 'warning' : 'success' }));
+      tiles.push(RT.kpi({ label: 'Out of stock', value: RT.fmtNum(inv.outOfStockCount || 0), tone: inv.outOfStockCount ? 'danger' : 'success' }));
+    }
+
+    body.innerHTML = `
+      ${canSelfShift ? renderShiftStrip(shift) : ''}
+
+      ${canSelfSales ? `
+      <section class="takings">
+        <div>
+          <div class="takings-label">My net sales today</div>
+          <div class="takings-value">${fm(s.netSales || 0)}</div>
+          <div class="takings-meta">
+            <span><b>${RT.fmtNum(s.transactionCount || 0)}</b> sales</span>
+            <span><b>${fm(s.averageSale || 0)}</b> average</span>
+            ${quiet ? '<span>No sales rung up yet today.</span>' : ''}
+          </div>
+        </div>
+        <div>
+          <div class="takings-split-title">How I collected it</div>
+          <div id="me-pay-split"></div>
+        </div>
+      </section>` : ''}
+
+      <div class="kpi-grid">${tiles.join('')}</div>
+
+      ${canSelfSales ? `
+      <div class="chart-grid g-1-1">
+        ${RT.chartCard({ id: 'me-pay', title: 'My payment mix', subtitle: "Today's collections" })}
+        ${RT.chartCard({ id: 'me-products', title: 'What I sold most', subtitle: 'Top 5 by revenue today' })}
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>My recent sales</h3></div>
+        <div class="table-wrap flat">
+          <table class="table">
+            <thead><tr><th>Receipt</th><th>Time</th><th>Customer</th><th>Total</th><th>Status</th></tr></thead>
+            <tbody>${renderRecentSalesRows(d.recentSales)}</tbody>
+          </table>
+        </div>
+      </div>` : ''}
+    `;
+
+    if (canSelfSales) {
+      CH.stackbar(document.getElementById('me-pay-split'), {
+        segments: (s.paymentBreakdown || []).map((x) => ({ label: RT.methodMeta(x.method).label, value: x.total, color: RT.methodMeta(x.method).color })),
+        format: RT.money0, emptyText: 'Payments will show up here as you make sales.',
+      });
+      CH.donut(document.getElementById('me-pay'), {
+        data: (s.paymentBreakdown || []).map((x) => ({ label: RT.methodMeta(x.method).label, value: x.total, color: RT.methodMeta(x.method).color })),
+        format: RT.money0, tipFormat: fm, centerLabel: 'Collected', ariaLabel: 'My payment mix',
+      });
+      CH.hbar(document.getElementById('me-products'), {
+        data: (s.topProducts || []).map((x) => ({ label: x.name, value: x.revenue, sub: `${RT.fmtNum(x.quantity)} sold` })),
+        format: RT.money0, valueLabel: 'Revenue', ranked: true, emptyText: 'Nothing sold yet today.',
+      });
+    }
+
+    window.Permissions.applyPermissionGates(body, user);
+  }
+
+  function renderShiftStrip(shift) {
+    if (shift) {
+      return `
+        <div class="shift-banner open" style="margin-bottom: var(--space-4)">
+          <span>${window.Icons.get('check')} Shift open since ${window.UI.formatDateTime(shift.openedAt)} - ${esc(shift.registerId?.name || 'Register')}</span>
+          <a class="btn btn-secondary btn-sm" href="sales.html">Manage in Sales</a>
+        </div>`;
+    }
+    return `
+      <div class="shift-banner closed" style="margin-bottom: var(--space-4)">
+        <span>${window.Icons.get('alert')} No open shift - open one before taking cash payments</span>
+        <a class="btn btn-primary btn-sm" href="sales.html" data-requires-permission="shifts.open">Open a shift</a>
+      </div>`;
+  }
+
+  const PAYMENT_BADGE = { PAID: 'badge-success', PARTIAL: 'badge-warning', CREDIT: 'badge-danger', UNPAID: 'badge-neutral' };
+
+  function renderRecentSalesRows(rows) {
+    if (!rows || !rows.length) {
+      return `<tr><td colspan="5">${window.UI.emptyStateHtml({ icon: 'sales', title: 'No sales yet today' })}</td></tr>`;
+    }
+    return rows.map((r) => `
+      <tr>
+        <td class="cell-primary">${esc(r.receiptNumber)}</td>
+        <td class="text-sm">${RT.timeOnly(r.createdAt)}</td>
+        <td class="text-sm">${r.customerName ? esc(r.customerName) : '<span class="text-muted">Walk-in</span>'}</td>
+        <td class="font-semibold">${fm(r.total)}</td>
+        <td><span class="badge ${PAYMENT_BADGE[r.paymentStatus] || 'badge-neutral'}">${esc(r.paymentStatus)}</span></td>
+      </tr>
+    `).join('');
+  }
+
   /* ------------------------------------------------------------------ *
    * First-run checklist (owners/admins only, hides itself once staff exist)
    * ------------------------------------------------------------------ */
@@ -259,7 +427,6 @@
       window.Api.get('/employees', { page: 1, limit: 1 }),
     ]);
     const branchCount = b.status === 'fulfilled' ? b.value.data.total : 0;
-    // The owner is one employee record, so "added an employee" means more than one.
     const staffAdded = Math.max((e.status === 'fulfilled' ? e.value.data.total : 0) - 1, 0);
     if (staffAdded > 0) return;
 
