@@ -3,7 +3,20 @@
  * Shared by dashboard.js, reports.js and audit-logs.js:
  *   - date range presets (+ the "end of day" fix, see toQuery note below)
  *   - createFilterBar(): presets, custom dates, branch + cashier selectors
- *   - small markup builders: kpi(), chartCard(), segmented(), badges
+ *   - small markup builders: kpi(), expandableKpi(), chartCard(), segmented(), badges
+ *   - TWO drill-down systems:
+ *     1) bindDrilldown/openDrilldown - self-scoped, backed by GET /sales.
+ *        Used on the personal dashboard (cashier's own sales). Rows show
+ *        receipt, date/time, branch, cashier, customer, total, status.
+ *     2) bindAdminDrilldown/openAdminDrilldown - backed by the real
+ *        /reports/*\/detail endpoints (sales/payments/expenses). Used on
+ *        the admin Reports page so each KPI's expand shows the ACTUAL
+ *        figure behind it (tax per sale, discount per sale, refunded
+ *        amount, payment method/reference) with fully custom columns,
+ *        not a generic sale list.
+ *     Both share the same panel markup (drilldownPanelHtml), "Load more"
+ *     pagination, and close/scroll behaviour.
+ *   - trendLabel(): Mon/Tue/... for <=7 day ranges, calendar dates beyond that.
  *   - downloadCSV() (Excel-friendly, formula-injection safe), copyText()
  *
  * NOTE on dates: the backend does `to: z.coerce.date()`, so "2026-09-21"
@@ -78,6 +91,17 @@
     return new Intl.DateTimeFormat('en-KE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(dateLike));
   }
 
+  /**
+   * trendLabel - Mon/Tue/... for ranges of 7 days or fewer (a natural
+   * weekday view), "12 Sep" style calendar dates for anything longer
+   * (weekday names alone would repeat and become ambiguous past a week).
+   */
+  function trendLabel(dateStr, rangeDays) {
+    const d = new Date(`${dateStr}T00:00:00`);
+    if (rangeDays <= 7) return new Intl.DateTimeFormat('en-KE', { weekday: 'short' }).format(d);
+    return new Intl.DateTimeFormat('en-KE', { day: '2-digit', month: 'short' }).format(d);
+  }
+
   /* ------------------------------------------------------------------ *
    * Numbers & text
    * ------------------------------------------------------------------ */
@@ -114,6 +138,11 @@
     return `<span class="badge ${map[status] || 'badge-neutral'}">${esc(prettify(status))}</span>`;
   }
 
+  const PAYMENT_STATUS_BADGE = { PAID: 'badge-success', PARTIAL: 'badge-warning', CREDIT: 'badge-danger', UNPAID: 'badge-neutral' };
+  function paymentStatusBadge(status) {
+    return `<span class="badge ${PAYMENT_STATUS_BADGE[status] || 'badge-neutral'}">${esc(prettify(status))}</span>`;
+  }
+
   function rankBadge(i) { return `<span class="rank rank-${i < 3 ? i + 1 : 'n'}">${i + 1}</span>`; }
 
   /* ------------------------------------------------------------------ *
@@ -127,6 +156,21 @@
         <div class="kpi-value">${value}</div>
         <div class="kpi-foot">${delta}${sub ? `<span class="kpi-sub">${esc(sub)}</span>` : ''}</div>
       </div>`;
+  }
+
+  /**
+   * expandableKpi - same visual as kpi() but the whole tile is a toggle
+   * button carrying data-kpi-trigger="<metricKey>". Pair with
+   * bindDrilldown() or bindAdminDrilldown() on the containing element.
+   */
+  function expandableKpi({ key, label, value, sub = '', tone = 'primary', icon = '', delta = '' }) {
+    return `
+      <button type="button" class="kpi kpi-${tone} kpi-expandable" data-kpi-trigger="${esc(key)}" aria-expanded="false">
+        <div class="kpi-top"><span class="kpi-label">${esc(label)}</span>${icon ? `<span class="kpi-icon">${window.Icons.get(icon)}</span>` : ''}</div>
+        <div class="kpi-value">${value}</div>
+        <div class="kpi-foot">${delta}${sub ? `<span class="kpi-sub">${esc(sub)}</span>` : ''}</div>
+        <div class="kpi-expand-hint"><span class="kpi-expand-hint-text">Tap to see the detail behind this</span>${window.Icons.get('chevronDown')}</div>
+      </button>`;
   }
 
   function chartCard({ id, title, subtitle = '', actions = '', className = '', bodyClass = '' }) {
@@ -170,14 +214,258 @@
     }, 150));
   }
 
+  function drilldownPanelHtml(id) {
+    return `<div class="drilldown-panel" id="${id}" hidden></div>`;
+  }
+
+  function closeDrilldown(panelEl) {
+    panelEl.hidden = true;
+    panelEl.innerHTML = '';
+  }
+
+  /* ==================================================================== *
+   * 1) SELF-SCOPED SALE DRILL-DOWN (personal dashboard) - GET /sales
+   * ==================================================================== */
+
+  const DRILLDOWN_TITLES = {
+    netSales: 'Sales behind "Net sales"',
+    grossSales: 'Sales behind "Gross sales"',
+    transactions: 'All transactions',
+    discounts: 'Sales with a discount applied',
+    refunds: 'Sales that were refunded',
+    tax: 'Sales behind "Tax collected"',
+    mySales: 'My sales',
+  };
+
+  function saleRowsHtml(items) {
+    if (!items.length) {
+      return `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'sales', title: 'No sales found' })}</td></tr>`;
+    }
+    return items.map((s) => `
+      <tr data-sale-id="${s._id}" class="drilldown-row">
+        <td class="cell-primary">${esc(s.receiptNumber)}</td>
+        <td class="text-sm">${window.UI.formatDateTime(s.createdAt)}</td>
+        <td class="text-sm">${esc(s.branchId?.name || '-')}</td>
+        <td class="text-sm">${esc(s.cashierId?.name || '-')}</td>
+        <td class="text-sm">${s.customerId ? esc(s.customerId.name) : '<span class="text-muted">Walk-in</span>'}</td>
+        <td class="num font-semibold">${window.UI.formatMoney(s.total)}</td>
+        <td>${paymentStatusBadge(s.paymentStatus)}${s.saleStatus === 'CANCELLED' ? ' <span class="badge badge-neutral">Cancelled</span>' : ''}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function openDrilldown(panelEl, metricKey, fetchParams = {}, page = 1) {
+    const limit = 15;
+    panelEl.innerHTML = `
+      <div class="drilldown-head">
+        <h4>${esc(DRILLDOWN_TITLES[metricKey] || 'Sales')}</h4>
+        <button type="button" class="btn btn-ghost btn-sm" data-drilldown-close>${window.Icons.get('close')} Close</button>
+      </div>
+      <div class="table-wrap flat">
+        <table class="table">
+          <thead><tr><th>Receipt</th><th>Date &amp; time</th><th>Branch</th><th>Cashier</th><th>Customer</th><th class="num">Total</th><th>Status</th></tr></thead>
+          <tbody id="${panelEl.id}-body">${window.UI.skeletonRows(5, 7)}</tbody>
+        </table>
+      </div>
+      <div class="drilldown-foot" id="${panelEl.id}-foot"></div>
+    `;
+    panelEl.hidden = false;
+    panelEl.querySelector('[data-drilldown-close]').addEventListener('click', () => closeDrilldown(panelEl));
+    await loadDrilldownPage(panelEl, fetchParams, page, limit, []);
+  }
+
+  async function loadDrilldownPage(panelEl, fetchParams, page, limit, existingItems) {
+    const bodyEl = document.getElementById(`${panelEl.id}-body`);
+    const footEl = document.getElementById(`${panelEl.id}-foot`);
+    try {
+      const { data } = await window.Api.get('/sales', { ...fetchParams, page, limit });
+      const allItems = existingItems.concat(data.items);
+      bodyEl.innerHTML = saleRowsHtml(allItems);
+      footEl.innerHTML = `
+        <span class="text-xs text-muted">${fmtNum(allItems.length)} of ${fmtNum(data.total)} shown</span>
+        ${page < data.pages ? '<button type="button" class="btn btn-secondary btn-sm" id="dd-load-more">Load more</button>' : ''}
+      `;
+      bindDrilldownRowClicks(bodyEl);
+      footEl.querySelector('#dd-load-more')?.addEventListener('click', (e) => {
+        window.UI.setButtonLoading(e.target, true, 'Loading…');
+        loadDrilldownPage(panelEl, fetchParams, page + 1, limit, allItems);
+      });
+    } catch (err) {
+      bodyEl.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load sales', message: err.message })}</td></tr>`;
+      footEl.innerHTML = '';
+    }
+  }
+
+  function bindDrilldownRowClicks(bodyEl) {
+    bodyEl.querySelectorAll('.drilldown-row').forEach((tr) => {
+      tr.addEventListener('click', () => openSaleDetailModal(tr.dataset.saleId));
+    });
+  }
+
+  function bindDrilldown(root, panelEl, metricFetchParams) {
+    let activeKey = null;
+    root.querySelectorAll('[data-kpi-trigger]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.kpiTrigger;
+        const wasActive = activeKey === key && !panelEl.hidden;
+        root.querySelectorAll('[data-kpi-trigger]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+        if (wasActive) {
+          closeDrilldown(panelEl);
+          activeKey = null;
+          return;
+        }
+        btn.setAttribute('aria-expanded', 'true');
+        activeKey = key;
+        const params = metricFetchParams(key) || {};
+        openDrilldown(panelEl, key, params, 1);
+        panelEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
+  }
+
+  /* ==================================================================== *
+   * 2) ADMIN DETAIL DRILL-DOWN (Reports page) - /reports/*\/detail
+   * Column-driven: each KPI supplies its own column set + endpoint, so
+   * "Tax collected" genuinely shows a Tax column, "Discounts" shows a
+   * Discount column, etc, instead of a generic sale list.
+   * ==================================================================== */
+
+  async function openAdminDrilldown(panelEl, opts) {
+    const { title, endpoint, params = {}, columns, rowSaleIdField } = opts;
+    const limit = 15;
+    panelEl.innerHTML = `
+      <div class="drilldown-head">
+        <h4>${esc(title)}</h4>
+        <button type="button" class="btn btn-ghost btn-sm" data-drilldown-close>${window.Icons.get('close')} Close</button>
+      </div>
+      <div class="table-wrap flat">
+        <table class="table">
+          <thead><tr>${columns.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.label)}</th>`).join('')}</tr></thead>
+          <tbody id="${panelEl.id}-body">${window.UI.skeletonRows(5, columns.length)}</tbody>
+        </table>
+      </div>
+      <div class="drilldown-foot" id="${panelEl.id}-foot"></div>
+    `;
+    panelEl.hidden = false;
+    panelEl.querySelector('[data-drilldown-close]').addEventListener('click', () => closeDrilldown(panelEl));
+    await loadAdminDetailPage(panelEl, endpoint, params, columns, rowSaleIdField, 1, limit, []);
+  }
+
+  async function loadAdminDetailPage(panelEl, endpoint, params, columns, rowSaleIdField, page, limit, existingItems) {
+    const bodyEl = document.getElementById(`${panelEl.id}-body`);
+    const footEl = document.getElementById(`${panelEl.id}-foot`);
+    try {
+      const { data } = await window.Api.get(endpoint, { ...params, page, limit });
+      const allItems = existingItems.concat(data.items);
+      bodyEl.innerHTML = allItems.length
+        ? allItems.map((item) => {
+            const clickable = rowSaleIdField && item[rowSaleIdField];
+            return `<tr${clickable ? ` class="drilldown-row" data-sale-id="${item[rowSaleIdField]}"` : ''}>${columns.map((c) => `<td${c.num ? ' class="num"' : ''}>${c.render(item)}</td>`).join('')}</tr>`;
+          }).join('')
+        : `<tr><td colspan="${columns.length}">${window.UI.emptyStateHtml({ icon: 'reports', title: 'Nothing found for this filter' })}</td></tr>`;
+      footEl.innerHTML = `
+        <span class="text-xs text-muted">${fmtNum(allItems.length)} of ${fmtNum(data.total)} shown</span>
+        ${page < data.pages ? '<button type="button" class="btn btn-secondary btn-sm" id="dd-load-more">Load more</button>' : ''}
+      `;
+      bodyEl.querySelectorAll('.drilldown-row').forEach((tr) => tr.addEventListener('click', () => openSaleDetailModal(tr.dataset.saleId)));
+      footEl.querySelector('#dd-load-more')?.addEventListener('click', (e) => {
+        window.UI.setButtonLoading(e.target, true, 'Loading…');
+        loadAdminDetailPage(panelEl, endpoint, params, columns, rowSaleIdField, page + 1, limit, allItems);
+      });
+    } catch (err) {
+      bodyEl.innerHTML = `<tr><td colspan="${columns.length}">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load', message: err.message })}</td></tr>`;
+      footEl.innerHTML = '';
+    }
+  }
+
+  /**
+   * bindAdminDrilldown(root, panelEl, configFn)
+   * configFn(key) -> { title, endpoint, params, columns, rowSaleIdField? }
+   * or null/undefined to ignore a trigger with no drill-down configured.
+   */
+  function bindAdminDrilldown(root, panelEl, configFn) {
+    let activeKey = null;
+    root.querySelectorAll('[data-kpi-trigger]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.kpiTrigger;
+        const wasActive = activeKey === key && !panelEl.hidden;
+        root.querySelectorAll('[data-kpi-trigger]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+        if (wasActive) { closeDrilldown(panelEl); activeKey = null; return; }
+        const cfg = configFn(key);
+        if (!cfg) return;
+        btn.setAttribute('aria-expanded', 'true');
+        activeKey = key;
+        openAdminDrilldown(panelEl, cfg);
+        panelEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Full sale detail modal - line items + the REAL payment methods used
+   * (not just paymentStatus). Reuses GET /sales/:id (sale + receipt +
+   * payments). Used by both drill-down systems above.
+   * ------------------------------------------------------------------ */
+  async function openSaleDetailModal(id) {
+    if (!id) return;
+    let data;
+    try {
+      ({ data } = await window.Api.get(`/sales/${id}`));
+    } catch (err) {
+      window.UI.toast.error(err.message);
+      return;
+    }
+    if (!data.sale) {
+      window.UI.toast.error("You don't have access to this sale");
+      return;
+    }
+
+    const { sale, payments } = data;
+    const modal = window.UI.openModal({
+      title: `Sale ${sale.receiptNumber}`,
+      maxWidth: '560px',
+      bodyHtml: `
+        <div class="kv-grid" style="margin-bottom: var(--space-4)">
+          <dt>Date &amp; time</dt><dd>${window.UI.formatDateTime(sale.createdAt)}</dd>
+          <dt>Branch</dt><dd>${esc(sale.branchId?.name || '-')}</dd>
+          <dt>Cashier</dt><dd>${esc(sale.cashierId?.name || '-')}</dd>
+          <dt>Customer</dt><dd>${sale.customerId ? esc(sale.customerId.name) : '<span class="text-muted">Walk-in</span>'}</dd>
+          <dt>Status</dt><dd>${paymentStatusBadge(sale.paymentStatus)}${sale.saleStatus === 'CANCELLED' ? ' <span class="badge badge-neutral">Cancelled</span>' : ''}</dd>
+        </div>
+
+        <h4 class="detail-title" style="margin-top:0">Items</h4>
+        <div class="table-wrap flat" style="margin-bottom: var(--space-4)">
+          <table class="table">
+            <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Total</th></tr></thead>
+            <tbody>
+              ${sale.items.map((i) => `<tr><td class="text-sm">${esc(i.nameSnapshot)}${i.refundedQuantity ? ` <span class="text-xs text-muted">(${i.refundedQuantity} refunded)</span>` : ''}</td><td class="num">${i.quantity}</td><td class="num">${window.UI.formatMoney(i.total)}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <h4 class="detail-title">Payment methods used</h4>
+        <div class="table-wrap flat">
+          <table class="table">
+            <thead><tr><th>Method</th><th>Reference</th><th class="num">Amount</th></tr></thead>
+            <tbody>
+              ${(payments || []).length
+                ? payments.map((p) => `<tr><td class="cell-primary">${esc(methodMeta(p.method).label)}</td><td class="text-sm">${p.reference ? esc(p.reference) : '<span class="text-muted">-</span>'}</td><td class="num">${window.UI.formatMoney(p.amount)}</td></tr>`).join('')
+                : `<tr><td colspan="3">${window.UI.emptyStateHtml({ icon: 'sales', title: 'No payments recorded (fully on credit)' })}</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pos-totals-row grand" style="margin-top: var(--space-4)"><span>Total</span><span>${window.UI.formatMoney(sale.total)}</span></div>
+        ${sale.balance > 0 ? `<div class="pos-totals-row" style="color:var(--color-warning)"><span>Balance owed</span><span>${window.UI.formatMoney(sale.balance)}</span></div>` : ''}
+      `,
+      footerHtml: `<button class="btn btn-secondary" data-action="close">Close</button>`,
+    });
+    modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
+  }
+
   /* ------------------------------------------------------------------ *
    * CSV + clipboard
    * ------------------------------------------------------------------ */
-  /**
-   * downloadCSV('sales-2026-09-21.csv', [{ title?, headers, rows }, ...])
-   * Adds a BOM so Excel reads UTF-8, and prefixes text cells that start with
-   * = + - @ so a product named "=HYPERLINK(...)" can't run as a formula.
-   */
   function downloadCSV(filename, sections) {
     const cell = (v) => {
       let s = v == null ? '' : v;
@@ -229,16 +517,6 @@
   /* ------------------------------------------------------------------ *
    * Filter bar
    * ------------------------------------------------------------------ */
-  /**
-   * createFilterBar(container, { defaultPreset, presets, showBranch, showCashier, onChange })
-   * Returns { ready, getState, getQuery, setScope, describe }.
-   *
-   * Branch: users with branches.view get an "All branches" selector (owners
-   * usually want the whole business). Users without it are pinned to their
-   * active branch so a manager never queries outside their reach.
-   * Cashier list needs employees.view; if the user lacks it the selector
-   * simply doesn't appear.
-   */
   function createFilterBar(container, opts = {}) {
     const {
       defaultPreset = '30d',
@@ -286,7 +564,6 @@
     const api = {
       el: container,
       getState: () => ({ ...st }),
-      /** Query params for the active scope ({dates, branch, cashier}). */
       getQuery(sc = scope) {
         const q = {};
         if (sc.dates) { q.from = st.from.toISOString(); q.to = st.to.toISOString(); }
@@ -366,9 +643,11 @@
 
   window.ReportTools = {
     PRESET_LABELS, rangeFor, previousRange, startOfDay, endOfDay, toDateInput, parseDateInput,
-    describeRange, dayLabel, timeOnly,
-    money0, fmtNum, pct, fmtPct, prettify, methodMeta, statusColor, statusBadge, rankBadge,
-    kpi, chartCard, deltaBadge, segmented, tableSearch,
+    describeRange, dayLabel, timeOnly, trendLabel,
+    money0, fmtNum, pct, fmtPct, prettify, methodMeta, statusColor, statusBadge, paymentStatusBadge, rankBadge,
+    kpi, expandableKpi, chartCard, deltaBadge, segmented, tableSearch,
+    drilldownPanelHtml, bindDrilldown, closeDrilldown, openSaleDetailModal,
+    bindAdminDrilldown, openAdminDrilldown,
     downloadCSV, stamp, copyText, createFilterBar,
   };
 })(window);

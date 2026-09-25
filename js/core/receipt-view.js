@@ -4,6 +4,12 @@
  * KES thanks to the backend's transform) as an on-screen + printable
  * receipt. One shared renderer so the immediate post-checkout view and a
  * later reprint from Sales History look identical.
+ *
+ * Every visual toggle here (header/footer messages, custom lines, paper
+ * width, which fields show) comes from receipt.receiptData.business, which
+ * is a SNAPSHOT of Business.receiptSettings as they were at sale time - this
+ * file never fetches live business settings, so a reprint always matches
+ * exactly what was originally printed even if the owner changes settings later.
  */
 (function (window) {
   function money(n) {
@@ -12,19 +18,24 @@
 
   function renderReceiptHtml(receipt) {
     const d = receipt.receiptData;
+    const b = d.business || {};
+    const width = b.paperWidth === '58mm' ? 240 : 320;
+
     return `
-      <div id="receipt-print-area" style="font-family: 'Courier New', monospace; font-size: 13px; max-width: 320px; margin: 0 auto;">
+      <div id="receipt-print-area" style="font-family: 'Courier New', monospace; font-size: 13px; max-width: ${width}px; margin: 0 auto;">
+        ${b.headerMessage ? `<div style="text-align:center; margin-bottom: var(--space-2); font-weight:600">${window.UI.escapeHtml(b.headerMessage)}</div>` : ''}
         <div style="text-align:center; margin-bottom: var(--space-3)">
-          <div style="font-weight:700; font-size: 15px">${window.UI.escapeHtml(d.business?.name || '')}</div>
-          ${d.business?.address ? `<div>${window.UI.escapeHtml(d.business.address)}</div>` : ''}
-          ${d.business?.phone ? `<div>${window.UI.escapeHtml(d.business.phone)}</div>` : ''}
-          ${d.business?.kraPin ? `<div>PIN: ${window.UI.escapeHtml(d.business.kraPin)}</div>` : ''}
+          ${b.logo ? `<img src="${b.logo}" alt="" style="max-height:48px; margin-bottom:6px" />` : ''}
+          <div style="font-weight:700; font-size: 15px">${window.UI.escapeHtml(b.name || '')}</div>
+          ${b.address ? `<div>${window.UI.escapeHtml(b.address)}</div>` : ''}
+          ${b.phone ? `<div>${window.UI.escapeHtml(b.phone)}</div>` : ''}
+          ${b.showKraPin !== false && b.kraPin ? `<div>PIN: ${window.UI.escapeHtml(b.kraPin)}</div>` : ''}
         </div>
         <div style="border-top: 1px dashed #999; border-bottom: 1px dashed #999; padding: var(--space-2) 0; margin-bottom: var(--space-2)">
           <div>Receipt: ${window.UI.escapeHtml(receipt.receiptNumber)}</div>
           ${receipt.invoiceNumber ? `<div>Invoice: ${window.UI.escapeHtml(receipt.invoiceNumber)}</div>` : ''}
           <div>Date: ${window.UI.formatDateTime(receipt.createdAt)}</div>
-          <div>Cashier: ${window.UI.escapeHtml(d.cashier?.name || '')}</div>
+          ${b.showCashierName !== false ? `<div>Cashier: ${window.UI.escapeHtml(d.cashier?.name || '')}</div>` : ''}
           ${d.customer ? `<div>Customer: ${window.UI.escapeHtml(d.customer.name)}</div>` : ''}
           ${d.branch?.name ? `<div>Branch: ${window.UI.escapeHtml(d.branch.name)}</div>` : ''}
         </div>
@@ -49,11 +60,17 @@
           <div style="display:flex; justify-content:space-between; font-weight:700; font-size:14px; margin-top:4px"><span>TOTAL</span><span>${money(d.total)}</span></div>
         </div>
         <div style="border-top: 1px dashed #999; margin-top: var(--space-2); padding-top: var(--space-2)">
-          ${d.payments.map((p) => `<div style="display:flex; justify-content:space-between"><span>${window.UI.escapeHtml(p.method)}${p.reference ? ` (${window.UI.escapeHtml(p.reference)})` : ''}</span><span>${money(p.amount)}</span></div>`).join('')}
+          ${d.payments.map((p) => `
+            <div style="display:flex; justify-content:space-between">
+              <span>${window.UI.escapeHtml(p.method)}${p.method === 'MPESA' && b.showMpesaReceiptCode !== false && p.externalTransactionId ? ` <span style="color:#666">(M-PESA: ${window.UI.escapeHtml(p.externalTransactionId)})</span>` : p.reference ? ` (${window.UI.escapeHtml(p.reference)})` : ''}</span>
+              <span>${money(p.amount)}</span>
+            </div>
+          `).join('')}
           ${d.changeGiven ? `<div style="display:flex; justify-content:space-between"><span>Change</span><span>${money(d.changeGiven)}</span></div>` : ''}
           ${d.balance > 0 ? `<div style="display:flex; justify-content:space-between; color: var(--color-danger); font-weight:600"><span>Balance owed</span><span>${money(d.balance)}</span></div>` : ''}
         </div>
-        ${d.business?.footerMessage ? `<div style="text-align:center; margin-top: var(--space-3); color:#666">${window.UI.escapeHtml(d.business.footerMessage)}</div>` : ''}
+        ${(b.customLines || []).map((line) => `<div style="text-align:center; margin-top:4px; color:#666; font-size:12px">${window.UI.escapeHtml(line)}</div>`).join('')}
+        ${b.footerMessage ? `<div style="text-align:center; margin-top: var(--space-3); color:#666">${window.UI.escapeHtml(b.footerMessage)}</div>` : ''}
       </div>
     `;
   }

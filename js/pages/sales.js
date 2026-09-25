@@ -25,12 +25,14 @@
  *
  * M-PESA STK PUSH: when the business has M-PESA enabled (state.flags.mpesaEnabled,
  * fetched alongside the shift), the payment modal offers a "Send prompt"
- * flow instead of a free-text reference field. The reference used on the
- * eventual payment line is NEVER typed by the cashier - it only gets set
- * (modal.dataset.mpesaReference) once GET /payments/mpesa/:reference/status
+ * flow instead of a free-text reference field. The reference is NEVER typed
+ * by the cashier - it's only known once GET /payments/mpesa/:reference/status
  * confirms SUCCESS. The backend re-verifies this same reference against a
  * server-side MpesaTransaction when the sale is finalized, so a cashier
  * can't fabricate a fake M-PESA payment even if they tamper with the request.
+ * Once confirmed, the payment is pushed automatically and, if it fully
+ * covers the sale total, checkout fires immediately - no extra clicks,
+ * since the money has already moved.
  */
 (function () {
   const MPESA_FAILURE_LABELS = {
@@ -471,6 +473,19 @@
     return { gross, net, tax, total: net };
   }
 
+  /** Same totals math as renderCart's inline calc, factored out so both the render and the auto-checkout logic use one source of truth. */
+  function computeTotals() {
+    let subtotal = 0, itemDiscountTotal = 0;
+    state.cart.forEach((item) => {
+      const unitPrice = item.overridePriceEnabled && item.overridePrice != null ? item.overridePrice : (item.variant ? item.variant.sellingPrice : item.product.sellingPrice);
+      subtotal += round2(unitPrice * item.quantity);
+      itemDiscountTotal += item.discount || 0;
+    });
+    const total = round2(subtotal - itemDiscountTotal - (state.cartDiscount || 0));
+    const paidSoFar = round2(state.payments.reduce((s, p) => s + p.amount, 0));
+    return { subtotal, itemDiscountTotal, total, paidSoFar, balance: round2(total - paidSoFar) };
+  }
+
   function renderCart() {
     const el = document.getElementById('cart-body');
     if (!el) return;
@@ -480,27 +495,23 @@
       return;
     }
 
-    let subtotal = 0, tax = 0, itemDiscountTotal = 0;
+    let tax = 0;
     const lines = state.cart.map((item) => {
       const unitPrice = item.overridePriceEnabled && item.overridePrice != null ? item.overridePrice : (item.variant ? item.variant.sellingPrice : item.product.sellingPrice);
       const preview = previewLine(unitPrice, item.quantity, item.discount, item.product.taxRate);
-      subtotal += preview.gross;
       tax += preview.tax;
-      itemDiscountTotal += item.discount || 0;
       return { item, unitPrice, preview };
     });
-    const total = round2(subtotal - itemDiscountTotal - (state.cartDiscount || 0));
-    const paidSoFar = round2(state.payments.reduce((s, p) => s + p.amount, 0));
-    const balance = round2(total - paidSoFar);
+    const { subtotal, itemDiscountTotal, total, paidSoFar, balance } = computeTotals();
 
     el.innerHTML = `
-      <div id="cart-items"></div>
-      <div style="margin: var(--space-3) 0">
+      <div class="cart-items-list" id="cart-items"></div>
+      <div class="cart-section" id="cart-customer-row">
         <button class="btn btn-secondary btn-sm btn-block" id="pick-customer-btn">
           ${window.Icons.get('employees')} ${state.customer ? window.UI.escapeHtml(state.customer.name) : 'Walk-in customer (add one for credit)'}
         </button>
       </div>
-      <div class="field" style="margin-bottom: var(--space-3)">
+      <div class="field cart-section" id="cart-discount-row">
         <label class="text-xs">Cart discount (KES)</label>
         <input class="input" id="cart-discount-input" type="number" step="0.01" min="0" value="${state.cartDiscount || ''}" placeholder="0" />
       </div>
@@ -511,7 +522,7 @@
       <div class="pos-totals-row"><span>Tax (est.)</span><span>${window.UI.formatMoney(tax)}</span></div>
       <div class="pos-totals-row grand"><span>Total</span><span>${window.UI.formatMoney(total)}</span></div>
 
-      <div style="margin-top: var(--space-4)">
+      <div class="cart-section">
         <div class="flex items-center justify-between" style="margin-bottom: var(--space-2)">
           <label class="text-xs font-semibold">Payments</label>
           <button class="btn btn-ghost btn-sm" id="add-payment-btn">${window.Icons.get('plus')} Add payment</button>
@@ -544,20 +555,22 @@
     const el = document.getElementById('cart-items');
     el.innerHTML = lines.map(({ item, unitPrice, preview }, i) => `
       <div class="pos-cart-item">
-        <span style="flex:1">
-          <div class="font-semibold text-sm">${window.UI.escapeHtml(item.product.name)}${item.variant ? ` <span class="text-muted">(${Object.values(item.variant.attributes || {}).join(', ')})</span>` : ''}</div>
+        <div class="pos-cart-item-info">
+          <div class="font-semibold text-sm pos-cart-item-name">${window.UI.escapeHtml(item.product.name)}${item.variant ? ` <span class="text-muted">(${Object.values(item.variant.attributes || {}).join(', ')})</span>` : ''}</div>
           <div class="text-xs text-muted">${window.UI.formatMoney(unitPrice)} each${item.discount ? ` &middot; -${window.UI.formatMoney(item.discount)}` : ''}</div>
-          <div class="pos-qty-control" style="margin-top: var(--space-2)">
-            <button type="button" data-action="dec" data-idx="${i}">-</button>
-            <span class="text-sm" style="min-width:20px; text-align:center">${item.quantity}</span>
-            <button type="button" data-action="inc" data-idx="${i}">+</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-action="discount" data-idx="${i}" style="height:26px">Discount</button>
+          <div class="pos-qty-control">
+            <div class="pos-qty-stepper">
+              <button type="button" data-action="dec" data-idx="${i}" aria-label="Decrease quantity">−</button>
+              <span class="pos-qty-value">${item.quantity}</span>
+              <button type="button" data-action="inc" data-idx="${i}" aria-label="Increase quantity">+</button>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm pos-discount-btn" data-action="discount" data-idx="${i}">Discount</button>
           </div>
-        </span>
-        <span class="flex flex-col items-end gap-1">
+        </div>
+        <div class="pos-cart-item-side">
           <span class="font-semibold text-sm">${window.UI.formatMoney(preview.total)}</span>
-          <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="remove" data-idx="${i}">${window.Icons.get('trash')}</button>
-        </span>
+          <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="remove" data-idx="${i}" aria-label="Remove item">${window.Icons.get('trash')}</button>
+        </div>
       </div>
     `).join('');
 
@@ -632,7 +645,7 @@
   }
 
   /* ---- M-PESA STK status panel (used inside the payment modal) ---- */
-  function renderMpesaStatus(modal, viewState, data = {}) {
+  function renderMpesaStatus(modal, viewState) {
     const el = modal.querySelector('#mpesa-stk-status');
     if (!el) return;
     const toneClass = { pending: 'badge-info', error: 'badge-danger', warning: 'badge-warning', success: 'badge-success' }[viewState.tone] || 'badge-neutral';
@@ -682,9 +695,21 @@
           }
           if (s.status === 'SUCCESS') {
             clearMpesaPolling(modal);
-            modal.dataset.mpesaReference = reference;
             renderMpesaStatus(modal, { tone: 'success', label: 'Confirmed', message: s.message });
             window.UI.toast.success('M-PESA payment confirmed');
+
+            // Auto-finish: the money has already moved, so don't make the
+            // cashier click Add then Complete Sale separately - push the
+            // payment now, and if the sale is fully paid, complete it
+            // immediately. A brief pause so "Confirmed" is actually seen
+            // before the modal closes.
+            state.payments.push({ method: 'MPESA', amount, reference });
+            setTimeout(() => {
+              window.UI.closeModal();
+              renderCart();
+              const { balance } = computeTotals();
+              if (balance <= 0) checkout();
+            }, 700);
           } else if (s.status === 'FAILED') {
             clearMpesaPolling(modal);
             const label = MPESA_FAILURE_LABELS[s.failureType] || 'Payment failed';
@@ -692,6 +717,46 @@
             window.UI.toast.error(label);
           }
         }, 3000);
+
+        // After ~15s of silent waiting, give the cashier a manual recheck
+        // instead of leaving them staring at a spinner with no way out -
+        // and reassure them that closing the tab doesn't lose the payment,
+        // since the reconciliation job still resolves it server-side.
+        setTimeout(() => {
+          if (modal._mpesaPoll && !modal.dataset.mpesaReference) {
+            const area = modal.querySelector('#mpesa-stk-status');
+            if (area && !area.querySelector('#mpesa-check-now-btn')) {
+              area.insertAdjacentHTML('beforeend', `
+                <button type="button" class="btn btn-secondary btn-sm" id="mpesa-check-now-btn" style="margin-top:var(--space-2)">Check status now</button>
+                <p class="text-xs text-muted" style="margin-top:var(--space-2)">Taking a while? If the customer already entered their PIN, it's still safe to wait - this doesn't create a second charge.</p>
+              `);
+              modal.querySelector('#mpesa-check-now-btn').addEventListener('click', async () => {
+                try {
+                  const { data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`);
+                  if (s.status === 'SUCCESS') {
+                    clearMpesaPolling(modal);
+                    renderMpesaStatus(modal, { tone: 'success', label: 'Confirmed', message: s.message });
+                    state.payments.push({ method: 'MPESA', amount, reference });
+                    setTimeout(() => {
+                      window.UI.closeModal();
+                      renderCart();
+                      const { balance } = computeTotals();
+                      if (balance <= 0) checkout();
+                    }, 700);
+                  } else if (s.status === 'FAILED') {
+                    clearMpesaPolling(modal);
+                    const label = MPESA_FAILURE_LABELS[s.failureType] || 'Payment failed';
+                    renderMpesaStatus(modal, { tone: s.failureType === 'timeout' ? 'warning' : 'error', label, message: s.message, retry: true });
+                  } else {
+                    window.UI.toast.success('Still pending on M-PESA\u2019s side - keep waiting.');
+                  }
+                } catch (err) {
+                  window.UI.toast.error(err.message);
+                }
+              });
+            }
+          }
+        }, 15000);
       } catch (err) {
         // Send-time failure (bad credentials, rate-limited, wallet empty,
         // network) - err.data.failureType comes straight from mpesa.controller.js.
@@ -764,14 +829,10 @@
       const raw = window.UI.serializeForm(form);
 
       if (raw.method === 'MPESA') {
-        if (!modal.dataset.mpesaReference) {
-          return window.UI.toast.error('Wait for the M-PESA payment to be confirmed first');
-        }
-        clearMpesaPolling(modal);
-        state.payments.push({ method: 'MPESA', amount: Number(raw.amount), reference: modal.dataset.mpesaReference });
-        window.UI.closeModal();
-        renderCart();
-        return;
+        // The auto-finish path above already pushes the payment and closes
+        // the modal on confirmation - if we get here with MPESA selected,
+        // the cashier clicked Add before confirmation landed.
+        return window.UI.toast.error('Wait for the M-PESA payment to be confirmed first');
       }
 
       state.payments.push({
@@ -816,7 +877,7 @@
     };
 
     const btn = document.getElementById('checkout-btn');
-    window.UI.setButtonLoading(btn, true, 'Completing sale…');
+    if (btn) window.UI.setButtonLoading(btn, true, 'Completing sale…');
     try {
       const { data } = await window.Api.post('/sales', payload, { idempotencyKey: checkoutKey });
       window.UI.toast.success(`Sale ${data.sale.receiptNumber} completed`);
@@ -826,7 +887,7 @@
     } catch (err) {
       window.UI.toast.error(err.message);
     } finally {
-      window.UI.setButtonLoading(btn, false);
+      if (btn) window.UI.setButtonLoading(btn, false);
     }
   }
 

@@ -4,6 +4,20 @@
  * No CDN, no build step - so charts keep working when the shop's internet is
  * down (the POS is meant to survive that).
  *
+ * RESPONSIVENESS FIX: `responsive()` used to measure container width
+ * synchronously, right after innerHTML was set elsewhere on the page -
+ * before the browser had done a layout pass. That measurement was often 0,
+ * so charts fell back to a hard-coded 560px and stayed there even on a wide
+ * laptop screen (this was the "too small on laptop" bug). It now waits two
+ * animation frames before its first measurement, and always attaches a
+ * ResizeObserver (donut() included - it never resized before at all).
+ *
+ * MOBILE FIX: bar() and waterfall() now guarantee a minimum pixel width per
+ * category. If that would make the chart wider than its card, the chart
+ * scrolls horizontally in its own lane (.chart-scroll) instead of cramming
+ * every bar down to an unreadable sliver - this was the "extremely small on
+ * phone" bug. donut() now clamps its size to the space actually available.
+ *
  *   Charts.bar(el, { labels, series: [{ name, values, color?, colors? }], format, tipFormat })
  *   Charts.hbar(el, { data: [{ label, value, sub?, color? }], format, ranked })
  *   Charts.donut(el, { data: [{ label, value, color? }], format, inner: 0.62 })   // inner: 0 = pie
@@ -12,7 +26,7 @@
  *   Charts.stackbar(el, { segments: [{ label, value, color }], format })
  *
  * Every chart draws into the element you pass, redraws when that element
- * changes width (bar + waterfall), and shows a tooltip on hover / tap.
+ * changes width (bar + waterfall + donut), and shows a tooltip on hover / tap.
  * All labels are escaped with UI.escapeHtml.
  */
 (function (window) {
@@ -46,6 +60,10 @@
     return `<div class="chart-empty">${esc(text || 'No data for this period')}</div>`;
   }
 
+  function isSmallViewport() {
+    return typeof window !== 'undefined' && window.innerWidth && window.innerWidth < 480;
+  }
+
   function niceNum(x, round) {
     const exp = Math.floor(Math.log10(x));
     const f = x / Math.pow(10, exp);
@@ -68,7 +86,14 @@
     return { min: nmin, max: nmax, step, ticks };
   }
 
-  /** Runs draw(width) now and again whenever the container's width changes. */
+  /**
+   * Runs draw(width) once layout has actually settled, and again whenever
+   * the container's width changes. The first measurement is deferred two
+   * animation frames: innerHTML is usually set synchronously right before
+   * this runs, and clientWidth can read 0 (or a stale pre-layout value) in
+   * that same tick - without this, charts would fall back to a fixed
+   * width and never recover even though the real container was much wider.
+   */
   function responsive(container, draw) {
     let lastW = -1;
     let ro = null;
@@ -77,10 +102,20 @@
       const w = Math.floor(container.clientWidth) || 0;
       if (w && w !== lastW) { lastW = w; draw(w); }
     };
-    const w0 = Math.floor(container.clientWidth) || 560;
-    lastW = w0;
-    draw(w0);
-    if (window.ResizeObserver) { ro = new ResizeObserver(run); ro.observe(container); }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        run();
+        if (lastW <= 0) {
+          // Still unmeasurable (e.g. inside a display:none tab) - draw at
+          // a sane fallback so something renders; ResizeObserver below
+          // will correct it the moment the container becomes visible.
+          const w = Math.floor(container.clientWidth) || 560;
+          lastW = w;
+          draw(w);
+        }
+        if (window.ResizeObserver && !ro) { ro = new ResizeObserver(run); ro.observe(container); }
+      });
+    });
   }
 
   /* ------------------------------------------------------------------ *
@@ -145,15 +180,15 @@
   /** Shared axis + grid for the bar and waterfall charts. */
   function layout(W, H, scale, format) {
     const tickText = scale.ticks.map((t) => String(format(t)));
-    const left = Math.max(...tickText.map((t) => t.length)) * 6.6 + 16;
-    const m = { t: 20, r: 12, b: 36, l: left };
+    const left = Math.max(...tickText.map((t) => t.length)) * 8.6 + 22;
+    const m = { t: 26, r: 18, b: 50, l: left };
     const ih = H - m.t - m.b;
     const y = (v) => m.t + ih * (1 - (v - scale.min) / (scale.max - scale.min));
     let grid = '';
     scale.ticks.forEach((t, i) => {
       const ty = y(t);
       grid += `<line class="ch-grid${t === 0 ? ' zero' : ''}" x1="${m.l}" x2="${W - m.r}" y1="${ty}" y2="${ty}"/>`
-        + `<text class="ch-tick" x="${m.l - 8}" y="${ty + 4}" text-anchor="end">${esc(tickText[i])}</text>`;
+        + `<text class="ch-tick" x="${m.l - 10}" y="${ty + 5}" text-anchor="end">${esc(tickText[i])}</text>`;
     });
     return { m, iw: W - m.l - m.r, ih, y, y0: y(0), grid };
   }
@@ -162,7 +197,7 @@
    * Vertical bars (single or grouped series, negative values allowed)
    * ------------------------------------------------------------------ */
   function bar(container, opts) {
-    const { labels = [], series = [], format = compact, height = 280, ariaLabel = 'Bar chart' } = opts;
+    const { labels = [], series = [], format = compact, height = 420, ariaLabel = 'Bar chart' } = opts;
     const tipFormat = opts.tipFormat || format;
 
     if (!labels.length || series.every((s) => s.values.every((v) => !v))) {
@@ -170,15 +205,24 @@
       return;
     }
     const showValues = opts.showValues != null ? opts.showValues : labels.length * series.length <= 8;
+    // Minimum pixel width per category so bars/labels stay legible even
+    // with many categories on a narrow phone. If the content needs more
+    // room than the card has, the chart scrolls horizontally (see
+    // .chart-scroll in report.css) rather than squeezing bars to nothing.
+    const minBand = Math.max(52, 30 + series.length * 26);
+    const h = isSmallViewport() ? Math.min(height, 320) : height;
 
-    responsive(container, (W) => {
+    responsive(container, (containerW) => {
       const all = series.flatMap((s) => s.values);
       const scale = niceScale(Math.min(0, ...all), Math.max(0, ...all), 5);
-      const { m, iw, ih, y, y0, grid } = layout(W, height, scale, format);
+      const probe = layout(containerW, h, scale, format);
+      const requiredW = probe.m.l + probe.m.r + labels.length * minBand;
+      const W = Math.max(containerW, requiredW);
+      const { m, iw, ih, y, y0, grid } = layout(W, h, scale, format);
       const band = iw / labels.length;
-      const inner = Math.min(band * 0.72, 64 * series.length);
+      const inner = Math.min(band * 0.74, 96 * series.length);
       const bw = inner / series.length;
-      const maxChars = Math.max(3, Math.floor(band / 6.6));
+      const maxChars = Math.max(3, Math.floor(band / 7.8));
 
       let bars = '';
       let xl = '';
@@ -194,19 +238,19 @@
           const v = s.values[i] || 0;
           const c = (s.colors && s.colors[i]) || s.color || PALETTE[si % PALETTE.length];
           const top = Math.min(y(v), y0);
-          const h = v ? Math.max(Math.abs(y(v) - y0), 2) : 0;
+          const hgt = v ? Math.max(Math.abs(y(v) - y0), 2) : 0;
           const x = bx + bw * si + 1;
-          bars += `<rect class="ch-bar" x="${x}" y="${top}" width="${Math.max(bw - 2, 1)}" height="${h}" rx="4" `
+          bars += `<rect class="ch-bar" x="${x}" y="${top}" width="${Math.max(bw - 3, 1)}" height="${hgt}" rx="5" `
             + `style="fill:${c};transform-origin:0 ${y0}px;animation-delay:${i * 45}ms"/>`;
           if (showValues && v) {
-            bars += `<text class="ch-val" x="${x + Math.max(bw - 2, 1) / 2}" y="${v >= 0 ? top - 6 : top + h + 13}" text-anchor="middle">${esc(format(v))}</text>`;
+            bars += `<text class="ch-val" x="${x + Math.max(bw - 3, 1) / 2}" y="${v >= 0 ? top - 8 : top + hgt + 16}" text-anchor="middle">${esc(format(v))}</text>`;
           }
         });
-        xl += `<text class="ch-tick" x="${m.l + band * i + band / 2}" y="${height - m.b + 20}" text-anchor="middle">${esc(trunc(lab, maxChars))}</text>`;
+        xl += `<text class="ch-tick" x="${m.l + band * i + band / 2}" y="${h - m.b + 26}" text-anchor="middle">${esc(trunc(lab, maxChars))}</text>`;
         hits += `<rect class="ch-hit" x="${m.l + band * i}" y="${m.t}" width="${band}" height="${ih}" data-tip="${esc(tip)}"/>`;
       });
 
-      container.innerHTML = `${legendHtml(series)}<svg class="chart-svg" width="${W}" height="${height}" viewBox="0 0 ${W} ${height}" role="img" aria-label="${esc(ariaLabel)}">${grid}${bars}${xl}${hits}</svg>`;
+      container.innerHTML = `${legendHtml(series)}<div class="chart-scroll"><svg class="chart-svg" width="${W}" height="${h}" viewBox="0 0 ${W} ${h}" role="img" aria-label="${esc(ariaLabel)}">${grid}${bars}${xl}${hits}</svg></div>`;
       attachTips(container);
     });
   }
@@ -215,11 +259,13 @@
    * Waterfall (revenue -> costs -> profit style walk)
    * ------------------------------------------------------------------ */
   function waterfall(container, opts) {
-    const { steps = [], format = compact, height = 300, ariaLabel = 'Waterfall chart' } = opts;
+    const { steps = [], format = compact, height = 420, ariaLabel = 'Waterfall chart' } = opts;
     const tipFormat = opts.tipFormat || format;
     if (!steps.length) { container.innerHTML = emptyHtml(opts.emptyText); return; }
+    const minBand = 92; // waterfall bars carry more label text than plain bars
+    const h = isSmallViewport() ? Math.min(height, 320) : height;
 
-    responsive(container, (W) => {
+    responsive(container, (containerW) => {
       let run = 0;
       const bars = steps.map((s) => {
         let from;
@@ -230,10 +276,13 @@
       });
       const vals = bars.flatMap((b) => [b.from, b.to]);
       const scale = niceScale(Math.min(0, ...vals), Math.max(0, ...vals), 5);
-      const { m, iw, y, grid } = layout(W, height, scale, format);
+      const probe = layout(containerW, h, scale, format);
+      const requiredW = probe.m.l + probe.m.r + bars.length * minBand;
+      const W = Math.max(containerW, requiredW);
+      const { m, iw, y, grid } = layout(W, h, scale, format);
       const band = iw / bars.length;
-      const bw = Math.min(band * 0.6, 84);
-      const maxChars = Math.max(4, Math.floor(band / 6.6));
+      const bw = Math.min(band * 0.6, 120);
+      const maxChars = Math.max(4, Math.floor(band / 7.8));
 
       let out = '';
       let xl = '';
@@ -243,23 +292,23 @@
         const yA = y(b.from);
         const yB = y(b.to);
         const top = Math.min(yA, yB);
-        const h = Math.max(Math.abs(yA - yB), 2);
+        const hgt = Math.max(Math.abs(yA - yB), 2);
         const color = b.color || (b.kind === 'total' ? (b.value >= 0 ? 'var(--color-primary)' : 'var(--color-danger)') : (b.value < 0 ? '#f59e0b' : '#10b981'));
         const label = b.kind === 'total' ? tipFormat(b.value) : `${b.value < 0 ? '−' : '+'}${tipFormat(Math.abs(b.value))}`;
         const tip = `<strong>${esc(b.label)}</strong><div class="tt-row"><span>${b.kind === 'total' ? 'Amount' : 'Change'}</span><b>${esc(label)}</b></div>`
           + (b.kind === 'total' ? '' : `<div class="tt-row"><span>Running total</span><b>${esc(tipFormat(b.end))}</b></div>`);
-        out += `<rect class="ch-bar" x="${x}" y="${top}" width="${bw}" height="${h}" rx="4" style="fill:${color};transform-origin:0 ${y(0)}px;animation-delay:${i * 90}ms" data-tip="${esc(tip)}"/>`;
+        out += `<rect class="ch-bar" x="${x}" y="${top}" width="${bw}" height="${hgt}" rx="5" style="fill:${color};transform-origin:0 ${y(0)}px;animation-delay:${i * 90}ms" data-tip="${esc(tip)}"/>`;
         const shown = b.kind === 'total' ? format(b.value) : `${b.value < 0 ? '−' : '+'}${format(Math.abs(b.value))}`;
         const up = b.to >= b.from;
-        out += `<text class="ch-val" x="${x + bw / 2}" y="${up ? top - 6 : top + h + 13}" text-anchor="middle">${esc(shown)}</text>`;
-        xl += `<text class="ch-tick" x="${m.l + band * i + band / 2}" y="${height - m.b + 20}" text-anchor="middle">${esc(trunc(b.label, maxChars))}</text>`;
+        out += `<text class="ch-val" x="${x + bw / 2}" y="${up ? top - 8 : top + hgt + 16}" text-anchor="middle">${esc(shown)}</text>`;
+        xl += `<text class="ch-tick" x="${m.l + band * i + band / 2}" y="${h - m.b + 26}" text-anchor="middle">${esc(trunc(b.label, maxChars))}</text>`;
         if (i < bars.length - 1) {
           const ny = y(b.end);
           links += `<line class="ch-link" x1="${x + bw}" x2="${m.l + band * (i + 1) + (band - bw) / 2}" y1="${ny}" y2="${ny}"/>`;
         }
       });
 
-      container.innerHTML = `<svg class="chart-svg" width="${W}" height="${height}" viewBox="0 0 ${W} ${height}" role="img" aria-label="${esc(ariaLabel)}">${grid}${links}${out}${xl}</svg>`;
+      container.innerHTML = `<div class="chart-scroll"><svg class="chart-svg" width="${W}" height="${h}" viewBox="0 0 ${W} ${h}" role="img" aria-label="${esc(ariaLabel)}">${grid}${links}${out}${xl}</svg></div>`;
       attachTips(container);
     });
   }
@@ -294,12 +343,14 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Donut / pie
+   * Donut / pie - now resize-aware, and clamps to the space it actually
+   * has so a fixed `size` never overflows a narrow phone card.
    * ------------------------------------------------------------------ */
   function donut(container, opts) {
-    const { data = [], format = compact, inner = 0.62, size = 210, centerLabel = 'Total', maxSlices = 7, ariaLabel = 'Share chart' } = opts;
+    const { data = [], format = compact, inner = 0.62, centerLabel = 'Total', maxSlices = 7, ariaLabel = 'Share chart' } = opts;
     const centerFormat = opts.centerFormat || compact;
     const tipFormat = opts.tipFormat || format;
+    const requestedSize = opts.size || 300;
 
     let items = data.filter((d) => d.value > 0).sort((a, b) => b.value - a.value);
     if (!items.length) { container.innerHTML = emptyHtml(opts.emptyText); return; }
@@ -308,71 +359,75 @@
       items = items.slice(0, maxSlices - 1).concat({ label: 'Others', value: rest.reduce((s, d) => s + d.value, 0), color: '#94a3b8' });
     }
     const total = items.reduce((s, d) => s + d.value, 0);
-    const r = size / 2 - 6;
-    const cx = size / 2;
-    const cy = size / 2;
-    const ri = r * inner;
-    const pt = (rad, a) => [cx + rad * Math.cos(a), cy + rad * Math.sin(a)];
 
-    let a0 = -Math.PI / 2;
-    const paths = items.map((d, i) => {
-      const frac = d.value / total;
-      const a1 = a0 + Math.min(frac, 0.99999) * 2 * Math.PI;
-      const large = a1 - a0 > Math.PI ? 1 : 0;
-      const [x0, y0] = pt(r, a0);
-      const [x1, y1] = pt(r, a1);
-      let path;
-      if (ri > 0) {
-        const [x2, y2] = pt(ri, a1);
-        const [x3, y3] = pt(ri, a0);
-        path = `M${x0} ${y0}A${r} ${r} 0 ${large} 1 ${x1} ${y1}L${x2} ${y2}A${ri} ${ri} 0 ${large} 0 ${x3} ${y3}Z`;
-      } else {
-        path = `M${cx} ${cy}L${x0} ${y0}A${r} ${r} 0 ${large} 1 ${x1} ${y1}Z`;
-      }
-      a0 = a1;
-      const color = d.color || PALETTE[i % PALETTE.length];
-      const tip = `<strong>${esc(d.label)}</strong><div class="tt-row"><span>Amount</span><b>${esc(tipFormat(d.value))}</b></div><div class="tt-row"><span>Share</span><b>${(frac * 100).toFixed(1)}%</b></div>`;
-      return `<path class="dn-slice" d="${path}" style="fill:${color};transform-origin:${cx}px ${cy}px" data-tip="${esc(tip)}"/>`;
-    }).join('');
+    responsive(container, (containerW) => {
+      const size = Math.max(150, Math.min(requestedSize, containerW - 8));
+      const r = size / 2 - 10;
+      const cx = size / 2;
+      const cy = size / 2;
+      const ri = r * inner;
+      const pt = (rad, a) => [cx + rad * Math.cos(a), cy + rad * Math.sin(a)];
 
-    const center = ri > 0
-      ? `<text class="dn-cv" x="${cx}" y="${cy + 4}" text-anchor="middle">${esc(centerFormat(total))}</text><text class="dn-cl" x="${cx}" y="${cy + 22}" text-anchor="middle">${esc(centerLabel)}</text>`
-      : '';
+      let a0 = -Math.PI / 2;
+      const paths = items.map((d, i) => {
+        const frac = d.value / total;
+        const a1 = a0 + Math.min(frac, 0.99999) * 2 * Math.PI;
+        const large = a1 - a0 > Math.PI ? 1 : 0;
+        const [x0, y0] = pt(r, a0);
+        const [x1, y1] = pt(r, a1);
+        let path;
+        if (ri > 0) {
+          const [x2, y2] = pt(ri, a1);
+          const [x3, y3] = pt(ri, a0);
+          path = `M${x0} ${y0}A${r} ${r} 0 ${large} 1 ${x1} ${y1}L${x2} ${y2}A${ri} ${ri} 0 ${large} 0 ${x3} ${y3}Z`;
+        } else {
+          path = `M${cx} ${cy}L${x0} ${y0}A${r} ${r} 0 ${large} 1 ${x1} ${y1}Z`;
+        }
+        a0 = a1;
+        const color = d.color || PALETTE[i % PALETTE.length];
+        const tip = `<strong>${esc(d.label)}</strong><div class="tt-row"><span>Amount</span><b>${esc(tipFormat(d.value))}</b></div><div class="tt-row"><span>Share</span><b>${(frac * 100).toFixed(1)}%</b></div>`;
+        return `<path class="dn-slice" d="${path}" style="fill:${color};transform-origin:${cx}px ${cy}px" data-tip="${esc(tip)}"/>`;
+      }).join('');
 
-    const legend = items.map((d, i) => `
-      <li data-i="${i}">
-        <i style="background:${d.color || PALETTE[i % PALETTE.length]}"></i>
-        <span class="lbl" title="${esc(d.label)}">${esc(d.label)}</span>
-        <span class="val">${esc(format(d.value))}</span>
-        <span class="pct">${((d.value / total) * 100).toFixed(1)}%</span>
-      </li>`).join('');
+      const center = ri > 0
+        ? `<text class="dn-cv" x="${cx}" y="${cy + 6}" text-anchor="middle">${esc(centerFormat(total))}</text><text class="dn-cl" x="${cx}" y="${cy + 28}" text-anchor="middle">${esc(centerLabel)}</text>`
+        : '';
 
-    container.innerHTML = `
-      <div class="donut-wrap">
-        <svg class="dn-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc(ariaLabel)}">${paths}${center}</svg>
-        <ul class="dn-legend">${legend}</ul>
-      </div>`;
-    attachTips(container);
+      const legend = items.map((d, i) => `
+        <li data-i="${i}">
+          <i style="background:${d.color || PALETTE[i % PALETTE.length]}"></i>
+          <span class="lbl" title="${esc(d.label)}">${esc(d.label)}</span>
+          <span class="val">${esc(format(d.value))}</span>
+          <span class="pct">${((d.value / total) * 100).toFixed(1)}%</span>
+        </li>`).join('');
 
-    const svg = container.querySelector('.dn-svg');
-    const cv = svg.querySelector('.dn-cv');
-    const cl = svg.querySelector('.dn-cl');
-    const slices = svg.querySelectorAll('.dn-slice');
-    const lis = container.querySelectorAll('.dn-legend li');
-    const activate = (i) => {
-      slices.forEach((p, k) => p.classList.toggle('active', k === i));
-      lis.forEach((l, k) => l.classList.toggle('active', k === i));
-      svg.classList.add('has-active');
-      if (cv) { cv.textContent = `${((items[i].value / total) * 100).toFixed(1)}%`; cl.textContent = trunc(items[i].label, 16); }
-    };
-    const reset = () => {
-      slices.forEach((p) => p.classList.remove('active'));
-      lis.forEach((l) => l.classList.remove('active'));
-      svg.classList.remove('has-active');
-      if (cv) { cv.textContent = centerFormat(total); cl.textContent = centerLabel; }
-    };
-    slices.forEach((p, i) => { p.addEventListener('pointerenter', () => activate(i)); p.addEventListener('pointerleave', reset); });
-    lis.forEach((l, i) => { l.addEventListener('pointerenter', () => activate(i)); l.addEventListener('pointerleave', reset); });
+      container.innerHTML = `
+        <div class="donut-wrap">
+          <svg class="dn-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc(ariaLabel)}">${paths}${center}</svg>
+          <ul class="dn-legend">${legend}</ul>
+        </div>`;
+      attachTips(container);
+
+      const svg = container.querySelector('.dn-svg');
+      const cv = svg.querySelector('.dn-cv');
+      const cl = svg.querySelector('.dn-cl');
+      const slices = svg.querySelectorAll('.dn-slice');
+      const lis = container.querySelectorAll('.dn-legend li');
+      const activate = (i) => {
+        slices.forEach((p, k) => p.classList.toggle('active', k === i));
+        lis.forEach((l, k) => l.classList.toggle('active', k === i));
+        svg.classList.add('has-active');
+        if (cv) { cv.textContent = `${((items[i].value / total) * 100).toFixed(1)}%`; cl.textContent = trunc(items[i].label, 18); }
+      };
+      const reset = () => {
+        slices.forEach((p) => p.classList.remove('active'));
+        lis.forEach((l) => l.classList.remove('active'));
+        svg.classList.remove('has-active');
+        if (cv) { cv.textContent = centerFormat(total); cl.textContent = centerLabel; }
+      };
+      slices.forEach((p, i) => { p.addEventListener('pointerenter', () => activate(i)); p.addEventListener('pointerleave', reset); });
+      lis.forEach((l, i) => { l.addEventListener('pointerenter', () => activate(i)); l.addEventListener('pointerleave', reset); });
+    });
   }
 
   /* ------------------------------------------------------------------ *
@@ -380,16 +435,16 @@
    * ------------------------------------------------------------------ */
   function gauge(container, opts) {
     const { value = 0, label = '', sub = '', color = 'var(--color-primary)' } = opts;
-    const r = 44;
+    const r = 62;
     const C = 2 * Math.PI * r;
     const v = Math.max(0, Math.min(100, value));
     const off = C * (1 - v / 100);
     container.innerHTML = `
       <div class="gauge">
-        <svg viewBox="0 0 120 120" role="img" aria-label="${esc(label)} ${value.toFixed(1)}%">
-          <circle class="g-track" cx="60" cy="60" r="${r}"/>
-          <circle class="g-arc" cx="60" cy="60" r="${r}" transform="rotate(-90 60 60)" style="stroke:${color};stroke-dasharray:${C};stroke-dashoffset:${C}"/>
-          <text class="g-val" x="60" y="66" text-anchor="middle" ${value < 0 ? 'style="fill:var(--color-danger)"' : ''}>${value.toFixed(1)}%</text>
+        <svg viewBox="0 0 160 160" role="img" aria-label="${esc(label)} ${value.toFixed(1)}%">
+          <circle class="g-track" cx="80" cy="80" r="${r}"/>
+          <circle class="g-arc" cx="80" cy="80" r="${r}" transform="rotate(-90 80 80)" style="stroke:${color};stroke-dasharray:${C};stroke-dashoffset:${C}"/>
+          <text class="g-val" x="80" y="88" text-anchor="middle" ${value < 0 ? 'style="fill:var(--color-danger)"' : ''}>${value.toFixed(1)}%</text>
         </svg>
         <div class="g-label">${esc(label)}</div>
         ${sub ? `<div class="g-sub">${esc(sub)}</div>` : ''}

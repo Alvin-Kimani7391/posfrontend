@@ -532,23 +532,84 @@ table.table {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-3);
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--color-border);
 }
 .pos-cart-item:last-child { border-bottom: none; }
+
+/* Left side (name/price/qty controls) and right side (total/remove) are
+   now dedicated, self-contained classes rather than relying on inline
+   "flex:1" spans - this is what guarantees they never collide: the left
+   side always shrinks/truncates, the right side always keeps its own
+   space, and quantity controls always get a full row to themselves. */
+.pos-cart-item-info { flex: 1 1 auto; min-width: 0; }
+.pos-cart-item-name { overflow-wrap: anywhere; }
+.pos-cart-item-side {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
 .pos-qty-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.pos-qty-stepper {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  flex: 0 0 auto;
 }
-.pos-qty-control button {
-  width: 26px; height: 26px;
+.pos-qty-stepper button {
+  width: 30px; height: 30px;
+  flex: 0 0 auto;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border-strong);
   background: var(--color-surface);
   cursor: pointer;
   font-weight: var(--font-semibold);
+  font-size: var(--text-md);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pos-qty-stepper button:hover { background: var(--color-bg); }
+.pos-qty-value {
+  min-width: 22px;
+  text-align: center;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.pos-discount-btn {
+  flex: 0 0 auto;
+  height: 30px;
+  margin-left: auto; /* sits at the row's right edge when there's room */
+}
+
+@media (max-width: 480px) {
+  /* If the row genuinely can't fit both the stepper and the Discount
+     button side by side, Discount drops to its own full-width line below
+     instead of ever overlapping the stepper or the total/remove column. */
+  .pos-discount-btn { margin-left: 0; flex-basis: 100%; }
+}
+
+/* Cart list + the sections below it (customer, discount, totals) now have
+   an explicit divider and spacing between them, so nothing can visually
+   run into the next block even if a row wraps to two lines. */
+.cart-items-list { display: flex; flex-direction: column; margin-bottom: var(--space-2); }
+.cart-section { padding-top: var(--space-3); margin-top: var(--space-1); border-top: 1px solid var(--color-border); }
+
+@media (max-width: 640px) {
+  /* Keep the item list independently scrollable on phones so a long cart
+     never pushes the "Complete sale" button off the bottom of the screen. */
+  .cart-items-list { max-height: 45vh; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 2px; }
 }
 
 .pos-totals-row { display: flex; justify-content: space-between; padding: 2px 0; font-size: var(--text-sm); }
@@ -577,3 +638,93 @@ table.table {
 }
 .shift-banner.open { background: var(--color-success-bg); color: var(--color-success); }
 .shift-banner.closed { background: var(--color-warning-bg); color: var(--color-warning); }
+
+
+
+
+
+
+
+.pos-cart-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.pos-cart-item:last-child { border-bottom: none; }
+
+/* Left side (name/price/qty controls) and right side (total/remove) are
+   now dedicated, self-contained classes rather than relying on inline
+   "flex:1" spans - this is what guarantees they never collide: the left
+   side always shrinks/truncates, the right side always keeps its own
+   space, and quantity controls always get a full row to themselves. */
+.pos-cart-item-info { flex: 1 1 auto; min-width: 0; }
+.pos-cart-item-name { overflow-wrap: anywhere; }
+.pos-cart-item-side {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.pos-qty-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.pos-qty-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+.pos-qty-stepper button {
+  width: 30px; height: 30px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-weight: var(--font-semibold);
+  font-size: var(--text-md);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pos-qty-stepper button:hover { background: var(--color-bg); }
+.pos-qty-value {
+  min-width: 22px;
+  text-align: center;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.pos-discount-btn {
+  flex: 0 0 auto;
+  height: 30px;
+  margin-left: auto; /* sits at the row's right edge when there's room */
+}
+
+@media (max-width: 480px) {
+  /* If the row genuinely can't fit both the stepper and the Discount
+     button side by side, Discount drops to its own full-width line below
+     instead of ever overlapping the stepper or the total/remove column. */
+  .pos-discount-btn { margin-left: 0; flex-basis: 100%; }
+}
+
+/* Cart list + the sections below it (customer, discount, totals) now have
+   an explicit divider and spacing between them, so nothing can visually
+   run into the next block even if a row wraps to two lines. */
+.cart-items-list { display: flex; flex-direction: column; margin-bottom: var(--space-2); }
+.cart-section { padding-top: var(--space-3); margin-top: var(--space-1); border-top: 1px solid var(--color-border); }
+
+@media (max-width: 640px) {
+  /* Keep the item list independently scrollable on phones so a long cart
+     never pushes the "Complete sale" button off the bottom of the screen. */
+  .cart-items-list { max-height: 45vh; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 2px; }
+}

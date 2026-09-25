@@ -1,24 +1,26 @@
 /**
  * dashboard.js
- * Two completely different dashboards live here, chosen once at init and
- * never mixed:
+ * Two dashboards:
  *
- *  - Full dashboard (reports.view): unchanged business-wide view - takings,
- *    KPIs, charts, stock alerts, the employee login card, the setup
- *    checklist. Owner/Admin/Manager/Accountant land here.
+ *  - Full dashboard (reports.view): unchanged - takings, KPIs, charts,
+ *    stock alerts, employee login card, setup checklist.
  *
- *  - Personal dashboard (no reports.view): everyone else (Cashier,
- *    Storekeeper, any custom role). Built purely from what THIS user's
- *    permissions actually allow:
- *      - sales.view/sales.create -> "my sales today" + my payment mix +
- *        my top items + my recent sales (fetched from GET /reports/me,
- *        which is self-scoped server-side to this user's own cashierId -
- *        it is not possible to see another employee's numbers through it).
- *      - inventory.view -> low stock / out of stock tiles for their branch
- *        (also returned by /reports/me, gated server-side).
- *      - shifts.view -> a compact shift status strip.
- *    A role with none of the above just gets the quick-actions grid and a
- *    friendly empty state - never a raw blank page.
+ *  - Personal dashboard (no reports.view - Cashier, Storekeeper, custom
+ *    roles): now has its OWN filter bar (dates only) instead of a silent
+ *    "today" default. THIS IS THE FIX for stats reading zero even when
+ *    the cashier made sales: previously /reports/me was called with no
+ *    from/to at all, so it always meant "today" with no way to see
+ *    yesterday or a wider period. Now the same date presets the full
+ *    dashboard uses (Today/7d/30d/month) are available here too, and the
+ *    resolved range is shown under the greeting so it's never ambiguous
+ *    what "zero" means.
+ *    "Transactions today" and friends are now expandable - clicking opens
+ *    the same shared drill-down panel used in Reports, listing the
+ *    cashier's own sales (branch, time, customer, total, status) with
+ *    "Load more" and a tap-through to full sale detail (real payment
+ *    methods used). The backend now self-scopes GET /sales for anyone
+ *    without reports.view, so this is safe: a cashier can only ever see
+ *    their own sales through it, however the query is built.
  */
 (function () {
   const RT = window.ReportTools;
@@ -30,6 +32,7 @@
   let user;
   let businessId = '';
   let filterBar = null;
+  let personalFilterBar = null;
   let canReports = false;
   let canProfit = false;
   let canSelfSales = false;
@@ -72,9 +75,16 @@
       }, 60000);
     } else {
       document.getElementById('dash-refresh').addEventListener('click', () => loadPersonal());
+      personalFilterBar = RT.createFilterBar(document.getElementById('dash-personal-filters'), {
+        defaultPreset: 'today',
+        presets: ['today', 'yesterday', '7d', '30d'],
+        showBranch: false,
+        onChange: () => loadPersonal(),
+      });
+      await personalFilterBar.ready;
       await loadPersonal();
       timer = setInterval(() => {
-        if (!document.hidden) loadPersonal({ silent: true });
+        if (!document.hidden && personalFilterBar.getState().preset === 'today') loadPersonal({ silent: true });
       }, 60000);
     }
     loadSetupChecklist();
@@ -103,13 +113,13 @@
         <a class="qa primary" href="sales.html" data-requires-permission="sales.view">${window.Icons.get('sales')} New sale</a>
         <a class="qa" href="products.html" data-requires-permission="products.view">${window.Icons.get('products')} Products</a>
         <a class="qa" href="inventory.html" data-requires-permission="inventory.view">${window.Icons.get('inventory')} Inventory</a>
+        <a class="qa" href="customers.html" data-requires-permission="customers.view">${window.Icons.get('employees')} Customers</a>
         <a class="qa" href="expenses.html" data-requires-permission="expenses.view">${window.Icons.get('reports')} Expenses</a>
         <a class="qa" href="reports.html" data-requires-permission="reports.view">${window.Icons.get('reports')} Reports</a>
         <a class="qa" href="audit-logs.html" data-requires-permission="audit.view">${window.Icons.get('settings')} Audit log</a>
-        <a class="qa" href="customers.html" data-requires-permission="customers.view">${window.Icons.get('employees')} Customers</a>
-        </div>
+      </div>
 
-      ${canReports ? '<div id="dash-filters"></div>' : ''}
+      ${canReports ? '<div id="dash-filters"></div>' : '<div id="dash-personal-filters"></div>'}
       <div id="dash-body"></div>
       <div id="setup-slot"></div>
       ${loginCard()}
@@ -117,7 +127,7 @@
   }
 
   /* ==================================================================== *
-   * FULL DASHBOARD (reports.view) - unchanged from before
+   * FULL DASHBOARD (reports.view) - unchanged
    * ==================================================================== */
   async function load({ silent = false } = {}) {
     const body = document.getElementById('dash-body');
@@ -151,7 +161,7 @@
     const tile = '<div class="kpi"><div class="skeleton" style="height:12px;width:50%"></div><div class="skeleton" style="height:28px;width:70%;margin-top:14px"></div></div>';
     return `<div class="takings"><div class="skeleton" style="height:90px"></div><div class="skeleton" style="height:60px"></div></div>
       <div class="kpi-grid">${tile.repeat(4)}</div>
-      <div class="chart-grid g-1-1"><div class="card chart-card"><div class="skeleton" style="height:240px;margin:20px"></div></div><div class="card chart-card"><div class="skeleton" style="height:240px;margin:20px"></div></div></div>`;
+      <div class="chart-grid g-1-1"><div class="card chart-card"><div class="skeleton" style="height:320px;margin:20px"></div></div><div class="card chart-card"><div class="skeleton" style="height:320px;margin:20px"></div></div></div>`;
   }
 
   function render(body, d, prev, st) {
@@ -170,7 +180,7 @@
     const tiles = [];
     if (canProfit && p) {
       tiles.push(RT.kpi({ label: 'Gross profit', value: fm(p.grossProfit), icon: 'reports', tone: p.grossProfit >= 0 ? 'success' : 'danger', sub: `${RT.fmtPct(RT.pct(p.grossProfit, p.grossRevenue))} margin`, delta: RT.deltaBadge(p.grossProfit, pp?.grossProfit) }));
-      tiles.push(RT.kpi({ label: 'Net profit', value: `<span class="${p.netProfit >= 0 ? 'text-pos' : 'text-neg'}">${fm(p.netProfit)}</span>`, icon: 'check', tone: p.netProfit >= 0 ? 'success' : 'danger', sub: 'After expenses', delta: RT.deltaBadge(p.netProfit, pp?.netProfit) }));
+      tiles.push(RT.kpi({ label: 'Net profit', value: `<span class="${p.netProfit >= 0 ? 'text-pos' : 'text-neg'}">${fm(p.netProfit)}</span>`, icon: 'check', tone: p.netProfit >= 0 ? 'success' : 'danger', sub: `${RT.fmtPct(RT.pct(p.netProfit, p.grossRevenue))} net margin`, delta: RT.deltaBadge(p.netProfit, pp?.netProfit) }));
       tiles.push(RT.kpi({ label: 'Expenses', value: fm(p.expenses), icon: 'reports', tone: 'warning', sub: 'Approved only', delta: RT.deltaBadge(p.expenses, pp?.expenses, { invert: true }) }));
     }
     tiles.push(RT.kpi({ label: 'Refunds', value: fm(s.totalRefunds), tone: s.totalRefunds > 0 ? 'danger' : 'neutral', sub: `${RT.fmtPct(RT.pct(s.totalRefunds, s.netSales))} of net sales`, delta: RT.deltaBadge(s.totalRefunds, ps?.totalRefunds, { invert: true }) }));
@@ -198,7 +208,7 @@
         </div>
       </section>
 
-      <div class="kpi-grid">${tiles.join('')}</div>
+      <div class="kpi-grid" id="dash-kpi-grid">${tiles.join('')}</div>
 
       <div class="chart-grid g-1-1">
         ${RT.chartCard({ id: 'd-pay', title: 'Payment mix', subtitle: 'Cash, M-PESA, card and more' })}
@@ -246,19 +256,19 @@
           { label: 'Expenses', value: -p.expenses, kind: 'delta', color: '#f97316' },
           { label: 'Net profit', value: p.netProfit, kind: 'total', color: p.netProfit >= 0 ? '#059669' : 'var(--color-danger)' },
         ],
-        format: CH.compact, tipFormat: fm, height: 260, ariaLabel: 'Revenue to net profit',
+        format: CH.compact, tipFormat: fm, height: 340, ariaLabel: 'Revenue to net profit',
       });
     }
     const cashiers = (d.topCashiers || []).slice(0, 5);
     CH.bar(document.getElementById('d-cashiers'), {
       labels: cashiers.map((c) => c.name),
       series: [{ name: 'Sales', values: cashiers.map((c) => c.totalSales) }],
-      format: CH.compact, tipFormat: fm, height: 260, ariaLabel: 'Top cashiers', emptyText: 'No cashier activity in this period.',
+      format: CH.compact, tipFormat: fm, height: 340, ariaLabel: 'Top cashiers', emptyText: 'No cashier activity in this period.',
     });
     CH.bar(document.getElementById('d-money'), {
       labels: ['Owed by customers', 'Owed to suppliers', 'Stock value'],
       series: [{ name: 'Amount', values: [d.outstandingCustomerCredit, d.supplierPayables, inv.inventoryValuation], colors: ['#3b82f6', '#f59e0b', '#10b981'] }],
-      format: CH.compact, tipFormat: fm, height: 240, ariaLabel: 'Money position',
+      format: CH.compact, tipFormat: fm, height: 320, ariaLabel: 'Money position',
     });
 
     window.Permissions.applyPermissionGates(body, user);
@@ -280,9 +290,15 @@
     if (!silent) body.innerHTML = loadingHtmlPersonal();
 
     const branchId = window.AppShell.getActiveBranchId();
+    const st = personalFilterBar.getState();
+    // ALWAYS an explicit from/to now - this is the fix for the "zero even
+    // though sales were made" bug: previously no range was sent at all,
+    // which silently meant "today" with no visible label and no way to
+    // widen it from the UI.
+    const dateQuery = { from: st.from.toISOString(), to: st.to.toISOString() };
 
     const [meRes, shiftRes] = await Promise.allSettled([
-      window.Api.get('/reports/me', branchId ? { branchId } : {}),
+      window.Api.get('/reports/me', { ...dateQuery, ...(branchId ? { branchId } : {}) }),
       canSelfShift ? window.Api.get('/shifts/current', branchId ? { branchId } : {}) : Promise.resolve(null),
     ]);
     if (my !== token) return;
@@ -298,17 +314,15 @@
     }
 
     const shift = shiftRes.status === 'fulfilled' && shiftRes.value ? shiftRes.value.data.shift : null;
-    renderPersonal(body, meRes.value.data, shift);
+    renderPersonal(body, meRes.value.data, shift, st, dateQuery);
   }
 
-  function renderPersonal(body, d, shift) {
-    document.getElementById('dash-sub').textContent = "Here's what's happening on your shift.";
+  function renderPersonal(body, d, shift, st, dateQuery) {
+    document.getElementById('dash-sub').textContent = `${RT.describeRange(st.from, st.to)} · your shift`;
 
     const s = d.sales || {};
     const inv = d.inventory || null;
 
-    // A role with no sales visibility and no inventory visibility has
-    // nothing personal to show - keep the page honest instead of faking tiles.
     if (!canSelfSales && !inv) {
       body.innerHTML = `<div class="card">${window.UI.emptyStateHtml({
         icon: 'dashboard', title: 'Nothing to show here yet', message: 'Use the quick actions above to get to work.',
@@ -320,7 +334,8 @@
     const quiet = canSelfSales && !s.transactionCount;
     const tiles = [];
     if (canSelfSales) {
-      tiles.push(RT.kpi({ label: 'Transactions today', value: RT.fmtNum(s.transactionCount || 0), icon: 'sales' }));
+      tiles.push(RT.expandableKpi({ key: 'mySales', label: 'Transactions', value: RT.fmtNum(s.transactionCount || 0), icon: 'sales', tone: 'primary', sub: 'In the selected period' }));
+      tiles.push(RT.kpi({ label: 'Net sales', value: fm(s.netSales || 0), icon: 'reports', tone: 'success' }));
       tiles.push(RT.kpi({ label: 'Average sale', value: fm(s.averageSale || 0) }));
       tiles.push(RT.kpi({ label: 'Discounts given', value: fm(s.totalDiscount || 0), tone: s.totalDiscount ? 'warning' : 'neutral' }));
     }
@@ -335,12 +350,12 @@
       ${canSelfSales ? `
       <section class="takings">
         <div>
-          <div class="takings-label">My net sales today</div>
+          <div class="takings-label">My net sales</div>
           <div class="takings-value">${fm(s.netSales || 0)}</div>
           <div class="takings-meta">
             <span><b>${RT.fmtNum(s.transactionCount || 0)}</b> sales</span>
             <span><b>${fm(s.averageSale || 0)}</b> average</span>
-            ${quiet ? '<span>No sales rung up yet today.</span>' : ''}
+            ${quiet ? `<span>No sales in ${esc(RT.describeRange(st.from, st.to))}. Try a wider range above.</span>` : ''}
           </div>
         </div>
         <div>
@@ -349,19 +364,21 @@
         </div>
       </section>` : ''}
 
-      <div class="kpi-grid">${tiles.join('')}</div>
+      <div class="kpi-grid" id="dash-personal-kpi-grid">${tiles.join('')}</div>
+
+      ${canSelfSales ? RT.drilldownPanelHtml('personal-drilldown') : ''}
 
       ${canSelfSales ? `
       <div class="chart-grid g-1-1">
-        ${RT.chartCard({ id: 'me-pay', title: 'My payment mix', subtitle: "Today's collections" })}
-        ${RT.chartCard({ id: 'me-products', title: 'What I sold most', subtitle: 'Top 5 by revenue today' })}
+        ${RT.chartCard({ id: 'me-pay', title: 'My payment mix', subtitle: 'This period' })}
+        ${RT.chartCard({ id: 'me-products', title: 'What I sold most', subtitle: 'Top 5 by revenue' })}
       </div>
       <div class="card">
-        <div class="card-header"><h3>My recent sales</h3></div>
+        <div class="card-header"><h3>My recent sales</h3><span class="text-xs text-muted">Tap a row for full details</span></div>
         <div class="table-wrap flat">
           <table class="table">
-            <thead><tr><th>Receipt</th><th>Time</th><th>Customer</th><th>Total</th><th>Status</th></tr></thead>
-            <tbody>${renderRecentSalesRows(d.recentSales)}</tbody>
+            <thead><tr><th>Receipt</th><th>Date &amp; time</th><th>Customer</th><th class="num">Total</th><th>Status</th></tr></thead>
+            <tbody id="my-recent-sales-body">${renderRecentSalesRows(d.recentSales)}</tbody>
           </table>
         </div>
       </div>` : ''}
@@ -378,8 +395,22 @@
       });
       CH.hbar(document.getElementById('me-products'), {
         data: (s.topProducts || []).map((x) => ({ label: x.name, value: x.revenue, sub: `${RT.fmtNum(x.quantity)} sold` })),
-        format: RT.money0, valueLabel: 'Revenue', ranked: true, emptyText: 'Nothing sold yet today.',
+        format: RT.money0, valueLabel: 'Revenue', ranked: true, emptyText: 'Nothing sold in this period.',
       });
+
+      document.getElementById('my-recent-sales-body').querySelectorAll('[data-sale-id]').forEach((tr) => {
+        tr.addEventListener('click', () => RT.openSaleDetailModal(tr.dataset.saleId));
+      });
+
+      // Expandable "Transactions" tile -> shared drill-down panel, backed
+      // by GET /sales. The backend now force-scopes cashierId to this
+      // user for anyone without reports.view, so this always shows only
+      // the caller's own sales no matter what branchId/dates are passed.
+      RT.bindDrilldown(
+        document.getElementById('dash-personal-kpi-grid'),
+        document.getElementById('personal-drilldown'),
+        () => ({ ...dateQuery, ...(window.AppShell.getActiveBranchId() ? { branchId: window.AppShell.getActiveBranchId() } : {}) })
+      );
     }
 
     window.Permissions.applyPermissionGates(body, user);
@@ -400,19 +431,17 @@
       </div>`;
   }
 
-  const PAYMENT_BADGE = { PAID: 'badge-success', PARTIAL: 'badge-warning', CREDIT: 'badge-danger', UNPAID: 'badge-neutral' };
-
   function renderRecentSalesRows(rows) {
     if (!rows || !rows.length) {
-      return `<tr><td colspan="5">${window.UI.emptyStateHtml({ icon: 'sales', title: 'No sales yet today' })}</td></tr>`;
+      return `<tr><td colspan="5">${window.UI.emptyStateHtml({ icon: 'sales', title: 'No sales in this period' })}</td></tr>`;
     }
     return rows.map((r) => `
-      <tr>
+      <tr data-sale-id="${r.id}" class="drilldown-row">
         <td class="cell-primary">${esc(r.receiptNumber)}</td>
-        <td class="text-sm">${RT.timeOnly(r.createdAt)}</td>
+        <td class="text-sm">${window.UI.formatDateTime(r.createdAt)}</td>
         <td class="text-sm">${r.customerName ? esc(r.customerName) : '<span class="text-muted">Walk-in</span>'}</td>
         <td class="font-semibold">${fm(r.total)}</td>
-        <td><span class="badge ${PAYMENT_BADGE[r.paymentStatus] || 'badge-neutral'}">${esc(r.paymentStatus)}</span></td>
+        <td>${RT.paymentStatusBadge(r.paymentStatus)}</td>
       </tr>
     `).join('');
   }

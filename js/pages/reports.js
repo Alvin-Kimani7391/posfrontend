@@ -4,14 +4,15 @@
  * Inventory, Customers owing, Suppliers owed). Same list -> fetch -> render
  * pattern as the other pages, with a shared filter bar on top.
  *
- * Each tab entry says:
- *   endpoint  - GET /reports/<endpoint>
- *   scope     - which filters apply (dates / branch / cashier). The backend
- *               ignores the rest, so the bar hides what doesn't matter.
- *   permission- reports.view for everything except profit (reports.profit)
- *   render    - draws the report into the page body and returns what
- *               "Export CSV" should write (an object, or a function that
- *               returns one, for tabs that can re-filter in place).
+ * SALES/PAYMENTS/EXPENSES tabs: the primary KPI tiles are expandable via
+ * RT.bindAdminDrilldown, backed by the real /reports/*\/detail endpoints -
+ * so "Tax collected -> expand" shows a Tax column per sale, "Discounts"
+ * shows a Discount column, "Refunds" shows a Refunded column, payments
+ * show method/reference, expenses show category/description. Every row
+ * shows its branch. Sales/payments rows tap through to the full sale.
+ *
+ * SALES tab also has a daily trend chart: weekday names (Mon..Sun) for
+ * ranges of 7 days or fewer, calendar dates beyond that.
  *
  * Money arrives from the API already converted from cents to shillings, so
  * nothing here divides by 100.
@@ -123,13 +124,8 @@
       if (!data) {
         body.innerHTML = loadingHtml();
         const res = await window.Api.get(`/reports/${tab.endpoint}`, query);
-
-// Api.get() may return either the payload directly or { data: payload }.
-// Support both without changing the reports UI/design.
-data = res && res.data !== undefined ? res.data : res;
-
-state.cache[cacheKey] = data;
-
+        data = res && res.data !== undefined ? res.data : res;
+        state.cache[cacheKey] = data;
       }
       if (token !== state.token) return;
       body.innerHTML = '';
@@ -150,7 +146,7 @@ state.cache[cacheKey] = data;
 
   function loadingHtml() {
     const tile = '<div class="kpi"><div class="skeleton" style="height:12px;width:50%"></div><div class="skeleton" style="height:28px;width:70%;margin-top:14px"></div></div>';
-    const panel = '<div class="card chart-card"><div class="skeleton" style="height:260px;margin:20px"></div></div>';
+    const panel = '<div class="card chart-card"><div class="skeleton" style="height:380px;margin:20px"></div></div>';
     return `<div class="kpi-grid">${tile.repeat(4)}</div><div class="chart-grid g-2-1">${panel}${panel}</div>`;
   }
 
@@ -166,9 +162,9 @@ state.cache[cacheKey] = data;
   }
 
   /* ================================================================== *
-   * SALES
+   * SALES - real per-sale drill-downs + daily trend
    * ================================================================== */
-  function renderSales(el, d) {
+  function renderSales(el, d, { query }) {
     if (!d.transactionCount) {
       el.innerHTML = emptyReport('No completed sales in this period', 'Try a wider date range, another branch or another cashier.');
       return null;
@@ -180,6 +176,7 @@ state.cache[cacheKey] = data;
     const topRevenue = products.reduce((s, p) => s + p.revenue, 0);
     const payTotal = (d.paymentBreakdown || []).reduce((s, p) => s + p.total, 0);
     const topPay = [...(d.paymentBreakdown || [])].sort((a, b) => b.total - a.total)[0];
+    const trend = d.dailyTrend || [];
 
     const insights = [];
     if (products[0]) insights.push({ tone: 'info', text: `<strong>${esc(products[0].name)}</strong> is the best seller: ${fm(products[0].revenue)}, ${RT.fmtPct(RT.pct(products[0].revenue, topRevenue))} of the top-10 revenue.` });
@@ -188,17 +185,23 @@ state.cache[cacheKey] = data;
     if (d.totalDiscount > 0) insights.push({ tone: discRate > 10 ? 'warning' : 'info', text: `Discounts given away: <strong>${fm(d.totalDiscount)}</strong> (${RT.fmtPct(discRate)} of gross sales).${discRate > 10 ? ' Worth reviewing who applies them.' : ''}` });
 
     el.innerHTML = `
-      <div class="kpi-grid">
-        ${RT.kpi({ label: 'Net sales', value: fm(d.netSales), icon: 'sales', tone: 'primary', sub: 'Total charged to customers' })}
-        ${RT.kpi({ label: 'Gross sales', value: fm(d.totalSales), icon: 'reports', tone: 'info', sub: 'Sum of sale subtotals' })}
-        ${RT.kpi({ label: 'Transactions', value: RT.fmtNum(d.transactionCount), icon: 'sales', tone: 'neutral', sub: 'Completed sales' })}
+      <div class="kpi-grid" id="sales-kpi-grid">
+        ${RT.expandableKpi({ key: 'netSales', label: 'Net sales', value: fm(d.netSales), icon: 'sales', tone: 'primary', sub: 'Total charged to customers' })}
+        ${RT.expandableKpi({ key: 'grossSales', label: 'Gross sales', value: fm(d.totalSales), icon: 'reports', tone: 'info', sub: 'Sum of sale subtotals' })}
+        ${RT.expandableKpi({ key: 'transactions', label: 'Transactions', value: RT.fmtNum(d.transactionCount), icon: 'sales', tone: 'neutral', sub: 'Completed sales' })}
         ${RT.kpi({ label: 'Average sale', value: fm(avg), icon: 'reports', tone: 'success', sub: 'Net sales per transaction' })}
-        ${RT.kpi({ label: 'Discounts', value: fm(d.totalDiscount), tone: 'warning', sub: `${RT.fmtPct(discRate)} of gross` })}
-        ${RT.kpi({ label: 'Tax collected', value: fm(d.totalTax), tone: 'neutral' })}
-        ${RT.kpi({ label: 'Refunds', value: fm(d.totalRefunds), tone: d.totalRefunds > 0 ? 'danger' : 'neutral', sub: `${RT.fmtPct(refundRate)} of net sales` })}
+        ${RT.expandableKpi({ key: 'discounts', label: 'Discounts', value: fm(d.totalDiscount), tone: 'warning', sub: `${RT.fmtPct(discRate)} of gross - tap to see which sales` })}
+        ${RT.expandableKpi({ key: 'tax', label: 'Tax collected', value: fm(d.totalTax), tone: 'neutral', sub: 'Tap to see tax per sale' })}
+        ${RT.expandableKpi({ key: 'refunds', label: 'Refunds', value: fm(d.totalRefunds), tone: d.totalRefunds > 0 ? 'danger' : 'neutral', sub: `${RT.fmtPct(refundRate)} of net sales - tap to see which sales` })}
       </div>
 
+      ${RT.drilldownPanelHtml('sales-drilldown')}
+
       <div class="insights">${insights.map((i) => `<div class="insight insight-${i.tone}">${i.text}</div>`).join('')}</div>
+
+      <div class="chart-grid trend-chart-card">
+        ${RT.chartCard({ id: 'ch-trend', title: 'Sales trend', subtitle: 'Net sales by day for the selected period' })}
+      </div>
 
       <div class="chart-grid g-2-1">
         ${RT.chartCard({ id: 'ch-products', title: 'Top products', subtitle: 'Best sellers in this period', actions: '<div id="prod-toggle"></div>' })}
@@ -224,6 +227,16 @@ state.cache[cacheKey] = data;
         </div>
       </div>`;
 
+    const rangeDays = query.from && query.to
+      ? Math.max(1, Math.round((new Date(query.to) - new Date(query.from)) / 86400000) + 1)
+      : (trend.length || 1);
+    CH.bar(document.getElementById('ch-trend'), {
+      labels: trend.map((t) => RT.trendLabel(t.date, rangeDays)),
+      series: [{ name: 'Net sales', values: trend.map((t) => t.netSales), color: 'var(--color-primary)' }],
+      format: CH.compact, tipFormat: fm, height: 420, ariaLabel: 'Sales trend by day',
+      emptyText: 'No daily sales to chart in this period.',
+    });
+
     const drawProducts = (mode) => CH.hbar(document.getElementById('ch-products'), {
       data: products.map((p) => ({ label: p.name, value: mode === 'units' ? p.quantity : p.revenue, sub: mode === 'units' ? fm(p.revenue) : `${RT.fmtNum(p.quantity)} units` })),
       format: mode === 'units' ? (n) => `${RT.fmtNum(n)} units` : RT.money0,
@@ -238,12 +251,53 @@ state.cache[cacheKey] = data;
       format: RT.money0, tipFormat: fm, centerLabel: 'Collected', ariaLabel: 'Payment methods',
     });
 
+    const SALE_BASE_COLUMNS = [
+      { label: 'Receipt', render: (s) => `<span class="cell-primary">${esc(s.receiptNumber)}</span>` },
+      { label: 'Date & time', render: (s) => `<span class="text-sm">${window.UI.formatDateTime(s.createdAt)}</span>` },
+      { label: 'Branch', render: (s) => `<span class="text-sm">${esc(s.branchName || '-')}</span>` },
+      { label: 'Cashier', render: (s) => `<span class="text-sm">${esc(s.cashierName || '-')}</span>` },
+      { label: 'Customer', render: (s) => (s.customerName ? `<span class="text-sm">${esc(s.customerName)}</span>` : '<span class="text-muted">Walk-in</span>') },
+    ];
+    const SALE_TOTAL_COL = { label: 'Total', num: true, render: (s) => `<span class="font-semibold">${fm(s.total)}</span>` };
+    const SALE_STATUS_COL = { label: 'Status', render: (s) => RT.paymentStatusBadge(s.paymentStatus) + (s.saleStatus === 'CANCELLED' ? ' <span class="badge badge-neutral">Cancelled</span>' : '') };
+
+    const SALES_CONFIG = {
+      netSales: { title: 'Sales behind "Net sales"', columns: [...SALE_BASE_COLUMNS, SALE_TOTAL_COL, SALE_STATUS_COL] },
+      grossSales: { title: 'Sales behind "Gross sales"', columns: [...SALE_BASE_COLUMNS, { label: 'Subtotal', num: true, render: (s) => fm(s.subtotal) }, SALE_STATUS_COL] },
+      transactions: { title: 'All transactions', columns: [...SALE_BASE_COLUMNS, SALE_TOTAL_COL, SALE_STATUS_COL] },
+      discounts: {
+        title: 'Sales with a discount applied', extraParams: { hasDiscount: true },
+        columns: [...SALE_BASE_COLUMNS, { label: 'Discount', num: true, render: (s) => `<span class="text-neg">${fm(s.totalDiscount)}</span>` }, SALE_TOTAL_COL],
+      },
+      tax: {
+        title: 'Tax collected, per sale',
+        columns: [...SALE_BASE_COLUMNS, { label: 'Tax', num: true, render: (s) => `<span class="font-semibold">${fm(s.tax)}</span>` }, SALE_TOTAL_COL],
+      },
+      refunds: {
+        title: 'Sales that were refunded', extraParams: { hasRefund: true },
+        columns: [...SALE_BASE_COLUMNS, { label: 'Refunded', num: true, render: (s) => `<span class="text-neg">${fm(s.refundedAmount)}</span>` }, SALE_TOTAL_COL],
+      },
+    };
+
+    RT.bindAdminDrilldown(document.getElementById('sales-kpi-grid'), document.getElementById('sales-drilldown'), (key) => {
+      const cfg = SALES_CONFIG[key];
+      if (!cfg) return null;
+      return {
+        title: cfg.title,
+        endpoint: '/reports/sales/detail',
+        params: { ...query, ...(cfg.extraParams || {}) },
+        columns: cfg.columns,
+        rowSaleIdField: 'id',
+      };
+    });
+
     return {
       name: 'sales-report',
       sections: [
         { title: 'Summary', headers: ['Metric', 'Amount (KES)'], rows: [['Net sales', d.netSales], ['Gross sales', d.totalSales], ['Transactions', d.transactionCount], ['Average sale', avg.toFixed(2)], ['Discounts', d.totalDiscount], ['Tax collected', d.totalTax], ['Refunds', d.totalRefunds]] },
         { title: 'Payment methods', headers: ['Method', 'Total (KES)'], rows: (d.paymentBreakdown || []).map((p) => [RT.methodMeta(p.method).label, p.total]) },
         { title: 'Top products', headers: ['Rank', 'Product', 'Units sold', 'Revenue (KES)'], rows: products.map((p, i) => [i + 1, p.name, p.quantity, p.revenue]) },
+        { title: 'Daily trend', headers: ['Date', 'Net sales (KES)', 'Transactions'], rows: trend.map((t) => [t.date, t.netSales, t.transactionCount]) },
       ],
     };
   }
@@ -319,7 +373,7 @@ state.cache[cacheKey] = data;
         { label: 'Expenses', value: -exp, kind: 'delta', color: '#f97316' },
         { label: 'Net profit', value: np, kind: 'total', color: profitable ? '#059669' : 'var(--color-danger)' },
       ],
-      format: CH.compact, tipFormat: fm, height: 300, ariaLabel: 'Revenue to net profit',
+      format: CH.compact, tipFormat: fm, height: 420, ariaLabel: 'Revenue to net profit',
     });
 
     document.getElementById('ch-gauges').innerHTML = '<div class="gauge-row"><div id="g1"></div><div id="g2"></div><div id="g3"></div></div>';
@@ -345,9 +399,9 @@ state.cache[cacheKey] = data;
   }
 
   /* ================================================================== *
-   * PAYMENTS
+   * PAYMENTS - expandable "Money collected" -> /reports/payments/detail
    * ================================================================== */
-  function renderPayments(el, d) {
+  function renderPayments(el, d, { query }) {
     const rows = d.breakdown || [];
     if (!rows.length) {
       el.innerHTML = emptyReport('No payments in this period', 'Payments appear here once sales are paid for.');
@@ -365,12 +419,14 @@ state.cache[cacheKey] = data;
     const statuses = [...new Set(rows.map((r) => r.status))].sort((a, b) => (a === 'SUCCESS' ? -1 : b === 'SUCCESS' ? 1 : a.localeCompare(b)));
 
     el.innerHTML = `
-      <div class="kpi-grid">
-        ${RT.kpi({ label: 'Money collected', value: fm(collected), icon: 'sales', tone: 'success', sub: 'Successful payments' })}
+      <div class="kpi-grid" id="payments-kpi-grid">
+        ${RT.expandableKpi({ key: 'collected', label: 'Money collected', value: fm(collected), icon: 'sales', tone: 'success', sub: 'Successful payments - tap for each one' })}
+        ${RT.expandableKpi({ key: 'notSuccessful', label: 'Not successful', value: RT.fmtNum(otherCount), tone: otherCount ? 'warning' : 'neutral', sub: otherCount ? `${fm(otherTotal)} pending, failed or reversed - tap to see them` : 'Nothing stuck' })}
         ${RT.kpi({ label: 'Successful payments', value: RT.fmtNum(okCount), tone: 'primary' })}
         ${RT.kpi({ label: 'Top method', value: top ? esc(RT.methodMeta(top.method).label) : '-', tone: 'info', sub: top ? `${RT.fmtPct(RT.pct(top.total, collected))} of collected` : '' })}
-        ${RT.kpi({ label: 'Not successful', value: RT.fmtNum(otherCount), tone: otherCount ? 'warning' : 'neutral', sub: otherCount ? `${fm(otherTotal)} pending, failed or reversed` : 'Nothing stuck' })}
       </div>
+
+      ${RT.drilldownPanelHtml('payments-drilldown')}
 
       <div class="chart-grid g-1-2">
         ${RT.chartCard({ id: 'ch-methods', title: 'Collected by method', subtitle: 'Successful payments only' })}
@@ -401,7 +457,31 @@ state.cache[cacheKey] = data;
         name: RT.prettify(s), color: RT.statusColor(s, i),
         values: methods.map((m) => rows.filter((r) => r.method === m && r.status === s).reduce((sum, r) => sum + r.total, 0)),
       })),
-      format: CH.compact, tipFormat: fm, height: 280, ariaLabel: 'Payments by method and status',
+      format: CH.compact, tipFormat: fm, height: 400, ariaLabel: 'Payments by method and status',
+    });
+
+    const PAYMENT_COLUMNS = [
+      { label: 'Receipt', render: (p) => (p.receiptNumber ? `<span class="cell-primary">${esc(p.receiptNumber)}</span>` : '<span class="text-muted">-</span>') },
+      { label: 'Date & time', render: (p) => `<span class="text-sm">${window.UI.formatDateTime(p.createdAt)}</span>` },
+      { label: 'Branch', render: (p) => `<span class="text-sm">${esc(p.branchName || '-')}</span>` },
+      { label: 'Cashier', render: (p) => `<span class="text-sm">${esc(p.cashierName || '-')}</span>` },
+      { label: 'Method', render: (p) => esc(RT.methodMeta(p.method).label) },
+      { label: 'Reference', render: (p) => (p.reference ? esc(p.reference) : '<span class="text-muted">-</span>') },
+      { label: 'Status', render: (p) => RT.statusBadge(p.status) },
+      { label: 'Amount', num: true, render: (p) => `<span class="font-semibold">${fm(p.amount)}</span>` },
+    ];
+
+    RT.bindAdminDrilldown(document.getElementById('payments-kpi-grid'), document.getElementById('payments-drilldown'), (key) => {
+      if (key === 'collected') {
+        return { title: 'Successful payments', endpoint: '/reports/payments/detail', params: { ...query, status: 'SUCCESS' }, columns: PAYMENT_COLUMNS, rowSaleIdField: 'saleId' };
+      }
+      if (key === 'notSuccessful') {
+        // No single "not successful" status filter server-side, so this
+        // shows every payment in period; the Status column makes clear
+        // which rows are the pending/failed/reversed ones being referenced.
+        return { title: 'Payments that did not succeed', endpoint: '/reports/payments/detail', params: { ...query }, columns: PAYMENT_COLUMNS, rowSaleIdField: 'saleId' };
+      }
+      return null;
     });
 
     return {
@@ -461,7 +541,7 @@ state.cache[cacheKey] = data;
     CH.bar(document.getElementById('ch-cash-bar'), {
       labels: top.map((c) => c.name),
       series: [{ name: 'Total sales', values: top.map((c) => c.totalSales) }],
-      format: CH.compact, tipFormat: fm, height: 280, ariaLabel: 'Sales by cashier',
+      format: CH.compact, tipFormat: fm, height: 400, ariaLabel: 'Sales by cashier',
     });
     CH.donut(document.getElementById('ch-cash-pie'), {
       data: list.map((c) => ({ label: c.name, value: c.totalSales })),
@@ -475,9 +555,9 @@ state.cache[cacheKey] = data;
   }
 
   /* ================================================================== *
-   * EXPENSES
+   * EXPENSES - expandable total -> /reports/expenses/detail
    * ================================================================== */
-  function renderExpenses(el, d) {
+  function renderExpenses(el, d, { query }) {
     const rows = d.breakdown || [];
     if (!rows.length) {
       el.innerHTML = emptyReport('No expenses in this period', 'Record expenses on the Expenses page and they will be analysed here.');
@@ -493,11 +573,21 @@ state.cache[cacheKey] = data;
         <div id="exp-status"></div>
         <span class="text-xs text-muted">Only approved expenses reduce profit.</span>
       </div>
+      ${RT.drilldownPanelHtml('expenses-drilldown')}
       <div id="exp-body"></div>`;
 
     RT.segmented(document.getElementById('exp-status'),
       [{ key: 'ALL', label: 'All' }, ...statuses.map((s) => ({ key: s, label: RT.prettify(s) }))],
-      current, (k) => { current = k; paint(); });
+      current, (k) => { current = k; RT.closeDrilldown(document.getElementById('expenses-drilldown')); paint(); });
+
+    const EXPENSE_COLUMNS = [
+      { label: 'Date', render: (e) => window.UI.formatDateTime(e.createdAt) },
+      { label: 'Branch', render: (e) => esc(e.branchName || '-') },
+      { label: 'Category', render: (e) => esc(RT.prettify(e.category)) },
+      { label: 'Description', render: (e) => (e.description ? esc(e.description) : '<span class="text-muted">-</span>') },
+      { label: 'Status', render: (e) => RT.statusBadge(e.status) },
+      { label: 'Amount', num: true, render: (e) => `<span class="font-semibold">${fm(e.amount)}</span>` },
+    ];
 
     function paint() {
       const sel = current === 'ALL' ? rows : rows.filter((r) => r.status === current);
@@ -515,8 +605,8 @@ state.cache[cacheKey] = data;
       if (!sel.length) { body.innerHTML = emptyReport('Nothing with this status', 'Pick another status above.'); lastExport = null; return; }
 
       body.innerHTML = `
-        <div class="kpi-grid">
-          ${RT.kpi({ label: current === 'ALL' ? 'All expenses' : `${RT.prettify(current)} expenses`, value: fm(total), icon: 'reports', tone: 'warning' })}
+        <div class="kpi-grid" id="expenses-kpi-grid">
+          ${RT.expandableKpi({ key: 'expenseTotal', label: current === 'ALL' ? 'All expenses' : `${RT.prettify(current)} expenses`, value: fm(total), icon: 'reports', tone: 'warning', sub: 'Tap to see each entry' })}
           ${RT.kpi({ label: 'Entries', value: RT.fmtNum(count), tone: 'neutral', sub: `${byCat.length} categories` })}
           ${RT.kpi({ label: 'Biggest category', value: esc(RT.prettify(byCat[0].category)), tone: 'info', sub: `${fm(byCat[0].total)} · ${RT.fmtPct(RT.pct(byCat[0].total, total), 0)}` })}
           ${pending > 0 ? RT.kpi({ label: 'Waiting for approval', value: fm(pending), tone: 'danger', sub: 'Not counted in profit yet' }) : ''}
@@ -539,13 +629,24 @@ state.cache[cacheKey] = data;
 
       CH.donut(document.getElementById('ch-exp-pie'), {
         data: byCat.map((c) => ({ label: RT.prettify(c.category), value: c.total })),
-        inner: 0, size: 220, format: RT.money0, tipFormat: fm, maxSlices: 7, ariaLabel: 'Expenses by category',
+        inner: 0, size: 300, format: RT.money0, tipFormat: fm, maxSlices: 7, ariaLabel: 'Expenses by category',
       });
       CH.hbar(document.getElementById('ch-exp-bar'), {
         data: byCat.slice(0, 10).map((c) => ({ label: RT.prettify(c.category), value: c.total, sub: `${RT.fmtNum(c.count)} entries` })),
         format: RT.money0, valueLabel: 'Total', ranked: true,
       });
       window.Permissions.applyPermissionGates(body, user);
+
+      RT.bindAdminDrilldown(document.getElementById('expenses-kpi-grid'), document.getElementById('expenses-drilldown'), (key) => {
+        if (key !== 'expenseTotal') return null;
+        return {
+          title: current === 'ALL' ? 'All expenses' : `${RT.prettify(current)} expenses`,
+          endpoint: '/reports/expenses/detail',
+          params: { ...query, ...(current !== 'ALL' ? { status: current } : {}) },
+          columns: EXPENSE_COLUMNS,
+        };
+      });
+
       lastExport = {
         name: 'expense-report',
         sections: [{ headers: ['Category', 'Status', 'Entries', 'Total (KES)'], rows: sel.map((r) => [RT.prettify(r.category), r.status, r.count, r.total]) }],
@@ -714,7 +815,7 @@ state.cache[cacheKey] = data;
     });
     CH.donut(document.getElementById('ch-owed-pie'), {
       data: list.map((s) => ({ label: s.name, value: s.currentBalance })),
-      inner: 0, size: 200, format: RT.money0, tipFormat: fm, maxSlices: 5, ariaLabel: 'Share of payables by supplier',
+      inner: 0, size: 260, format: RT.money0, tipFormat: fm, maxSlices: 5, ariaLabel: 'Share of payables by supplier',
     });
     RT.tableSearch(document.getElementById('tbl-search'), document.getElementById('tbl-body'));
 

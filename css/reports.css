@@ -321,3 +321,209 @@ tr.log-row { cursor: pointer; }
   .ch-bar, .stackbar { animation: none; clip-path: none; }
   .hbar-fill, .g-arc, .dn-slice { transition: none; }
 }
+
+
+
+
+
+
+
+/* ==========================================================================
+   ADDITIONS: bigger chart real estate + expandable KPI drill-downs
+   ========================================================================== */
+
+/* Chart cards get real minimum height so charts can't be squeezed tiny by
+   a narrow grid column. */
+.chart-card-body { min-height: 320px; }
+.chart-card-body.center { min-height: 260px; }
+@media (min-width: 960px) {
+  .g-2-1 .chart-card-body, .g-1-2 .chart-card-body, .g-1-1 .chart-card-body { min-height: 360px; }
+}
+
+/* Bigger, bolder chart text (charts.js now renders at these sizes too via
+   larger SVG viewBoxes - this just backs it up for anything CSS-driven). */
+.ch-tick { font-size: 13px; }
+.ch-val { font-size: 13px; font-weight: 700; }
+.hbar-label { font-size: var(--text-md); }
+.hbar-value { font-size: var(--text-md); }
+.hbar-track { height: 12px; }
+.dn-cv { font-size: 26px; }
+.dn-cl { font-size: 13px; }
+.dn-legend li { font-size: var(--text-sm); padding: 7px var(--space-2); }
+.g-val { font-size: 22px; }
+.g-label { font-size: var(--text-md); }
+.gauge svg { width: 148px; height: 148px; }
+
+/* ---- Expandable KPI tiles ---- */
+.kpi-expandable {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; color: inherit;
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+.kpi-expandable:hover { box-shadow: var(--shadow-md); }
+.kpi-expandable:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.kpi-expand-hint {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  margin-top: var(--space-3); padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border);
+  font-size: var(--text-xs); color: var(--color-primary); font-weight: var(--font-semibold);
+}
+.kpi-expand-hint svg { width: 14px; height: 14px; transition: transform var(--transition-fast); }
+.kpi-expandable[aria-expanded="true"] .kpi-expand-hint svg { transform: rotate(180deg); }
+.kpi-expandable[aria-expanded="true"] { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary-light); }
+
+/* ---- Drill-down accordion panel ---- */
+.drilldown-panel {
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg);
+  margin: 0 0 var(--space-4); overflow: hidden;
+  animation: dd-open 0.22s ease-out;
+}
+@keyframes dd-open { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+.drilldown-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+.drilldown-head h4 { font-size: var(--text-md); font-weight: var(--font-semibold); margin: 0; }
+.drilldown-row { cursor: pointer; }
+.drilldown-row:hover { background: var(--color-primary-50); }
+.drilldown-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-4) var(--space-5); flex-wrap: wrap;
+}
+
+
+
+
+
+
+
+
+
+
+/* ==========================================================================
+   ADDITIONS v2: bigger chart real estate, expandable KPI drill-downs,
+   admin detail drill-down tables, sales trend chart
+   ========================================================================== */
+
+/* Chart cards - taller minimums so nothing collapses in a narrow column */
+.chart-card-body { min-height: 380px; }
+.chart-card-body.center { min-height: 300px; }
+@media (min-width: 960px) {
+  .g-2-1 .chart-card-body, .g-1-2 .chart-card-body, .g-1-1 .chart-card-body { min-height: 420px; }
+}
+.trend-chart-card .chart-card-body { min-height: 440px; }
+
+/* Bigger chart text/lines to match charts.js's larger SVG viewBoxes */
+.ch-tick { font-size: 14px; }
+.ch-val { font-size: 14px; font-weight: 700; }
+.hbar-label { font-size: var(--text-md); }
+.hbar-value { font-size: var(--text-md); }
+.hbar-track { height: 14px; }
+.dn-cv { font-size: 30px; }
+.dn-cl { font-size: 14px; }
+.dn-legend li { font-size: var(--text-sm); padding: 8px var(--space-2); }
+.g-val { font-size: 24px; }
+.g-label { font-size: var(--text-md); }
+.gauge svg { width: 168px; height: 168px; }
+
+/* ---- Expandable KPI tiles ---- */
+.kpi-expandable {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; color: inherit;
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+.kpi-expandable:hover { box-shadow: var(--shadow-md); }
+.kpi-expandable:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.kpi-expand-hint {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  margin-top: var(--space-3); padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border);
+  font-size: var(--text-xs); color: var(--color-primary); font-weight: var(--font-semibold);
+}
+.kpi-expand-hint svg { width: 14px; height: 14px; transition: transform var(--transition-fast); }
+.kpi-expandable[aria-expanded="true"] .kpi-expand-hint svg { transform: rotate(180deg); }
+.kpi-expandable[aria-expanded="true"] { border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary-light); }
+
+/* ---- Drill-down accordion panel (both self-scoped and admin-detail use this) ---- */
+.drilldown-panel {
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg);
+  margin: 0 0 var(--space-4); overflow: hidden;
+  animation: dd-open 0.22s ease-out;
+}
+@keyframes dd-open { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+.drilldown-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+.drilldown-head h4 { font-size: var(--text-md); font-weight: var(--font-semibold); margin: 0; }
+.drilldown-row { cursor: pointer; }
+.drilldown-row:hover { background: var(--color-primary-50); }
+.drilldown-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-4) var(--space-5); flex-wrap: wrap;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+/* ==========================================================================
+   ADDITIONS v3: horizontally-scrollable charts on narrow screens, a
+   resize-aware donut, and mobile-specific sizing for reports/dashboard.
+   Cart-specific fixes live in components.css.
+   ========================================================================== */
+
+/* Charts render at whatever width keeps their bars/labels legible. When
+   that's wider than the card (many categories on a narrow phone), only the
+   chart's own canvas scrolls horizontally - the card and page never do. */
+.chart-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.chart-scroll::-webkit-scrollbar { height: 6px; }
+.chart-scroll::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 3px; }
+.chart-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* No max-width: 100% here on purpose - charts.js sets an exact pixel width
+   (matching the container, or wider when .chart-scroll needs to kick in),
+   and letting CSS scale it back down would silently undo that. */
+.chart-svg { display: block; overflow: visible; }
+
+@media (max-width: 640px) {
+  .chart-card-body { min-height: 260px; padding: var(--space-3) var(--space-3) var(--space-4); }
+  .chart-card-body.center { min-height: 220px; }
+  .trend-chart-card .chart-card-body { min-height: 300px; }
+  .g-2-1 .chart-card-body, .g-1-2 .chart-card-body, .g-1-1 .chart-card-body { min-height: 260px; }
+
+  .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-2); }
+  .kpi { padding: var(--space-3) var(--space-4); }
+  .kpi-value { font-size: 1.4rem; }
+  .takings-value { font-size: 1.8rem; }
+
+  .gauge-row { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+  .gauge svg { width: 120px; height: 120px; }
+
+  .donut-wrap { gap: var(--space-3); }
+  .dn-legend { width: 100%; min-width: 0; }
+
+  .filter-bar { padding: var(--space-3); }
+  .chip { height: 32px; padding: 0 var(--space-3); font-size: var(--text-xs); }
+}
+
+@media (max-width: 400px) {
+  .chart-card-body { min-height: 220px; }
+  .ch-tick, .ch-val { font-size: 11px; }
+}

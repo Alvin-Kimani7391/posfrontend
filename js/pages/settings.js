@@ -4,24 +4,30 @@
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
-    contentEl = window.AppShell.mount({ title: 'Integrations' });
+    contentEl = window.AppShell.mount({ title: 'Settings' });
     if (!contentEl) return;
-    contentEl.innerHTML = `<div class="page-header"><div><h1>Integrations</h1><p>Turn on M-PESA and eTIMS for your business, and enter your provider credentials.</p></div></div><div id="settings-body"></div>`;
+    contentEl.innerHTML = `<div class="page-header"><div><h1>Settings</h1><p>Your business details, receipt layout, and payment/tax integrations.</p></div></div><div id="settings-body"></div>`;
     await render();
   }
 
   async function render() {
     const body = document.getElementById('settings-body');
-    body.innerHTML = window.UI.skeletonRows(2, 1);
-    let status;
-    try {
-      ({ data: status } = await window.Api.get('/settings/integrations'));
-    } catch (err) {
-      body.innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load settings', message: err.message });
+    body.innerHTML = window.UI.skeletonRows(3, 1);
+
+    const [statusResult, businessResult] = await Promise.allSettled([
+      window.Api.get('/settings/integrations'),
+      window.Api.get('/business'),
+    ]);
+
+    if (statusResult.status === 'rejected') {
+      body.innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load settings', message: statusResult.reason.message });
       return;
     }
+    const status = statusResult.value.data;
+    const business = businessResult.status === 'fulfilled' ? businessResult.value.data.business : null;
 
     body.innerHTML = `
+      ${business ? businessCard(business) : ''}
       ${integrationCard({
         key: 'mpesa', title: 'M-PESA (via PayHero)', enabled: status.mpesa.enabled,
         subtitle: 'Let customers pay by STK push at checkout.',
@@ -71,11 +77,88 @@
       })}
     `;
 
+    if (business) bindBusinessCard();
     bindCard('mpesa');
     bindCard('etims');
     bindMpesaCredTypeToggle();
   }
 
+  /* ------------------------------------------------------------------ *
+   * Business & receipt customization
+   * ------------------------------------------------------------------ */
+  function businessCard(business) {
+    const rs = business.receiptSettings || {};
+    return `
+      <div class="card" style="margin-bottom: var(--space-6)">
+        <div class="card-header">
+          <div><h2>Business & receipt details</h2><p class="text-sm text-muted">What appears on every printed receipt.</p></div>
+        </div>
+        <div class="card-body">
+          <form id="business-form">
+            <div class="form-row">
+              <div class="field"><label>Business name</label><input class="input" name="name" value="${window.UI.escapeHtml(business.name || '')}" /></div>
+              <div class="field"><label>Phone</label><input class="input" name="phone" value="${window.UI.escapeHtml(business.phone || '')}" /></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label>Address</label><input class="input" name="address" value="${window.UI.escapeHtml(business.address || '')}" /></div>
+              <div class="field"><label>KRA PIN</label><input class="input" name="kraPin" value="${window.UI.escapeHtml(business.kraPin || '')}" /></div>
+            </div>
+            <div class="field"><label>Receipt header message <span class="text-muted">(optional)</span></label><input class="input" name="rs_headerMessage" value="${window.UI.escapeHtml(rs.headerMessage || '')}" placeholder="e.g. Welcome to..." /></div>
+            <div class="field"><label>Receipt footer message</label><input class="input" name="rs_footerMessage" value="${window.UI.escapeHtml(rs.footerMessage || '')}" /></div>
+            <div class="field"><label>Extra line(s) <span class="text-muted">(one per line, e.g. return policy)</span></label><textarea class="textarea" name="rs_customLines" rows="2">${window.UI.escapeHtml((rs.customLines || []).join('\n'))}</textarea></div>
+            <div class="form-row">
+              <div class="field"><label>Receipt paper width</label>
+                <select class="select" name="rs_paperWidth">
+                  <option value="80mm" ${rs.paperWidth !== '58mm' ? 'selected' : ''}>80mm</option>
+                  <option value="58mm" ${rs.paperWidth === '58mm' ? 'selected' : ''}>58mm</option>
+                </select>
+              </div>
+            </div>
+            <div class="checkbox-row" style="margin-bottom:var(--space-2)"><input type="checkbox" id="rs_showKraPin" ${rs.showKraPin !== false ? 'checked' : ''} /><label for="rs_showKraPin" class="text-sm">Show KRA PIN</label></div>
+            <div class="checkbox-row" style="margin-bottom:var(--space-2)"><input type="checkbox" id="rs_showCashierName" ${rs.showCashierName !== false ? 'checked' : ''} /><label for="rs_showCashierName" class="text-sm">Show cashier name</label></div>
+            <div class="checkbox-row" style="margin-bottom:var(--space-2)"><input type="checkbox" id="rs_showMpesaReceiptCode" ${rs.showMpesaReceiptCode !== false ? 'checked' : ''} /><label for="rs_showMpesaReceiptCode" class="text-sm">Show M-PESA receipt code on receipt</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="rs_showLogo" ${rs.showLogo !== false ? 'checked' : ''} /><label for="rs_showLogo" class="text-sm">Show logo</label></div>
+          </form>
+        </div>
+        <div class="card-footer" style="display:flex; justify-content:flex-end">
+          <button class="btn btn-primary btn-sm" id="business-save">Save changes</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function bindBusinessCard() {
+    document.getElementById('business-save').addEventListener('click', async () => {
+      const raw = window.UI.serializeForm(document.getElementById('business-form'));
+      const payload = {
+        name: raw.name, phone: raw.phone, address: raw.address, kraPin: raw.kraPin,
+        receiptSettings: {
+          headerMessage: raw.rs_headerMessage,
+          footerMessage: raw.rs_footerMessage,
+          customLines: (raw.rs_customLines || '').split('\n').map((s) => s.trim()).filter(Boolean),
+          paperWidth: raw.rs_paperWidth,
+          showKraPin: document.getElementById('rs_showKraPin').checked,
+          showCashierName: document.getElementById('rs_showCashierName').checked,
+          showMpesaReceiptCode: document.getElementById('rs_showMpesaReceiptCode').checked,
+          showLogo: document.getElementById('rs_showLogo').checked,
+        },
+      };
+      const btn = document.getElementById('business-save');
+      window.UI.setButtonLoading(btn, true, 'Saving…');
+      try {
+        await window.Api.put('/business', payload);
+        window.UI.toast.success('Business details saved');
+      } catch (err) {
+        window.UI.toast.error(err.message);
+      } finally {
+        window.UI.setButtonLoading(btn, false);
+      }
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * M-PESA / eTIMS integration cards
+   * ------------------------------------------------------------------ */
   function integrationCard({ key, title, enabled, subtitle, fieldsHtml }) {
     return `
       <div class="card" style="margin-bottom: var(--space-6)">
