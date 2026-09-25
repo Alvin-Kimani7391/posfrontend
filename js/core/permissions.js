@@ -16,6 +16,10 @@
   });
 
   const DEFAULT_ROLE_PERMISSIONS = {
+    OWNER:[
+
+      'notifications.view', 'notifications.send', 
+    ],
     MANAGER: [
       'categories.view', 'categories.create', 'categories.update',
       'products.view', 'products.create', 'products.update',
@@ -33,6 +37,7 @@
       'shifts.open', 'shifts.close', 'shifts.view',
       'branches.view',
       'audit.view',
+      'notifications.view', 'notifications.send',   // new
     ],
     CASHIER: [
       'categories.view',
@@ -43,6 +48,7 @@
       'payments.view',
       'customers.view', 'customers.create',
       'shifts.open', 'shifts.close', 'shifts.view',
+      'notifications.view', 'notifications.send',   // new
     ],
     STOREKEEPER: [
       'categories.view', 'categories.create', 'categories.update',
@@ -50,6 +56,7 @@
       'inventory.view', 'inventory.adjust', 'inventory.receive', 'inventory.transfer',
       'suppliers.view', 'suppliers.create',
       'purchases.view', 'purchases.create', 'purchases.receive',
+      'notifications.view', 'notifications.send',   // new
     ],
     ACCOUNTANT: [
       'categories.view', 'products.view',
@@ -61,6 +68,7 @@
       'suppliers.view',
       'audit.view',
       'etims.view',
+      'notifications.view',   // new - view only, accountants don't raise ops alerts
     ],
   };
 

@@ -4,30 +4,12 @@
  * No CDN, no build step - so charts keep working when the shop's internet is
  * down (the POS is meant to survive that).
  *
- * RESPONSIVENESS FIX: `responsive()` used to measure container width
- * synchronously, right after innerHTML was set elsewhere on the page -
- * before the browser had done a layout pass. That measurement was often 0,
- * so charts fell back to a hard-coded 560px and stayed there even on a wide
- * laptop screen (this was the "too small on laptop" bug). It now waits two
- * animation frames before its first measurement, and always attaches a
- * ResizeObserver (donut() included - it never resized before at all).
- *
- * MOBILE FIX: bar() and waterfall() now guarantee a minimum pixel width per
- * category. If that would make the chart wider than its card, the chart
- * scrolls horizontally in its own lane (.chart-scroll) instead of cramming
- * every bar down to an unreadable sliver - this was the "extremely small on
- * phone" bug. donut() now clamps its size to the space actually available.
- *
- *   Charts.bar(el, { labels, series: [{ name, values, color?, colors? }], format, tipFormat })
- *   Charts.hbar(el, { data: [{ label, value, sub?, color? }], format, ranked })
- *   Charts.donut(el, { data: [{ label, value, color? }], format, inner: 0.62 })   // inner: 0 = pie
- *   Charts.waterfall(el, { steps: [{ label, value, kind: 'total'|'delta', color? }], format })
- *   Charts.gauge(el, { value, label, sub, color })
- *   Charts.stackbar(el, { segments: [{ label, value, color }], format })
- *
- * Every chart draws into the element you pass, redraws when that element
- * changes width (bar + waterfall + donut), and shows a tooltip on hover / tap.
- * All labels are escaped with UI.escapeHtml.
+ * SIZE: bar()/waterfall() height and donut() diameter are now treated as
+ * floors, not close-to-final numbers - on anything wider than a phone they
+ * always render at a substantial minimum size and grow further on wide
+ * cards, regardless of the (often small) height/size a caller passes in.
+ * responsive() still waits for real layout before measuring width and
+ * keeps redrawing on resize (donut() included).
  */
 (function (window) {
   const PALETTE = [
@@ -64,6 +46,26 @@
     return typeof window !== 'undefined' && window.innerWidth && window.innerWidth < 480;
   }
 
+  /** How tall a bar/waterfall chart should be for a given container width.
+   * The caller's `height` is now treated as a minimum, not a target - on
+   * anything wider than a phone this always renders at least 440px tall,
+   * growing further on genuinely wide cards, instead of quietly staying
+   * at whatever (often small) number reports.js/dashboard.js passed in. */
+  function chartHeight(requestedHeight, containerW) {
+    if (isSmallViewport()) return Math.max(260, Math.min(Math.round(containerW * 0.85), 380));
+    return Math.max(requestedHeight, 440, Math.min(Math.round(containerW * 0.5), 560));
+  }
+
+  /** Same idea for the donut/pie diameter: the caller's `size` is a floor,
+   * not a ceiling. Previously this only ever shrank a fixed size (300/260)
+   * down to fit a narrow container - it never grew on a wide one, which is
+   * why donuts looked small on a laptop even after the resize fix. */
+  function donutSize(requestedSize, containerW) {
+    if (isSmallViewport()) return Math.max(190, Math.min(containerW - 16, 280));
+    const capByContainer = Math.max(200, Math.round(containerW * 0.6)); // leave room for the legend beside it
+    return Math.max(requestedSize, 340, Math.min(capByContainer, 460));
+  }
+
   function niceNum(x, round) {
     const exp = Math.floor(Math.log10(x));
     const f = x / Math.pow(10, exp);
@@ -91,8 +93,8 @@
    * the container's width changes. The first measurement is deferred two
    * animation frames: innerHTML is usually set synchronously right before
    * this runs, and clientWidth can read 0 (or a stale pre-layout value) in
-   * that same tick - without this, charts would fall back to a fixed
-   * width and never recover even though the real container was much wider.
+   * that same tick - without this, charts fall back to a fixed width and
+   * never recover even though the real container is much wider.
    */
   function responsive(container, draw) {
     let lastW = -1;
@@ -106,9 +108,6 @@
       requestAnimationFrame(() => {
         run();
         if (lastW <= 0) {
-          // Still unmeasurable (e.g. inside a display:none tab) - draw at
-          // a sane fallback so something renders; ResizeObserver below
-          // will correct it the moment the container becomes visible.
           const w = Math.floor(container.clientWidth) || 560;
           lastW = w;
           draw(w);
@@ -205,14 +204,10 @@
       return;
     }
     const showValues = opts.showValues != null ? opts.showValues : labels.length * series.length <= 8;
-    // Minimum pixel width per category so bars/labels stay legible even
-    // with many categories on a narrow phone. If the content needs more
-    // room than the card has, the chart scrolls horizontally (see
-    // .chart-scroll in report.css) rather than squeezing bars to nothing.
     const minBand = Math.max(52, 30 + series.length * 26);
-    const h = isSmallViewport() ? Math.min(height, 320) : height;
 
     responsive(container, (containerW) => {
+      const h = chartHeight(height, containerW);
       const all = series.flatMap((s) => s.values);
       const scale = niceScale(Math.min(0, ...all), Math.max(0, ...all), 5);
       const probe = layout(containerW, h, scale, format);
@@ -262,10 +257,10 @@
     const { steps = [], format = compact, height = 420, ariaLabel = 'Waterfall chart' } = opts;
     const tipFormat = opts.tipFormat || format;
     if (!steps.length) { container.innerHTML = emptyHtml(opts.emptyText); return; }
-    const minBand = 92; // waterfall bars carry more label text than plain bars
-    const h = isSmallViewport() ? Math.min(height, 320) : height;
+    const minBand = 92;
 
     responsive(container, (containerW) => {
+      const h = chartHeight(height, containerW);
       let run = 0;
       const bars = steps.map((s) => {
         let from;
@@ -343,8 +338,8 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Donut / pie - now resize-aware, and clamps to the space it actually
-   * has so a fixed `size` never overflows a narrow phone card.
+   * Donut / pie - resize-aware, and now grows to fill a wide card instead
+   * of only ever shrinking to fit a narrow one.
    * ------------------------------------------------------------------ */
   function donut(container, opts) {
     const { data = [], format = compact, inner = 0.62, centerLabel = 'Total', maxSlices = 7, ariaLabel = 'Share chart' } = opts;
@@ -361,7 +356,7 @@
     const total = items.reduce((s, d) => s + d.value, 0);
 
     responsive(container, (containerW) => {
-      const size = Math.max(150, Math.min(requestedSize, containerW - 8));
+      const size = donutSize(requestedSize, containerW);
       const r = size / 2 - 10;
       const cx = size / 2;
       const cy = size / 2;

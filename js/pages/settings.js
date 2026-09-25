@@ -28,6 +28,7 @@
 
     body.innerHTML = `
       ${business ? businessCard(business) : ''}
+      ${business ? salesSettingsCard(business) : ''}
       ${integrationCard({
         key: 'mpesa', title: 'M-PESA (via PayHero)', enabled: status.mpesa.enabled,
         subtitle: 'Let customers pay by STK push at checkout.',
@@ -77,7 +78,7 @@
       })}
     `;
 
-    if (business) bindBusinessCard();
+    if (business) { bindBusinessCard(); bindSalesSettingsCard(); }
     bindCard('mpesa');
     bindCard('etims');
     bindMpesaCredTypeToggle();
@@ -91,7 +92,7 @@
     return `
       <div class="card" style="margin-bottom: var(--space-6)">
         <div class="card-header">
-          <div><h2>Business & receipt details</h2><p class="text-sm text-muted">What appears on every printed receipt.</p></div>
+          <div><h2>Business & receipt details</h2><p class="text-sm text-muted">What appears on every printed receipt, plus your company info.</p></div>
         </div>
         <div class="card-body">
           <form id="business-form">
@@ -100,9 +101,29 @@
               <div class="field"><label>Phone</label><input class="input" name="phone" value="${window.UI.escapeHtml(business.phone || '')}" /></div>
             </div>
             <div class="form-row">
+              <div class="field"><label>Email <span class="text-muted">(optional)</span></label><input class="input" name="email" type="email" value="${window.UI.escapeHtml(business.email || '')}" placeholder="owner@business.com" /></div>
               <div class="field"><label>Address</label><input class="input" name="address" value="${window.UI.escapeHtml(business.address || '')}" /></div>
-              <div class="field"><label>KRA PIN</label><input class="input" name="kraPin" value="${window.UI.escapeHtml(business.kraPin || '')}" /></div>
             </div>
+            <div class="form-row">
+              <div class="field"><label>County <span class="text-muted">(optional)</span></label><input class="input" name="county" value="${window.UI.escapeHtml(business.county || '')}" placeholder="Nairobi" /></div>
+              <div class="field"><label>Town <span class="text-muted">(optional)</span></label><input class="input" name="town" value="${window.UI.escapeHtml(business.town || '')}" placeholder="Westlands" /></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label>KRA PIN</label><input class="input" name="kraPin" value="${window.UI.escapeHtml(business.kraPin || '')}" /></div>
+              <div class="field"><label>Tax PIN <span class="text-muted">(if different from KRA PIN)</span></label><input class="input" name="taxPin" value="${window.UI.escapeHtml(business.taxPin || '')}" /></div>
+            </div>
+            <div class="checkbox-row" style="margin-bottom:var(--space-4)">
+              <input type="checkbox" id="biz_vatRegistered" ${business.vatRegistered ? 'checked' : ''} />
+              <label for="biz_vatRegistered" class="text-sm">VAT registered</label>
+            </div>
+            <div class="form-row">
+              <div class="field"><label>Currency</label><input class="input" name="currency" value="${window.UI.escapeHtml(business.currency || 'KES')}" /></div>
+              <div class="field"><label>Timezone</label><input class="input" name="timezone" value="${window.UI.escapeHtml(business.timezone || 'Africa/Nairobi')}" /></div>
+            </div>
+            <div class="field"><label>Logo URL <span class="text-muted">(optional)</span></label><input class="input" name="logo" value="${window.UI.escapeHtml(business.logo || '')}" placeholder="https://…" /></div>
+
+            <hr style="margin: var(--space-4) 0; border-color: var(--color-border)" />
+
             <div class="field"><label>Receipt header message <span class="text-muted">(optional)</span></label><input class="input" name="rs_headerMessage" value="${window.UI.escapeHtml(rs.headerMessage || '')}" placeholder="e.g. Welcome to..." /></div>
             <div class="field"><label>Receipt footer message</label><input class="input" name="rs_footerMessage" value="${window.UI.escapeHtml(rs.footerMessage || '')}" /></div>
             <div class="field"><label>Extra line(s) <span class="text-muted">(one per line, e.g. return policy)</span></label><textarea class="textarea" name="rs_customLines" rows="2">${window.UI.escapeHtml((rs.customLines || []).join('\n'))}</textarea></div>
@@ -131,7 +152,18 @@
     document.getElementById('business-save').addEventListener('click', async () => {
       const raw = window.UI.serializeForm(document.getElementById('business-form'));
       const payload = {
-        name: raw.name, phone: raw.phone, address: raw.address, kraPin: raw.kraPin,
+        name: raw.name,
+        phone: raw.phone,
+        address: raw.address,
+        kraPin: raw.kraPin,
+        email: raw.email || undefined,
+        county: raw.county || undefined,
+        town: raw.town || undefined,
+        taxPin: raw.taxPin || undefined,
+        currency: raw.currency || undefined,
+        timezone: raw.timezone || undefined,
+        logo: raw.logo || undefined,
+        vatRegistered: document.getElementById('biz_vatRegistered').checked,
         receiptSettings: {
           headerMessage: raw.rs_headerMessage,
           footerMessage: raw.rs_footerMessage,
@@ -148,6 +180,54 @@
       try {
         await window.Api.put('/business', payload);
         window.UI.toast.success('Business details saved');
+      } catch (err) {
+        window.UI.toast.error(err.message);
+      } finally {
+        window.UI.setButtonLoading(btn, false);
+      }
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Sales settings (customer credit on/off)
+   * ------------------------------------------------------------------ */
+  function salesSettingsCard(business) {
+    const s = business.settings || {};
+    return `
+      <div class="card" style="margin-bottom: var(--space-6)">
+        <div class="card-header">
+          <div><h2>Sales settings</h2><p class="text-sm text-muted">Controls what cashiers are allowed to do at checkout.</p></div>
+        </div>
+        <div class="card-body">
+          <div class="checkbox-row" style="margin-bottom:var(--space-2)">
+            <input type="checkbox" id="settings_enableCustomerCredit" ${s.enableCustomerCredit ? 'checked' : ''} />
+            <label for="settings_enableCustomerCredit" class="text-sm">Allow sales on customer credit</label>
+          </div>
+          <p class="text-xs text-muted">
+            When off, every sale must be paid in full at checkout and cashiers cannot leave a balance on a customer's account.
+            When on, a cashier can complete a sale with an outstanding balance for a selected customer, as long as it's within
+            that customer's credit limit (set on the Customers page).
+          </p>
+        </div>
+        <div class="card-footer" style="display:flex; justify-content:flex-end">
+          <button class="btn btn-primary btn-sm" id="sales-settings-save">Save changes</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function bindSalesSettingsCard() {
+    document.getElementById('sales-settings-save').addEventListener('click', async () => {
+      const payload = {
+        settings: {
+          enableCustomerCredit: document.getElementById('settings_enableCustomerCredit').checked,
+        },
+      };
+      const btn = document.getElementById('sales-settings-save');
+      window.UI.setButtonLoading(btn, true, 'Saving…');
+      try {
+        await window.Api.put('/business', payload);
+        window.UI.toast.success('Sales settings saved');
       } catch (err) {
         window.UI.toast.error(err.message);
       } finally {

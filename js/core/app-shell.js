@@ -28,6 +28,7 @@
     { key: 'branches', label: 'Branches', icon: 'branches', href: 'branches.html', permission: 'branches.view' },
     { key: 'employees', label: 'Employees', icon: 'employees', href: 'employees.html', permission: 'employees.view' },
     { key: 'customers', label: 'Customers', icon: 'employees', href: 'customers.html', permission: 'customers.view' },
+    { key: 'notifications', label: 'Notifications', icon: 'bell', href: 'notifications.html', permission: 'notifications.view' },
     { key: 'settings', label: 'Settings', icon: 'settings', href: 'settings.html', permission: 'settings.view' },
   ];
 
@@ -226,8 +227,9 @@
             <button class="menu-btn desktop-hidden" id="sidebar-toggle" aria-label="Open menu">${window.Icons.get('menu')}</button>
             <div class="topbar-title">${window.UI.escapeHtml(title)}</div>
           </div>
-          <div class="topbar-right">
+                    <div class="topbar-right">
             <div class="dropdown" id="branch-switcher-wrap"></div>
+            <div class="dropdown" id="notif-bell-wrap"></div>
             <button class="btn btn-ghost btn-icon" id="logout-btn" title="Log out">${window.Icons.get('logout')}</button>
           </div>
         </header>
@@ -297,7 +299,7 @@
     bindShellEvents();
     window.Permissions.applyPermissionGates(root, user);
     loadBranchSwitcher(); // async, fills in the dropdown once branches load - doesn't block the page. getActiveBranchId() itself does NOT depend on this.
-
+     window.NotificationCenter?.mount(document.getElementById('notif-bell-wrap'), user); // new
     return document.getElementById('page-content');
   }
 
