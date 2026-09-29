@@ -7,12 +7,17 @@
  *    so any page only needs `<script src="js/core/pwa.js"></script>`.
  *  - Registers sw.js.
  *  - Install: captures the browser's install prompt and offers it through a
- *    dismissible banner (never during an open modal, never again for 14 days
- *    after "Not now"). iPhone/iPad have no install prompt, so they get a
- *    short "Add to Home Screen" guide instead.
- *  - Update: when a new version is downloaded, shows "Refresh now / Later".
- *    Nothing reloads by itself, so a sale in progress is never lost.
+ *    compact, dismissible card (never during an open modal or the barcode
+ *    scanner, never again for 14 days after it is closed). iPhone/iPad have
+ *    no install prompt, so they get a short "Add to Home Screen" guide.
+ *  - Update: when a new version is downloaded, shows "Refresh". Nothing
+ *    reloads by itself, so a sale in progress is never lost.
  *  - Offline: shows a small notice while there is no connection.
+ *
+ * Layout (v2): one slim row on every screen size.
+ *   phones / tablets (< 960px): full width, sits ABOVE the bottom nav
+ *   larger tablets:             360px card, bottom-right
+ *   desktop (>= 960px):         360px card, bottom-right (clear of the sidebar)
  *
  * Public API (window.PWA):
  *   PWA.canInstall()        -> boolean, true when an Install button makes sense
@@ -40,7 +45,12 @@
     dismissDays: 14,
     bannerDelayMs: 6000,
     updateCheckMs: 30 * 60 * 1000,
+    // Anything matching this means the cashier is busy; do not pop up over it.
+    busySelector: '.modal-backdrop, .scanner-overlay, .pwa-sheet-backdrop',
   };
+
+  var CLOSE_ICON =
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
   /* ------------------------------------------------------------------ *
    * Small utilities
@@ -84,6 +94,20 @@
     try {
       if (window.UI && window.UI.toast && window.UI.toast[kind]) window.UI.toast[kind](message);
     } catch (e) { /* ignore */ }
+  }
+
+  /** True when the mobile bottom nav is actually on screen (so we sit above it). */
+  function bottomNavVisible() {
+    var nav = document.querySelector('.bottom-nav');
+    if (!nav) return false;
+    try { return window.getComputedStyle(nav).display !== 'none'; } catch (e) { return false; }
+  }
+
+  function syncNavOffset() {
+    var above = bottomNavVisible();
+    [bannerEl, updateEl].forEach(function (el) {
+      if (el) el.classList.toggle('pwa-above-nav', above);
+    });
   }
 
   /* ------------------------------------------------------------------ *
@@ -145,41 +169,51 @@
   function injectStyles() {
     if (document.getElementById('pwa-styles')) return;
     var css = [
-      '.pwa-install{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:1200;',
-      'display:flex;flex-wrap:wrap;align-items:center;gap:12px 14px;padding:14px 16px;',
+      /* Shared floating row: install card + update card */
+      '.pwa-float{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:1200;',
+      'display:flex;align-items:center;gap:10px;padding:9px 8px 9px 12px;box-sizing:border-box;',
       'background:var(--color-surface,#fff);color:var(--color-text,#0f172a);',
-      'border:1px solid var(--color-border,#e2e8f0);border-radius:var(--radius-lg,14px);',
-      'box-shadow:0 12px 32px rgba(15,23,42,.18);animation:pwa-rise .22s ease-out}',
-      '@media (min-width:521px){.pwa-install{right:auto;width:400px;left:20px;bottom:20px}}',
-      '.pwa-install-icon{width:44px;height:44px;border-radius:10px;flex:none}',
-      '.pwa-install-copy{flex:1 1 180px;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:.9rem;line-height:1.35}',
-      '.pwa-install-copy strong{font-size:1rem}',
-      '.pwa-install-copy span{color:var(--color-text-secondary,#475569)}',
-      '.pwa-install-actions{display:flex;gap:8px;flex:1 1 100%}',
-      '.pwa-install-actions .btn{flex:1;min-height:44px;justify-content:center}',
-      '.pwa-update{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));z-index:1300;margin:0 auto;max-width:560px;',
-      'display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:12px 14px;',
-      'background:var(--color-surface,#fff);color:var(--color-text,#0f172a);',
-      'border:1px solid var(--color-primary,#0f766e);border-radius:var(--radius-lg,14px);',
-      'box-shadow:0 12px 32px rgba(15,23,42,.2);font-size:.92rem;animation:pwa-drop .22s ease-out}',
-      '.pwa-update span{flex:1 1 220px}',
-      '.pwa-update .btn{min-height:40px}',
-      '.pwa-offline{position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + env(safe-area-inset-top,0px));z-index:1250;',
-      'max-width:calc(100% - 24px);padding:9px 16px;border-radius:999px;background:#7c2d12;color:#fff;',
-      'font-size:.85rem;font-weight:600;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.25)}',
+      'border:1px solid var(--color-border,#e2e8f0);border-radius:var(--radius-lg,12px);',
+      'box-shadow:var(--shadow-lg,0 10px 28px rgba(15,23,42,.18));',
+      'font-size:.85rem;line-height:1.3;animation:pwa-rise .2s ease-out}',
+      /* phones/tablets with the bottom nav showing: sit just above it */
+      '.pwa-float.pwa-above-nav{bottom:calc(var(--bottom-nav-height,64px) + 10px)}',
+      '@media (min-width:521px){.pwa-float{left:auto;right:16px;width:360px}}',
+      '@media (min-width:960px){.pwa-float,.pwa-float.pwa-above-nav{right:20px;bottom:20px}}',
+
+      '.pwa-float-icon{width:36px;height:36px;border-radius:9px;flex:none}',
+      '.pwa-copy{flex:1 1 auto;min-width:0}',
+      '.pwa-copy strong{display:block;font-size:.9rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.pwa-copy span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;',
+      'color:var(--color-text-secondary,#475569);font-size:.78rem}',
+      '@media (max-width:359px){.pwa-copy span{display:none}}',
+      '.pwa-float .btn{height:34px;padding:0 14px;font-size:.85rem;flex:none;border-radius:var(--radius-md,8px)}',
+      '.pwa-close{flex:none;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;',
+      'border:0;background:transparent;color:var(--color-text-muted,#64748b);border-radius:50%;cursor:pointer}',
+      '.pwa-close:hover{background:var(--color-bg,#f1f5f9);color:var(--color-text,#0f172a)}',
+      '.pwa-close:focus-visible{outline:2px solid var(--color-primary,#0f766e);outline-offset:1px}',
+
+      /* Offline notice: under the sticky topbar so it never collides with toasts */
+      '.pwa-offline{position:fixed;left:50%;transform:translateX(-50%);',
+      'top:calc(var(--topbar-height,56px) + env(safe-area-inset-top,0px) + 8px);z-index:1150;',
+      'max-width:calc(100% - 24px);padding:7px 14px;border-radius:999px;background:#7c2d12;color:#fff;',
+      'font-size:.8rem;font-weight:600;text-align:center;box-shadow:0 6px 18px rgba(0,0,0,.25)}',
+
+      /* iOS guide sheet */
       '.pwa-sheet-backdrop{position:fixed;inset:0;z-index:1400;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;justify-content:center}',
-      '@media (min-width:521px){.pwa-sheet-backdrop{align-items:center}}',
-      '.pwa-sheet{width:100%;max-width:440px;background:var(--color-surface,#fff);color:var(--color-text,#0f172a);',
-      'border-radius:18px 18px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom,0px));animation:pwa-rise .22s ease-out}',
-      '@media (min-width:521px){.pwa-sheet{border-radius:18px}}',
-      '.pwa-sheet h3{margin:0 0 6px;font-size:1.1rem}',
-      '.pwa-sheet p{margin:0 0 12px;color:var(--color-text-secondary,#475569);font-size:.92rem}',
-      '.pwa-sheet ol{margin:0 0 18px;padding-left:20px;display:grid;gap:8px;font-size:.95rem}',
-      '.pwa-sheet .btn{width:100%;min-height:46px;justify-content:center}',
+      '@media (min-width:521px){.pwa-sheet-backdrop{align-items:center;padding:16px}}',
+      '.pwa-sheet{width:100%;max-width:400px;max-height:90vh;max-height:90dvh;overflow-y:auto;',
+      'background:var(--color-surface,#fff);color:var(--color-text,#0f172a);',
+      'border-radius:16px 16px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom,0px));animation:pwa-rise .2s ease-out}',
+      '@media (min-width:521px){.pwa-sheet{border-radius:16px}}',
+      '.pwa-sheet h3{margin:0 0 4px;font-size:1rem}',
+      '.pwa-sheet p{margin:0 0 10px;color:var(--color-text-secondary,#475569);font-size:.85rem}',
+      '.pwa-sheet ol{margin:0 0 14px;padding-left:20px;display:grid;gap:6px;font-size:.9rem}',
+      '.pwa-sheet .btn{width:100%;height:42px}',
+
       '[data-pwa-install][hidden]{display:none!important}',
-      '@keyframes pwa-rise{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}',
-      '@keyframes pwa-drop{from{transform:translateY(-12px);opacity:0}to{transform:none;opacity:1}}',
-      '@media (prefers-reduced-motion:reduce){.pwa-install,.pwa-update,.pwa-sheet{animation:none}}',
+      '@keyframes pwa-rise{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}',
+      '@media (prefers-reduced-motion:reduce){.pwa-float,.pwa-sheet{animation:none}}',
     ].join('');
     var style = document.createElement('style');
     style.id = 'pwa-styles';
@@ -188,7 +222,7 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Install banner
+   * Install card
    * ------------------------------------------------------------------ */
   function scheduleBanner(delay) {
     if (bannerTimer) clearTimeout(bannerTimer);
@@ -197,27 +231,23 @@
   }
 
   function showBanner() {
-    if (bannerEl || !canInstall() || dismissedRecently() || !document.body) return;
-    // Never interrupt checkout or another dialog.
-    if (document.querySelector('.modal-backdrop, .pwa-sheet-backdrop')) {
+    if (bannerEl || updateEl || !canInstall() || dismissedRecently() || !document.body) return;
+    // Never interrupt checkout, a dialog, or the barcode scanner.
+    if (document.querySelector(CFG.busySelector)) {
       scheduleBanner(5000);
       return;
     }
     var ios = isIos() && !deferredPrompt;
     bannerEl = document.createElement('section');
-    bannerEl.className = 'pwa-install';
+    bannerEl.className = 'pwa-float pwa-install';
     bannerEl.setAttribute('role', 'region');
     bannerEl.setAttribute('aria-label', 'Install ' + CFG.appName);
     bannerEl.innerHTML =
-      '<img class="pwa-install-icon" src="' + CFG.iconUrl + '" alt="" width="44" height="44">' +
-      '<div class="pwa-install-copy"><strong>Install ' + CFG.appName + '</strong>' +
-      '<span>' + (ios
-        ? 'Add it to your home screen to open it like an app.'
-        : 'Open it from your desktop or home screen. Full screen, quick to start.') + '</span></div>' +
-      '<div class="pwa-install-actions">' +
-      '<button type="button" class="btn btn-primary" data-pwa-act="install">' + (ios ? 'Show me how' : 'Install') + '</button>' +
-      '<button type="button" class="btn btn-secondary" data-pwa-act="dismiss">Not now</button>' +
-      '</div>';
+      '<img class="pwa-float-icon" src="' + CFG.iconUrl + '" alt="" width="36" height="36">' +
+      '<div class="pwa-copy"><strong>Install ' + CFG.appName + '</strong>' +
+      '<span>' + (ios ? 'Add it to your home screen.' : 'Open it like an app, full screen.') + '</span></div>' +
+      '<button type="button" class="btn btn-primary btn-sm" data-pwa-act="install">' + (ios ? 'How' : 'Install') + '</button>' +
+      '<button type="button" class="pwa-close" data-pwa-act="dismiss" aria-label="Not now" title="Not now">' + CLOSE_ICON + '</button>';
     bannerEl.addEventListener('click', function (e) {
       var btn = e.target.closest('[data-pwa-act]');
       if (!btn) return;
@@ -225,6 +255,7 @@
       else dismissBanner(true);
     });
     document.body.appendChild(bannerEl);
+    syncNavOffset();
   }
 
   function dismissBanner(remember) {
@@ -266,13 +297,10 @@
       deferredPrompt = null; // a prompt event can only be used once
       promptEvent.prompt();
       return promptEvent.userChoice.then(function (choice) {
-        if (choice && choice.outcome === 'accepted') {
-          dismissBanner(false);
-        } else {
-          dismissBanner(true);
-        }
+        var accepted = !!(choice && choice.outcome === 'accepted');
+        dismissBanner(!accepted);
         emitChange();
-        return choice && choice.outcome === 'accepted' ? 'accepted' : 'dismissed';
+        return accepted ? 'accepted' : 'dismissed';
       }).catch(function () { emitChange(); return 'dismissed'; });
     }
 
@@ -302,17 +330,18 @@
   });
 
   /* ------------------------------------------------------------------ *
-   * Update prompt
+   * Update card
    * ------------------------------------------------------------------ */
   function showUpdate(worker) {
     if (updateEl || !document.body) return;
+    dismissBanner(false); // one card at a time; the update matters more
     updateEl = document.createElement('div');
-    updateEl.className = 'pwa-update';
+    updateEl.className = 'pwa-float pwa-update';
     updateEl.setAttribute('role', 'status');
     updateEl.innerHTML =
-      '<span>A new version is ready. Finish your current sale, then refresh.</span>' +
-      '<button type="button" class="btn btn-primary btn-sm" data-pwa-act="refresh">Refresh now</button>' +
-      '<button type="button" class="btn btn-secondary btn-sm" data-pwa-act="later">Later</button>';
+      '<div class="pwa-copy"><strong>Update ready</strong><span>Finish your current sale, then refresh.</span></div>' +
+      '<button type="button" class="btn btn-primary btn-sm" data-pwa-act="refresh">Refresh</button>' +
+      '<button type="button" class="pwa-close" data-pwa-act="later" aria-label="Later" title="Later">' + CLOSE_ICON + '</button>';
     updateEl.addEventListener('click', function (e) {
       var btn = e.target.closest('[data-pwa-act]');
       if (!btn) return;
@@ -326,6 +355,7 @@
       else window.location.reload();
     });
     document.body.appendChild(updateEl);
+    syncNavOffset();
   }
 
   /* ------------------------------------------------------------------ *
@@ -410,6 +440,13 @@
   window.addEventListener('online', updateConnectionUi);
   window.addEventListener('offline', updateConnectionUi);
 
+  // Re-check "is the bottom nav showing?" when the window resizes or rotates.
+  var resizeTimer = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(syncNavOffset, 150);
+  });
+
   // Keep [data-pwa-install] buttons in sync when app-shell renders them later.
   function watchTriggers() {
     if (!('MutationObserver' in window) || !document.body) return;
@@ -417,7 +454,7 @@
     new MutationObserver(function () {
       if (pending) return;
       pending = true;
-      setTimeout(function () { pending = false; refreshTriggers(); }, 200);
+      setTimeout(function () { pending = false; refreshTriggers(); syncNavOffset(); }, 200);
     }).observe(document.body, { childList: true, subtree: true });
   }
 

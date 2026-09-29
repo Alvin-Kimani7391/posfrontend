@@ -1,5 +1,5 @@
 /* ==========================================================================
-   POS (Sales screen) - v3: "full-screen ticket"
+   POS (Sales screen) - v4: "full-screen ticket", phone-first
    ----------------------------------------------------------------------
    The whole sales screen is one workspace (#pz-root):
 
@@ -14,6 +14,14 @@
    "Full view" (default) pins the workspace over the whole browser window
    (sidebar + app bar hidden) so the ticket gets every pixel. The toggle in
    the top bar returns to the normal app layout.
+
+   RESPONSIVE MAP
+     >= 1360px  desktop, barcode column visible
+     1024-1359  desktop, barcode moves under the product name
+     641-1023   tablet: ticket on top, summary bar pinned under it
+     <= 640px   phone: slim top bar, 2-line ticket rows (name / qty-disc-subtotal),
+                two-row summary (customer + discount, total + pay), compact
+                payment sheet, sales history as cards
 
    All classes are prefixed "pz-".
    ========================================================================== */
@@ -58,6 +66,8 @@ body.pz-focus-on { overflow: hidden; }
   gap: 0;
   background: var(--color-bg);
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* ------------------------------------------------------------- top bar --- */
@@ -123,6 +133,8 @@ body.pz-focus-on { overflow: hidden; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Long text on wide screens, short text on phones (both live in the banner markup) */
+.pz-short { display: none; }
 
 .pz-top-right { margin-left: auto; display: flex; align-items: center; gap: var(--space-3); flex: 0 0 auto; }
 .pz-user { font-size: var(--text-sm); color: var(--color-text-secondary); font-weight: var(--font-medium); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -141,13 +153,26 @@ body.pz-focus-on { overflow: hidden; }
 .pz-iconbtn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 @media (max-width: 900px) { .pz-user { display: none; } }
+
+/* Phone / small tablet top bar: row 1 = tabs + view button, row 2 = shift strip */
 @media (max-width: 720px) {
-  .pz-topbar { flex-wrap: wrap; row-gap: var(--space-2); padding: 6px var(--space-3); }
+  .pz-topbar { flex-wrap: wrap; row-gap: 6px; column-gap: var(--space-2); min-height: 0; padding: 6px var(--space-3); }
   .pz-focus .pz-topbar { padding-top: calc(6px + env(safe-area-inset-top, 0px)); }
-  .pz-shift { order: 3; flex-basis: 100%; }
-  .pz-shift .shift-banner { max-width: none; }
+  .pz-top-right { gap: var(--space-2); }
   .pz-clock { display: none; }
+  .pz-top-right #pz-fs-btn { display: none; } /* browser full screen adds nothing on a phone */
   .pz-tab { padding: 0 var(--space-3); }
+
+  .pz-shift { order: 3; flex-basis: 100%; }
+  .pz-shift .shift-banner { max-width: none; height: 36px; padding: 0 var(--space-1) 0 var(--space-3); gap: var(--space-2); }
+  .pz-shift .shift-banner .btn { height: 30px; padding: 0 var(--space-3); flex: 0 0 auto; }
+  .pz-long { display: none; }
+  .pz-short { display: inline; }
+}
+/* Very narrow phones: only the active tab shows its name */
+@media (max-width: 420px) {
+  .pz-tab:not(.active) .pz-tab-label { display: none; }
+  .pz-tab:not(.active) { padding: 0 var(--space-3); }
 }
 
 /* ---------------------------------------------------------------- views -- */
@@ -156,8 +181,14 @@ body.pz-focus-on { overflow: hidden; }
 .pz-focus .pz-view-pos { padding: var(--space-3) var(--space-4) var(--space-4); }
 .pz-view-history { overflow: auto; -webkit-overflow-scrolling: touch; }
 .pz-focus .pz-view-history { padding: var(--space-4); }
+
+/* Below desktop the whole POS column may scroll on very short screens
+   (landscape phones) instead of squashing the ticket to nothing. */
+@media (max-width: 1023px) {
+  .pz-view-pos { overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+}
 @media (max-width: 640px) {
-  .pz-focus .pz-view-pos { padding: var(--space-2) var(--space-2) var(--space-2); gap: var(--space-2); }
+  .pz-focus .pz-view-pos { padding: var(--space-2); gap: var(--space-2); }
   .pz-focus .pz-view-history { padding: var(--space-2); }
 }
 
@@ -178,11 +209,12 @@ body.pz-focus-on { overflow: hidden; }
 }
 .pz-keys span { display: inline-flex; align-items: center; gap: 6px; }
 @media (min-width: 1280px) { .pz-keys { display: flex; } }
-@media (max-width: 480px) {
-  .pz-scan-btn .pz-scan-label { display: none; }
-  .pz-scan-btn { padding: 0 var(--space-4); }
+@media (max-width: 640px) {
   .pz-searchbar { padding: var(--space-2); }
-  .pz-searchwrap .input, .pz-scan-btn { height: 48px; }
+  .pz-search-row { gap: var(--space-2); }
+  .pz-searchwrap .input { height: 46px; font-size: 16px; } /* 16px stops iOS zooming on focus */
+  .pz-scan-btn { height: 46px; padding: 0 var(--space-4); }
+  .pz-scan-btn .pz-scan-label { display: none; }
 }
 
 /* Search results: a dropdown under the input, only while something is typed */
@@ -196,6 +228,7 @@ body.pz-focus-on { overflow: hidden; }
   box-shadow: var(--shadow-lg);
   max-height: min(64vh, 520px);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .pz-dd.open { display: block; }
 .pz-dd-head, .pz-dd-row {
@@ -211,6 +244,7 @@ body.pz-focus-on { overflow: hidden; }
 .pz-dd-row:last-child { border-bottom: none; }
 .pz-dd-row:hover, .pz-dd-row.active { background: var(--color-primary-50); }
 .pz-dd-msg { padding: var(--space-6) var(--space-4); text-align: center; color: var(--color-text-muted); font-size: var(--text-sm); }
+.pz-dd-bc { display: none; }
 
 .pz-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-sm); color: var(--color-text-secondary); overflow-wrap: anywhere; }
 .pz-name { font-weight: var(--font-semibold); overflow-wrap: anywhere; line-height: 1.25; }
@@ -218,8 +252,13 @@ body.pz-focus-on { overflow: hidden; }
 .pz-right { text-align: right; }
 .pz-price { text-align: right; font-weight: var(--font-bold); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pz-price small { display: block; font-size: 11px; font-weight: var(--font-medium); color: var(--color-warning); }
+
+/* Phone: results are Name (+ SKU / barcode underneath) and Price only */
 @media (max-width: 640px) {
-  .pz-dd-head, .pz-dd-row { grid-template-columns: 92px minmax(0, 1fr) 88px; gap: var(--space-2); padding: 0 var(--space-3); }
+  .pz-dd { max-height: min(52vh, 420px); }
+  .pz-dd-head, .pz-dd-row { grid-template-columns: minmax(0, 1fr) 96px; gap: var(--space-2); padding-left: var(--space-3); padding-right: var(--space-3); }
+  .pz-dd-head > span:first-child, .pz-dd-row > .pz-mono { display: none; }
+  .pz-dd-bc { display: inline; }
 }
 
 /* ------------------------------------------------------------ main area -- */
@@ -230,8 +269,10 @@ body.pz-focus-on { overflow: hidden; }
   grid-template-columns: minmax(0, 1fr) var(--pz-summary-w);
   gap: var(--space-3);
 }
+/* Below desktop: ticket on top, summary bar underneath and pinned to the bottom */
 @media (max-width: 1023px) {
-  .pz-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .pz-main { display: flex; flex-direction: column; gap: var(--space-2); min-height: 400px; }
+  .pz-ticketwrap { flex: 1 1 auto; min-height: 220px; }
 }
 
 /* ------------------------------------------------------------- ticket ---- */
@@ -283,6 +324,8 @@ body.pz-focus-on { overflow: hidden; }
   .pz-c-bc { display: none; }
   .pz-name-bc { display: block !important; }
 }
+/* "@ unit price" under the subtotal - only used where the price column is gone */
+.pz-unit { display: none; }
 
 .pz-empty { padding: var(--space-12, 4rem) var(--space-5); text-align: center; color: var(--color-text-muted); font-size: var(--text-sm); line-height: 1.6; }
 .pz-empty i { display: block; font-size: 2.6rem; margin-bottom: var(--space-3); opacity: 0.35; }
@@ -320,26 +363,50 @@ body.pz-focus-on { overflow: hidden; }
 .pz-x { width: 32px; height: 32px; border: none; background: transparent; border-radius: var(--radius-sm); color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
 .pz-x:hover { background: var(--color-danger-bg); color: var(--color-danger); }
 
-/* --------------------------------------------- narrow screens: 2-line row -- */
+/* ------------------------------------- below desktop: 2-line ticket row ---
+   line 1:  Product name .............................. [x]
+   line 2:  [ - qty + ]  [Disc 0]  ................ subtotal
+                                                   @ unit price            */
 @media (max-width: 1023px) {
   .pz-hgroup, .pz-hlabels { display: none; }
   .pz-tr {
     height: auto;
     padding: 8px var(--space-3);
-    grid-template-columns: auto 74px minmax(0, 1fr) 34px;
-    grid-template-areas: "name name price x" "qty disc sub sub";
+    grid-template-columns: auto 84px minmax(0, 1fr) 34px;
+    grid-template-areas: "name name name x" "qty disc sub sub";
     gap: 6px var(--space-2);
     align-items: center;
   }
   .pz-left, .pz-rgt { display: contents; }
-  .pz-c-no, .pz-c-bc { display: none; }
-  .pz-c-name { grid-area: name; }
-  .pz-c-price { grid-area: price; }
-  .pz-c-x { grid-area: x; }
+  .pz-c-no, .pz-c-bc, .pz-c-price { display: none; }
+  .pz-c-name { grid-area: name; min-width: 0; }
+  .pz-c-x { grid-area: x; align-self: start; width: 34px; height: 34px; }
   .pz-c-qty { grid-area: qty; }
   .pz-c-disc { grid-area: disc; }
-  .pz-c-sub { grid-area: sub; }
-  .pz-tfoot { min-height: 44px; }
+  .pz-c-sub { grid-area: sub; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; line-height: 1.15; min-width: 0; }
+  .pz-unit { display: block; font-size: 11px; font-weight: var(--font-medium); color: var(--color-text-muted); }
+  .pz-unit.changed { color: var(--color-warning); }
+
+  .pz-stepper button { width: 38px; height: 40px; }
+  .pz-stepper input { width: 40px; height: 40px; font-size: 16px; }
+  .pz-disc { height: 40px; }
+  .pz-disc::before { content: 'Disc '; font-weight: var(--font-medium); font-size: 11px; opacity: 0.8; }
+
+  .pz-tfoot { min-height: 42px; padding: 4px var(--space-3); }
+  .pz-empty { padding: var(--space-8, 2rem) var(--space-4); }
+  .pz-empty i { font-size: 2rem; margin-bottom: var(--space-2); }
+}
+/* The barcode line is useful on tablets, not on phones */
+@media (max-width: 640px) {
+  .pz-name-bc { display: none !important; }
+  .pz-empty br { display: none; }
+}
+/* 360px and narrower phones: tighten the controls so the subtotal never clips */
+@media (max-width: 370px) {
+  .pz-tr { grid-template-columns: auto 74px minmax(0, 1fr) 34px; padding-left: var(--space-2); padding-right: var(--space-2); }
+  .pz-stepper button { width: 34px; }
+  .pz-stepper input { width: 36px; }
+  .pz-sub { font-size: var(--text-base); }
 }
 
 /* ------------------------------------------------------------- summary --- */
@@ -365,20 +432,36 @@ body.pz-focus-on { overflow: hidden; }
 .pz-pay-btn { height: 62px; font-size: var(--text-lg); width: 100%; flex-direction: column; gap: 0; line-height: 1.2; }
 .pz-pay-btn small { font-size: var(--text-xs); font-weight: var(--font-medium); opacity: 0.85; }
 
+/* Below desktop: two slim rows, pinned to the bottom of the screen
+   row 1: [ customer ............ ] [ discount ]
+   row 2: Total to pay ................. KES 1,250.00
+   row 3: [        Add payment to complete sale        ]                    */
 @media (max-width: 1023px) {
+  .pz-summary {
+    flex: 0 0 auto;
+    overflow: visible;
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    box-shadow: 0 -6px 18px rgba(16, 24, 40, 0.10);
+  }
   .pz-sum-head, .pz-sum-lines { display: none; }
-  .pz-summary { overflow: visible; }
-  .pz-sum-body { flex: 0 0 auto; flex-direction: row; align-items: flex-end; padding: var(--space-2) var(--space-3); overflow: visible; }
-  .pz-sum-body > .btn { flex: 1 1 0; min-width: 0; }
-  .pz-sum-body > .field { flex: 0 0 132px; }
-  .pz-cart-foot { display: flex; align-items: stretch; gap: var(--space-3); padding: var(--space-2) var(--space-3); }
-  .pz-total { flex: 1 1 0; margin: 0; padding: var(--space-2) var(--space-3); min-width: 0; }
-  .pz-total-amount { font-size: clamp(1.5rem, 6vw, 2.2rem); }
-  .pz-pay-btn { flex: 1 1 0; height: auto; min-height: 56px; font-size: var(--text-md); }
+  .pz-sum-body { flex: 0 0 auto; flex-direction: row; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); overflow: visible; }
+  .pz-sum-body > .btn { flex: 1 1 0; min-width: 0; height: 42px; }
+  .pz-sum-body > .field { position: relative; flex: 0 0 132px; }
+  .pz-sum-body .input { height: 42px; font-size: 16px; }
+  /* the label is replaced by the input's placeholder; keep it for screen readers */
+  .pz-sum-body .field label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  .pz-cart-foot { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-3); }
+  .pz-total { margin: 0; padding: 8px var(--space-3); flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-3); text-align: left; }
+  .pz-total-label { align-self: auto; flex-direction: column; justify-content: flex-start; gap: 0; font-size: var(--text-xs); line-height: 1.3; }
+  .pz-total-amount { font-size: clamp(1.4rem, 6.5vw, 2rem); text-align: right; white-space: nowrap; overflow-wrap: normal; }
+  .pz-pay-btn { flex: 0 0 auto; height: 52px; min-height: 0; font-size: var(--text-md); }
   .pz-pay-btn small { display: none; }
 }
-@media (max-width: 420px) {
-  .pz-sum-body > .field { flex-basis: 108px; }
+@media (max-width: 380px) {
+  .pz-sum-body > .field { flex-basis: 116px; }
 }
 
 /* ------------------------------------------------------ payment modal ---- */
@@ -407,4 +490,68 @@ body.pz-focus-on { overflow: hidden; }
 .pz-note { font-size: var(--text-sm); color: var(--color-text-secondary); padding: var(--space-3) var(--space-4); background: var(--color-bg); border-radius: var(--radius-md); margin-bottom: var(--space-3); }
 .pz-note.warn { background: var(--color-warning-bg); color: var(--color-warning); }
 .pz-complete-btn { min-width: 220px; height: 52px; font-size: var(--text-md); }
-@media (max-width: 480px) { .pz-complete-btn { min-width: 0; flex: 1; } }
+
+/* Phone: the whole payment sheet has to fit above the keyboard-free screen */
+@media (max-width: 560px) {
+  .pz-pay-total { padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); }
+  .pz-pay-total strong { font-size: clamp(1.9rem, 9vw, 2.6rem); }
+  /* all methods in ONE row instead of a tall 2-column grid */
+  .pz-methods { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; margin-bottom: var(--space-3); }
+  .pz-method { height: 60px; gap: 2px; padding: 0 2px; font-size: 11px; border-width: 1.5px; }
+  .pz-method .pz-method-ico { font-size: 1.15rem; height: 22px; }
+  .pz-cash-input { height: 54px !important; font-size: 1.5rem !important; }
+  .pz-quick { gap: 6px; margin-bottom: var(--space-3); }
+  .pz-quick button { flex: 1 1 auto; height: 40px; padding: 0 var(--space-3); font-size: var(--text-sm); }
+  .pz-change { padding: var(--space-3); }
+  .pz-change strong { font-size: clamp(1.7rem, 8vw, 2.4rem); }
+  .pz-complete-btn { min-width: 0; flex: 1; height: 48px; }
+}
+
+/* ------------------------------------------------------ sales history ---- */
+.pz-hist-dates { display: flex; gap: var(--space-2); }
+.pz-hist-dates .input { max-width: 160px; }
+
+@media (max-width: 640px) {
+  .pz-view-history > .card { background: transparent; border: 0; box-shadow: none; }
+  .pz-view-history .toolbar { padding: 0 0 var(--space-2); gap: var(--space-2); }
+  .pz-view-history .toolbar-search { max-width: none; flex: 1 1 100%; min-width: 0; }
+  .pz-hist-dates { flex: 1 1 100%; }
+  .pz-hist-dates .input { max-width: none; flex: 1 1 0; min-width: 0; font-size: 16px; }
+
+  /* Each sale becomes a card:   RCP-0001            KES 1,250.00
+                                 30 Sep, 10:30         [PAID]
+                                 Cashier: Ann        Walk-in
+                                 [            View            ]   */
+  .pz-view-history .table-wrap { border: 0; background: transparent; overflow: visible; border-radius: 0; }
+  .pz-view-history table.table { min-width: 0; display: block; }
+  .pz-view-history table.table thead { display: none; }
+  .pz-view-history table.table tbody { display: block; }
+  .pz-view-history table.table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "r t" "d s" "cs cu" "a a";
+    gap: 4px var(--space-3);
+    align-items: center;
+    padding: var(--space-3);
+    margin-bottom: var(--space-2);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+  .pz-view-history table.table tbody tr:hover { background: var(--color-surface); }
+  .pz-view-history table.table tbody tr td {
+    display: block; padding: 0; border: 0; white-space: normal; min-width: 0;
+  }
+  .pz-view-history table.table tbody tr td:nth-child(1) { grid-area: r; }
+  .pz-view-history table.table tbody tr td:nth-child(2) { grid-area: d; color: var(--color-text-secondary); }
+  .pz-view-history table.table tbody tr td:nth-child(3) { grid-area: cs; }
+  .pz-view-history table.table tbody tr td:nth-child(4) { grid-area: cu; text-align: right; }
+  .pz-view-history table.table tbody tr td:nth-child(5) { grid-area: t; text-align: right; font-size: var(--text-md); }
+  .pz-view-history table.table tbody tr td:nth-child(6) { grid-area: s; text-align: right; }
+  .pz-view-history table.table tbody tr td:nth-child(7) { grid-area: a; display: flex; margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+  .pz-view-history table.table tbody tr td:nth-child(7) .btn { flex: 1; height: 38px; }
+  .pz-view-history table.table tbody tr td[data-label]::before { content: attr(data-label) ': '; color: var(--color-text-muted); font-size: var(--text-xs); }
+  /* the "No sales found" / error row is one wide cell, not a card */
+  .pz-view-history table.table tbody tr.pz-hist-empty { display: block; padding: 0; border: 0; background: transparent; }
+  .pz-view-history .pagination { padding: var(--space-2) 0 var(--space-4); justify-content: center; }
+}
