@@ -280,13 +280,44 @@
 .bottom-nav-item .icon { font-size: 1.15rem; }
 .bottom-nav-item.active { color: var(--color-primary); }
 
+/* Sidebar collapse toggle (button is injected by js/core/sidebar-rail.js).
+   Hidden on mobile where the drawer is used instead. */
+.sidebar-rail-toggle { display: none; }
+
 /* ---- Desktop breakpoint ---- */
 @media (min-width: 960px) {
-  .sidebar { transform: none; position: sticky; }
+  .sidebar { transform: none; position: sticky; top: 0; height: 100vh; transition: width var(--transition-base); overflow: hidden; }
   .sidebar-overlay { display: none !important; }
   .menu-btn.desktop-hidden { display: none; }
   .bottom-nav { display: none; }
   .page-content { padding: var(--space-6) var(--space-8); }
+
+  .sidebar-rail-toggle {
+    display: flex; align-items: center; gap: var(--space-3);
+    width: 100%; margin-bottom: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border); border-radius: var(--radius-md);
+    background: var(--color-surface); color: var(--color-text-secondary);
+    font-size: var(--text-sm); font-weight: var(--font-medium); cursor: pointer;
+  }
+  .sidebar-rail-toggle:hover { background: var(--color-bg); color: var(--color-text); }
+  .sidebar-rail-chevron { flex: 0 0 auto; transition: transform var(--transition-base); }
+
+  /* ---- Compact (icon rail) mode ---- */
+  body.sidebar-rail .sidebar { width: 76px; }
+  body.sidebar-rail .sidebar-brand { font-size: 0; padding: 0; justify-content: center; gap: 0; }
+  body.sidebar-rail .sidebar-brand .logo-mark { font-size: var(--text-sm); }
+  body.sidebar-rail .sidebar-nav { padding-left: var(--space-2); padding-right: var(--space-2); }
+  body.sidebar-rail .sidebar-section-label { display: none; }
+  body.sidebar-rail .sidebar-link { font-size: 0; justify-content: center; gap: 0; padding: var(--space-3) 0; }
+  body.sidebar-rail .sidebar-link .icon,
+  body.sidebar-rail .sidebar-link svg { font-size: 1.15rem; }
+  body.sidebar-rail .sidebar-footer { padding: var(--space-3) var(--space-2); }
+  body.sidebar-rail .sidebar-user { justify-content: center; }
+  body.sidebar-rail .sidebar-user-info { display: none; }
+  body.sidebar-rail .sidebar-rail-toggle { justify-content: center; padding: var(--space-2) 0; }
+  body.sidebar-rail .sidebar-rail-label { display: none; }
+  body.sidebar-rail .sidebar-rail-chevron { transform: rotate(180deg); }
 }
 
 @media (max-width: 959px) {

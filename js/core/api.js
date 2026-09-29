@@ -74,7 +74,16 @@
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
     } catch (networkErr) {
-      throw new ApiError('Could not reach the server. Check your connection.', { code: 'NETWORK_ERROR' });
+      // PWA: when the device itself is offline (installed app opened with no
+      // signal) say so plainly. The error CODE stays NETWORK_ERROR so any
+      // caller that already branches on it keeps working unchanged.
+      const deviceOffline = typeof window.navigator !== 'undefined' && window.navigator.onLine === false;
+      throw new ApiError(
+        deviceOffline
+          ? "You're offline. Reconnect to the internet and try again."
+          : 'Could not reach the server. Check your connection.',
+        { code: 'NETWORK_ERROR' }
+      );
     }
 
     let payload;

@@ -1,38 +1,48 @@
 /**
- * sales.js
- * Two views sharing one page: "New Sale" (the actual POS - product search,
- * cart, payments, checkout) and "Sales History" (list + detail, what an
- * owner/manager uses to review what's been sold). A shift banner sits above
- * both since it affects whether a cash sale can even be rung up.
+ * sales.js  (REDESIGNED POS - full-screen ticket)
  *
- * PRICING NOTE: everything shown while building the cart (line totals, tax,
- * grand total) is a CLIENT-SIDE PREVIEW ONLY, computed with a hard-coded
- * tax-inclusive assumption because the cashier role isn't granted
- * settings.view and so can't fetch the business's real tax configuration.
- * The moment "Complete Sale" is pressed, the backend recomputes every
- * number from the authoritative Product/ProductVariant records and its own
- * tax settings - that response, not this preview, is what actually gets
- * charged and printed on the receipt.
+ * One workspace with two views: "New sale" (the POS) and "Sales history".
  *
- * BARCODE SCANNING: the "New sale" view supports two scan paths (see
- * js/core/barcode-scanner.js) that both funnel into handleScannedCode():
- *   - A hardware/Bluetooth scanner (keyboard-wedge) is picked up globally
- *     while this view is active, so the cashier doesn't need to click into
- *     the search box first.
- *   - Tapping "Scan barcode" opens the camera viewfinder (phone or webcam).
- * Either way, an exact match adds straight to the cart via the existing
- * GET /products/barcode/:barcode lookup - no manual search needed.
+ * LAYOUT
+ *   Top bar  : tabs | shift status (open/close) | cashier + clock | view buttons
+ *   Search   : scan / search bar (+ camera scan button + shortcut hints)
+ *   Ticket   : ONE scrolling grid that takes all the free space. Every row is a
+ *              product, both halves on the same line:
+ *                Products -> # | Barcode | Product name | Price per unit
+ *                Cart     -> Quantity | Discount | Subtotal | remove
+ *   Summary  : customer, cart discount, subtotal/tax, the big TOTAL and the
+ *              single "Add payment to complete sale" button (also F9).
  *
- * M-PESA STK PUSH: when the business has M-PESA enabled (state.flags.mpesaEnabled,
- * fetched alongside the shift), the payment modal offers a "Send prompt"
- * flow instead of a free-text reference field. The reference is NEVER typed
- * by the cashier - it's only known once GET /payments/mpesa/:reference/status
- * confirms SUCCESS. The backend re-verifies this same reference against a
- * server-side MpesaTransaction when the sale is finalized, so a cashier
- * can't fabricate a fake M-PESA payment even if they tamper with the request.
- * Once confirmed, the payment is pushed automatically and, if it fully
- * covers the sale total, checkout fires immediately - no extra clicks,
- * since the money has already moved.
+ * FULL VIEW (default): the workspace is pinned over the whole browser window
+ * so the ticket gets every pixel. The top-bar button switches back to the
+ * normal app layout (sidebar + app bar); the choice is remembered on this
+ * device. A second button uses the browser's real full-screen mode.
+ *
+ * NEW SALE FLOW
+ *   1. Scan or search. A scan adds straight away; a search shows a results list
+ *      (Barcode | Product name | Price per unit) and picking a row adds it.
+ *   2. Added products appear in the ticket. Adjust quantity / discount inline.
+ *   3. ONE button: "Add payment to complete sale" (F9).
+ *   4. The payment window asks how the customer is paying:
+ *        CASH   -> amount received, system shows the CHANGE
+ *        M-PESA -> STK push; once confirmed the sale completes automatically
+ *        BANK / CARD -> optional reference, then Complete sale
+ *        CREDIT -> pick the customer, then Complete sale
+ *   5. Receipt opens after every sale (auto-print requested).
+ *
+ * PRICING NOTE: everything shown while building the cart is a CLIENT-SIDE
+ * PREVIEW (tax-inclusive assumption, cashier lacks settings.view). On
+ * "Complete sale" the backend recomputes everything from Product/Variant
+ * records + real tax settings; that response is what is charged and printed.
+ *
+ * BARCODE SCANNING: hardware scanner (global keyboard-wedge) and the camera
+ * "Scan barcode" button both funnel into handleScannedCode().
+ *
+ * M-PESA: the reference is never typed. It only exists once
+ * GET /payments/mpesa/:reference/status returns SUCCESS, and the backend
+ * re-verifies it against its own MpesaTransaction when the sale is saved.
+ *
+ * SHORTCUTS (new sale view): F2 search | Up/Down pick | Enter add | F9 payment
  */
 (function () {
   const MPESA_FAILURE_LABELS = {
@@ -49,20 +59,46 @@
     failed: 'Payment failed',
   };
 
+  // Font Awesome 6 (free, solid) icon classes - loaded in sales.html
+  const METHODS = [
+    { id: 'CASH', label: 'Cash', ico: 'fa-solid fa-money-bill-wave' },
+    { id: 'MPESA', label: 'M-PESA', ico: 'fa-solid fa-mobile-screen-button' },
+    { id: 'BANK', label: 'Bank', ico: 'fa-solid fa-building-columns' },
+    { id: 'CREDIT', label: 'Credit', ico: 'fa-solid fa-file-invoice-dollar' },
+    { id: 'CARD', label: 'Card', ico: 'fa-solid fa-credit-card' },
+  ];
+
+  const FOCUS_KEY = 'pos.fullView';
+
   const state = {
     view: 'new-sale',
+    focus: true, // "full view": workspace pinned over the whole window
     cart: [], // { product, variant, quantity, discount, overridePriceEnabled, overridePrice }
     customer: null,
     cartDiscount: 0,
-    payments: [], // { method, amount, reference, amountTendered }
+    payments: [], // built when the payment window completes: { method, amount, reference, amountTendered }
+    pendingMpesa: null, // { reference, amount } - confirmed M-PESA money that has not been saved as a sale yet
+    lastAdded: null, // key of the last product added
     currentShift: null,
     flags: { mpesaEnabled: false, etimsEnabled: false },
     history: { page: 1, limit: 10, search: '', from: '', to: '' },
   };
+
+  const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
+  const fm = (n) => window.UI.formatMoney(n);
+  const $ = (id) => document.getElementById(id);
+
   let contentEl;
   let checkoutKey = window.Api.newIdempotencyKey();
   let unsubscribeBranchChange = null;
+  let unsubscribeBranchesLoaded = null;
   let hardwareScannerUnsub = null;
+  let keyHandler = null;
+  let checkingOut = false;
+  let clearSearch = () => {};
+  let outsideHandler = null;
+  let clockTimer = null;
+  let lastScan = { code: '', at: 0 };
 
   document.addEventListener('DOMContentLoaded', init);
 
@@ -70,90 +106,189 @@
     contentEl = window.AppShell.mount({ title: 'Sales' });
     if (!contentEl) return;
 
+    try { state.focus = localStorage.getItem(FOCUS_KEY) !== '0'; } catch { state.focus = true; }
+
     contentEl.innerHTML = pageSkeleton();
-    bindTabs();
+    bindTopbar();
+    applyFocus(state.focus);
+    window.addEventListener('resize', fitRoot);
+
     await Promise.all([loadShift(), renderNewSaleView()]);
 
+    // The branch name arrives after the branch list loads (and may never arrive for roles
+    // without branches.view), so fill it in when it does and whenever the branch changes.
+    unsubscribeBranchesLoaded = window.AppShell.onBranchesLoaded?.(refreshCashierLabel);
+    refreshCashierLabel();
+
     unsubscribeBranchChange = window.AppShell.onBranchChange(async () => {
+      refreshCashierLabel();
       await loadShift();
       if (state.view === 'new-sale') renderNewSaleView();
       else renderHistory();
     });
     window.addEventListener('beforeunload', () => {
       unsubscribeBranchChange?.();
+      unsubscribeBranchesLoaded?.();
       detachHardwareScanner();
+      document.body.classList.remove('pz-focus-on');
     });
   }
 
+  /* ================================================================== *
+   * Workspace shell: top bar, full view, clock
+   * ================================================================== */
   function pageSkeleton() {
     return `
-      <div class="page-header">
-        <div>
-          <h1>Sales</h1>
-          <p>Ring up sales and review what's been sold.</p>
-        </div>
+      <div class="pz-root" id="pz-root">
+        <header class="pz-topbar">
+          <div class="pz-tabs" role="tablist">
+            <button class="pz-tab active" data-view="new-sale" role="tab"><i class="fa-solid fa-cash-register" aria-hidden="true"></i> New sale</button>
+            <button class="pz-tab" data-view="history" role="tab" data-requires-permission="sales.view"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Sales history</button>
+          </div>
+          <div class="pz-shift" id="shift-banner"></div>
+          <div class="pz-top-right">
+            <span class="pz-user" id="pz-user" title="${esc(cashierLabel())}">${esc(cashierLabel())}</span>
+            <span class="pz-clock" id="pz-clock"></span>
+            <button type="button" class="pz-iconbtn" id="pz-focus-btn"></button>
+            <button type="button" class="pz-iconbtn" id="pz-fs-btn" style="${document.fullscreenEnabled ? '' : 'display:none'}"></button>
+          </div>
+        </header>
+        <div class="pz-view" id="view-body"></div>
       </div>
-      <div id="shift-banner"></div>
-      <div class="tabs" style="margin-bottom: var(--space-4)">
-        <button class="tab-btn active" data-view="new-sale">New sale</button>
-        <button class="tab-btn" data-view="history" data-requires-permission="sales.view">Sales history</button>
-      </div>
-      <div id="view-body"></div>
     `;
   }
 
-  function bindTabs() {
-    document.querySelectorAll('.tab-btn').forEach((btn) => {
+  /** "Alvin Kimani / Main Branch" - falls back to just the name while the branch name is unknown. */
+  function cashierLabel() {
+    const name = window.AppShell.getUser()?.name || '';
+    const branch = window.AppShell.getActiveBranchName?.() || '';
+    return [name, branch].filter(Boolean).join(' / ');
+  }
+
+  function refreshCashierLabel() {
+    const el = $('pz-user');
+    if (!el) return;
+    const label = cashierLabel();
+    el.textContent = label;
+    el.title = label;
+  }
+
+  function bindTopbar() {
+    contentEl.querySelectorAll('.pz-tab').forEach((btn) => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+        contentEl.querySelectorAll('.pz-tab').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         state.view = btn.dataset.view;
         if (state.view === 'new-sale') {
           renderNewSaleView();
         } else {
-          detachHardwareScanner(); // scanning only makes sense while ringing up a sale
+          detachHardwareScanner();
           renderHistory();
         }
       });
     });
     window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+
+    $('pz-focus-btn').addEventListener('click', () => applyFocus(!state.focus));
+    $('pz-fs-btn').addEventListener('click', toggleBrowserFullscreen);
+    document.addEventListener('fullscreenchange', renderViewButtons);
+
+    tickClock();
+    clearInterval(clockTimer);
+    clockTimer = setInterval(tickClock, 15000);
+    renderViewButtons();
+  }
+
+  function tickClock() {
+    const el = $('pz-clock');
+    if (!el) { clearInterval(clockTimer); return; }
+    el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function applyFocus(on) {
+    state.focus = !!on;
+    try { localStorage.setItem(FOCUS_KEY, state.focus ? '1' : '0'); } catch { /* private mode - fine */ }
+    $('pz-root')?.classList.toggle('pz-focus', state.focus);
+    document.body.classList.toggle('pz-focus-on', state.focus);
+    renderViewButtons();
+    fitRoot();
+  }
+
+  function renderViewButtons() {
+    const f = $('pz-focus-btn');
+    if (f) {
+      f.classList.toggle('on', state.focus);
+      f.innerHTML = `<i class="fa-solid ${state.focus ? 'fa-down-left-and-up-right-to-center' : 'fa-up-right-and-down-left-from-center'}" aria-hidden="true"></i>`;
+      f.title = state.focus ? 'Show sidebar and app bar' : 'Full view - give the ticket the whole screen';
+      f.setAttribute('aria-label', f.title);
+    }
+    const s = $('pz-fs-btn');
+    if (s) {
+      const on = !!document.fullscreenElement;
+      s.classList.toggle('on', on);
+      s.innerHTML = `<i class="fa-solid ${on ? 'fa-compress' : 'fa-expand'}" aria-hidden="true"></i>`;
+      s.title = on ? 'Leave browser full screen' : 'Browser full screen';
+      s.setAttribute('aria-label', s.title);
+    }
+  }
+
+  function toggleBrowserFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else document.documentElement.requestFullscreen?.().catch(() => window.UI.toast.error('Full screen is not available in this browser'));
+  }
+
+  /** In full view the CSS pins the workspace; otherwise it is sized to the space under the app bar. */
+  function fitRoot() {
+    const root = $('pz-root');
+    if (!root) return;
+    if (state.focus) { root.style.height = ''; return; }
+    const top = root.getBoundingClientRect().top + window.scrollY;
+    root.style.height = `${Math.max(window.innerHeight - top - 12, 520)}px`;
   }
 
   /* ================================================================== *
-   * Barcode scanning (shared by hardware scanner + camera scan button)
+   * Barcode scanning + keyboard shortcuts
    * ================================================================== */
   function attachHardwareScanner() {
     hardwareScannerUnsub?.();
-    if (!window.BarcodeScanner) return;
-    hardwareScannerUnsub = window.BarcodeScanner.listenHardwareScanner(handleScannedCode);
+    if (window.BarcodeScanner) {
+      hardwareScannerUnsub = window.BarcodeScanner.listenHardwareScanner(handleScannedCode);
+    }
+    if (keyHandler) document.removeEventListener('keydown', keyHandler);
+    keyHandler = (e) => {
+      if (state.view !== 'new-sale' || document.querySelector('.modal-backdrop')) return;
+      if (e.key === 'F9') { e.preventDefault(); openPaymentModal(); }
+      if (e.key === 'F2') { e.preventDefault(); $('pos-search')?.focus(); $('pos-search')?.select(); }
+    };
+    document.addEventListener('keydown', keyHandler);
   }
 
   function detachHardwareScanner() {
     hardwareScannerUnsub?.();
     hardwareScannerUnsub = null;
+    if (keyHandler) document.removeEventListener('keydown', keyHandler);
+    keyHandler = null;
+    if (outsideHandler) document.removeEventListener('click', outsideHandler);
+    outsideHandler = null;
   }
 
   async function handleScannedCode(code) {
     if (!code) return;
-    // Don't hijack a scan while some other modal (payment, discount,
-    // customer picker...) is open and legitimately expects its own input.
+    // Don't hijack a scan while a modal (payment, discount, customer...) is open.
     if (document.querySelector('.modal-backdrop')) return;
+    // The same code arriving twice within a blink (scanner + focused search box) is one scan.
+    const now = Date.now();
+    if (code === lastScan.code && now - lastScan.at < 350) return;
+    lastScan = { code, at: now };
 
     try {
       const { data } = await window.Api.get(`/products/barcode/${encodeURIComponent(code.trim())}`);
       addToCart(data.product, data.variant);
-      const label = data.variant
-        ? `${data.product.name} (${Object.values(data.variant.attributes || {}).join(', ')})`
-        : data.product.name;
-      window.UI.toast.success(`${label} added`);
     } catch (err) {
       window.UI.toast.error(err.code === 'BARCODE_NOT_FOUND' ? `No product found for barcode "${code}"` : err.message);
     }
-
-    const searchInput = document.getElementById('pos-search');
-    const resultsEl = document.getElementById('pos-search-results');
-    if (searchInput) searchInput.value = '';
-    if (resultsEl) resultsEl.innerHTML = '<p class="text-sm text-muted" style="padding: var(--space-3)">Start typing to search your catalog.</p>';
+    clearSearch();
+    $('pos-search')?.focus();
   }
 
   /* ================================================================== *
@@ -169,22 +304,19 @@
     ]);
 
     state.currentShift = shiftResult.status === 'fulfilled' ? shiftResult.value.data.shift : null;
-    // Default to disabled rather than throw - a role without payments.view
-    // (shouldn't happen for anyone who can reach this page, but stay safe)
-    // just won't see the M-PESA/eTIMS options.
     state.flags = flagsResult.status === 'fulfilled' ? flagsResult.value.data : { mpesaEnabled: false, etimsEnabled: false };
 
     renderShiftBanner();
   }
 
   function renderShiftBanner() {
-    const el = document.getElementById('shift-banner');
+    const el = $('shift-banner');
     if (!el) return;
 
     if (state.currentShift) {
       el.innerHTML = `
         <div class="shift-banner open">
-          <span>${window.Icons.get('check')} Shift open since ${window.UI.formatDateTime(state.currentShift.openedAt)} - ${window.UI.escapeHtml(state.currentShift.registerId?.name || 'Register')}</span>
+          <span>${window.Icons.get('check')} Shift open since ${window.UI.formatDateTime(state.currentShift.openedAt)} - ${esc(state.currentShift.registerId?.name || 'Register')}</span>
           <button class="btn btn-secondary btn-sm" id="close-shift-btn" data-requires-permission="shifts.close">Close shift</button>
         </div>
       `;
@@ -199,6 +331,7 @@
       el.querySelector('#open-shift-btn').addEventListener('click', openOpenShiftModal);
     }
     window.Permissions.applyPermissionGates(el, window.AppShell.getUser());
+    fitRoot();
   }
 
   async function openOpenShiftModal() {
@@ -235,7 +368,7 @@
         <form id="open-shift-form">
           <div class="field">
             <label>Register</label>
-            <select class="select" name="registerId" required>${registers.map((r) => `<option value="${r._id}">${window.UI.escapeHtml(r.name)} (${window.UI.escapeHtml(r.code)})</option>`).join('')}</select>
+            <select class="select" name="registerId" required>${registers.map((r) => `<option value="${r._id}">${esc(r.name)} (${esc(r.code)})</option>`).join('')}</select>
           </div>
           <div class="field">
             <label>Opening cash float (KES)</label>
@@ -251,7 +384,7 @@
       const form = modal.querySelector('#open-shift-form');
       if (!form.reportValidity()) return;
       const raw = window.UI.serializeForm(form);
-      const btn = document.getElementById('open-shift-save');
+      const btn = $('open-shift-save');
       window.UI.setButtonLoading(btn, true, 'Opening…');
       try {
         await window.Api.post('/shifts/open', { branchId, registerId: raw.registerId, openingCash: raw.openingCash });
@@ -312,7 +445,7 @@
       const form = modal.querySelector('#close-shift-form');
       if (!form.reportValidity()) return;
       const raw = window.UI.serializeForm(form);
-      const btn = document.getElementById('close-shift-save');
+      const btn = $('close-shift-save');
       window.UI.setButtonLoading(btn, true, 'Closing…');
       try {
         const { data } = await window.Api.post(`/shifts/${state.currentShift._id}/close`, { actualCash: raw.actualCash, notes: raw.notes });
@@ -332,11 +465,11 @@
     const modal = window.UI.openModal({
       title: 'Shift summary',
       bodyHtml: `
-        <div class="pos-totals-row"><span>Opening float</span><span>${window.UI.formatMoney(shift.openingCash)}</span></div>
-        <div class="pos-totals-row"><span>Expected cash</span><span>${window.UI.formatMoney(shift.expectedCash)}</span></div>
-        <div class="pos-totals-row"><span>Actual cash counted</span><span>${window.UI.formatMoney(shift.actualCash)}</span></div>
+        <div class="pos-totals-row"><span>Opening float</span><span>${fm(shift.openingCash)}</span></div>
+        <div class="pos-totals-row"><span>Expected cash</span><span>${fm(shift.expectedCash)}</span></div>
+        <div class="pos-totals-row"><span>Actual cash counted</span><span>${fm(shift.actualCash)}</span></div>
         <div class="pos-totals-row grand" style="color:${diff === 0 ? 'var(--color-success)' : 'var(--color-danger)'}">
-          <span>${diff === 0 ? 'Balanced' : diff > 0 ? 'Over' : 'Short'}</span><span>${window.UI.formatMoney(Math.abs(diff))}</span>
+          <span>${diff === 0 ? 'Balanced' : diff > 0 ? 'Over' : 'Short'}</span><span>${fm(Math.abs(diff))}</span>
         </div>
       `,
       footerHtml: `<button class="btn btn-primary" data-action="close">Done</button>`,
@@ -347,54 +480,108 @@
   /* ================================================================== *
    * NEW SALE VIEW
    * ================================================================== */
-  function renderNewSaleView() {
-    const body = document.getElementById('view-body');
-    body.innerHTML = `
-      <div class="pos-layout">
-        <div class="card">
-          <div class="card-body">
-            ${window.BarcodeScanner ? `
-            <div class="pos-scan-row">
-              <button type="button" class="btn btn-primary btn-block" id="pos-scan-btn">
-                ${window.BarcodeScanner.cameraIconSvg} Scan barcode
-              </button>
-              <p class="text-xs text-muted pos-scan-hint">Tap to scan with your camera, or use a connected barcode scanner - it's picked up automatically.</p>
-            </div>
-            ` : ''}
-            <div class="field" style="margin-bottom: var(--space-3)">
-              <div class="input-group">
-                <span class="input-group-icon">${window.Icons.get('search')}</span>
-                <input class="input" id="pos-search" type="text" placeholder="Search products by name, SKU, or barcode" autofocus />
-              </div>
-            </div>
-            <div class="pos-search-results" id="pos-search-results"></div>
-          </div>
-        </div>
+  function barcodeOf(product, variant) {
+    return (variant && variant.barcode) || product.barcode || '';
+  }
+  function nameOf(product, variant) {
+    const attrs = variant ? Object.values(variant.attributes || {}).join(', ') : '';
+    return attrs ? `${product.name} (${attrs})` : product.name;
+  }
+  function unitPriceOf(item) {
+    if (item.overridePriceEnabled && item.overridePrice != null) return item.overridePrice;
+    return item.variant ? item.variant.sellingPrice : item.product.sellingPrice;
+  }
 
-        <div class="card pos-cart-panel">
-          <div class="card-header">
-            <h3>Cart</h3>
-            <button class="btn btn-ghost btn-sm" id="clear-cart-btn">Clear</button>
+  function renderNewSaleView() {
+    const body = $('view-body');
+    body.className = 'pz-view pz-view-pos';
+    body.innerHTML = `
+      <div class="card pz-searchbar">
+        <div class="pz-search-row">
+          <div class="pz-searchwrap" id="pz-searchwrap">
+            <div class="input-group">
+              <span class="input-group-icon">${window.Icons.get('search')}</span>
+              <input class="input" id="pos-search" type="text" autocomplete="off" autofocus placeholder="Scan a barcode or search a product by name / SKU" />
+            </div>
+            <div class="pz-dd" id="pz-dd" role="listbox"></div>
           </div>
-          <div class="card-body" id="cart-body"></div>
+          ${window.BarcodeScanner ? `
+            <button type="button" class="btn btn-primary pz-scan-btn" id="pos-scan-btn">
+              ${window.BarcodeScanner.cameraIconSvg} <span class="pz-scan-label">Scan barcode</span>
+            </button>` : ''}
+          <div class="pz-keys" aria-hidden="true">
+            <span><kbd class="kbd">F2</kbd> search</span>
+            <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> pick</span>
+            <span><kbd class="kbd">Enter</kbd> add</span>
+            <span><kbd class="kbd">F9</kbd> payment</span>
+          </div>
         </div>
+      </div>
+
+      <div class="pz-main">
+        <section class="card pz-ticketwrap" aria-label="Ticket">
+          <div class="pz-hr pz-hgroup">
+            <div class="pz-left"><h3>Products</h3></div>
+            <div class="pz-rgt"><h3>Cart <span class="pz-count" id="pz-count">0</span></h3></div>
+          </div>
+          <div class="pz-hr pz-hlabels">
+            <div class="pz-left"><span>#</span><span class="pz-c-bc">Barcode</span><span>Product name</span><span class="pz-right">Price per unit</span></div>
+            <div class="pz-rgt"><span>Quantity</span><span>Discount</span><span class="pz-right">Subtotal</span><span></span></div>
+          </div>
+          <div class="pz-tbody" id="pz-ticket"></div>
+          <div class="pz-tfoot">
+            <div class="pz-tfoot-stats" id="pz-products-foot"></div>
+            <button class="btn btn-ghost btn-sm" id="clear-cart-btn"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Clear all</button>
+          </div>
+        </section>
+
+        <aside class="card pz-summary" aria-label="Sale summary">
+          <div class="pz-sum-head"><h3>Sale summary</h3></div>
+          <div class="pz-sum-body">
+            <button class="btn btn-secondary" id="pick-customer-btn"></button>
+            <div class="field">
+              <label for="cart-discount-input">Cart discount (KES)</label>
+              <input class="input" id="cart-discount-input" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0" value="${state.cartDiscount || ''}" />
+            </div>
+            <div class="pz-sum-lines" id="pz-sum-lines"></div>
+          </div>
+          <div class="pz-cart-foot" id="pz-cart-foot"></div>
+        </aside>
       </div>
     `;
 
     bindProductSearch();
     bindScanButton();
+    bindTicketEvents();
     renderCart();
-    document.getElementById('clear-cart-btn').addEventListener('click', async () => {
+
+    $('clear-cart-btn').addEventListener('click', async () => {
       if (!state.cart.length) return;
       const ok = await window.UI.confirmDialog({ title: 'Clear cart?', confirmText: 'Clear', danger: true });
       if (ok) resetCart();
     });
+    $('cart-discount-input').addEventListener('input', (e) => {
+      state.cartDiscount = Math.max(Number(e.target.value) || 0, 0);
+      renderTotals();
+    });
+    $('pick-customer-btn').addEventListener('click', () => {
+      window.CustomerPicker.open({ onSelect: (customer) => { state.customer = customer; renderCustomerButton(); } });
+    });
 
     attachHardwareScanner();
+    fitRoot();
+    $('pos-search')?.focus();
+  }
+
+  function renderCustomerButton() {
+    const b = $('pick-customer-btn');
+    if (!b) return;
+    b.innerHTML = `${window.Icons.get('employees')} ${state.customer ? esc(state.customer.name) : 'Walk-in customer'}`;
+    b.title = state.customer ? 'Change customer' : 'Tap to add a customer (needed for credit)';
   }
 
   function bindScanButton() {
-    document.getElementById('pos-scan-btn')?.addEventListener('click', () => {
+    $('pos-scan-btn')?.addEventListener('click', () => {
       window.BarcodeScanner.openCameraModal({
         title: 'Scan product barcode',
         onDetect: (code) => handleScannedCode(code),
@@ -402,65 +589,109 @@
     });
   }
 
+  /* ---- Search: results only exist while the cashier is searching ---- */
   function bindProductSearch() {
-    const input = document.getElementById('pos-search');
-    const resultsEl = document.getElementById('pos-search-results');
+    const input = $('pos-search');
+    const dd = $('pz-dd');
+    let rows = [];
+    let active = 0;
+    let seq = 0;
+
+    const close = () => { dd.classList.remove('open'); dd.innerHTML = ''; rows = []; active = 0; };
+    clearSearch = () => { seq += 1; input.value = ''; close(); };
+
+    function setActive(n) {
+      active = n;
+      dd.querySelectorAll('.pz-dd-row').forEach((r, i) => r.classList.toggle('active', i === active));
+      dd.querySelector('.pz-dd-row.active')?.scrollIntoView({ block: 'nearest' });
+    }
+
+    function render(term, loading) {
+      dd.classList.add('open');
+      if (loading) { dd.innerHTML = '<div class="pz-dd-msg">Searching…</div>'; return; }
+      if (!rows.length) { dd.innerHTML = `<div class="pz-dd-msg">No product found for “${esc(term)}”</div>`; return; }
+      dd.innerHTML = `
+        <div class="pz-dd-head"><span>Barcode</span><span>Product name</span><span class="pz-right">Price per unit</span></div>
+        ${rows.map((r, i) => `
+          <div class="pz-dd-row ${i === active ? 'active' : ''}" data-idx="${i}" role="option">
+            <span class="pz-mono">${esc(barcodeOf(r.product, r.variant)) || '-'}</span>
+            <span class="pz-name">${esc(nameOf(r.product, r.variant))}<small>SKU ${esc(r.variant ? r.variant.sku : r.product.sku)}</small></span>
+            <span class="pz-price">${fm(r.variant ? r.variant.sellingPrice : r.product.sellingPrice)}</span>
+          </div>`).join('')}
+      `;
+      dd.querySelectorAll('.pz-dd-row').forEach((el) => {
+        el.addEventListener('mouseenter', () => setActive(Number(el.dataset.idx)));
+        el.addEventListener('click', () => pick(Number(el.dataset.idx)));
+      });
+    }
+
+    function pick(i) {
+      const r = rows[i];
+      if (!r) return;
+      addToCart(r.product, r.variant);
+      clearSearch();
+      input.focus();
+    }
 
     async function runSearch(term) {
-      if (!term) { resultsEl.innerHTML = '<p class="text-sm text-muted" style="padding: var(--space-3)">Start typing to search your catalog.</p>'; return; }
-      resultsEl.innerHTML = window.UI.skeletonRows(1, 4);
+      const my = ++seq;
+      render(term, true);
       try {
-        const { data } = await window.Api.get('/products', { search: term, limit: 20, status: 'active' });
-        renderSearchResults(data.items);
-      } catch (err) {
-        resultsEl.innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Search failed', message: err.message });
-      }
-    }
-
-    function renderSearchResults(items) {
-      if (!items.length) {
-        resultsEl.innerHTML = window.UI.emptyStateHtml({ icon: 'products', title: 'No products found' });
-        return;
-      }
-      const rows = [];
-      items.forEach((product) => {
-        if (product.variants?.length) {
-          product.variants.forEach((v) => rows.push({ product, variant: v }));
-        } else {
-          rows.push({ product, variant: null });
-        }
-      });
-      resultsEl.innerHTML = rows.map((r, i) => `
-        <div class="pos-product-card" data-idx="${i}">
-          <span>
-            <div class="font-semibold text-sm">${window.UI.escapeHtml(r.product.name)}${r.variant ? ` <span class="text-muted">(${Object.values(r.variant.attributes || {}).join(', ')})</span>` : ''}</div>
-            <div class="text-xs text-muted">${window.UI.escapeHtml(r.variant ? r.variant.sku : r.product.sku)}</div>
-          </span>
-          <span class="font-semibold">${window.UI.formatMoney(r.variant ? r.variant.sellingPrice : r.product.sellingPrice)}</span>
-        </div>
-      `).join('');
-      resultsEl.querySelectorAll('.pos-product-card').forEach((card) => {
-        card.addEventListener('click', () => {
-          const r = rows[Number(card.dataset.idx)];
-          addToCart(r.product, r.variant);
+        const { data } = await window.Api.get('/products', { search: term, limit: 15, status: 'active' });
+        if (my !== seq) return rows;
+        rows = [];
+        (data.items || []).forEach((product) => {
+          if (product.variants?.length) product.variants.forEach((v) => rows.push({ product, variant: v }));
+          else rows.push({ product, variant: null });
         });
-      });
+        active = 0;
+        render(term, false);
+      } catch (err) {
+        if (my !== seq) return rows;
+        rows = [];
+        dd.classList.add('open');
+        dd.innerHTML = `<div class="pz-dd-msg">Search failed: ${esc(err.message)}</div>`;
+      }
+      return rows;
     }
 
-    input.addEventListener('input', window.UI.debounce((e) => runSearch(e.target.value.trim()), 300));
-    runSearch('');
+    const debounced = window.UI.debounce((term) => runSearch(term), 250);
+    input.addEventListener('input', (e) => {
+      const term = e.target.value.trim();
+      if (!term) { seq += 1; close(); return; }
+      debounced(term);
+    });
+
+    input.addEventListener('keydown', async (e) => {
+      if (e.key === 'Escape') { clearSearch(); return; }
+      if (e.key === 'ArrowDown' && rows.length) { e.preventDefault(); setActive(Math.min(active + 1, rows.length - 1)); return; }
+      if (e.key === 'ArrowUp' && rows.length) { e.preventDefault(); setActive(Math.max(active - 1, 0)); return; }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const term = input.value.trim();
+      if (!term) return;
+      // A long all-digit entry is a barcode (typed or wedge-scanned): same lookup as the scanner.
+      if (/^\d{6,}$/.test(term)) { handleScannedCode(term); return; }
+      if (!rows.length || dd.querySelector('.pz-dd-msg')) await runSearch(term);
+      pick(active);
+    });
+
+    // click outside closes the results
+    if (outsideHandler) document.removeEventListener('click', outsideHandler);
+    outsideHandler = (e) => { if (!e.target.closest('#pz-searchwrap')) close(); };
+    document.addEventListener('click', outsideHandler);
   }
 
   /* ---- Cart operations ---- */
+  function keyOf(item) { return item.variant ? item.variant._id : item.product._id; }
+
   function addToCart(product, variant) {
     const key = variant ? variant._id : product._id;
-    const existing = state.cart.find((i) => (i.variant ? i.variant._id : i.product._id) === key);
-    if (existing) {
-      existing.quantity += 1;
-    } else {
-      state.cart.push({ product, variant, quantity: 1, discount: 0, overridePriceEnabled: false, overridePrice: null });
-    }
-    renderCart();
+    const existing = state.cart.find((i) => keyOf(i) === key);
+    if (existing) existing.quantity += 1;
+    else state.cart.push({ product, variant, quantity: 1, discount: 0, overridePriceEnabled: false, overridePrice: null });
+    state.lastAdded = key;
+    renderCart(key); // scrolls the new / updated row into view
   }
 
   function round2(n) { return Math.round(n * 100) / 100; }
@@ -473,116 +704,164 @@
     return { gross, net, tax, total: net };
   }
 
-  /** Same totals math as renderCart's inline calc, factored out so both the render and the auto-checkout logic use one source of truth. */
   function computeTotals() {
-    let subtotal = 0, itemDiscountTotal = 0;
+    let subtotal = 0, itemDiscountTotal = 0, tax = 0, itemCount = 0;
     state.cart.forEach((item) => {
-      const unitPrice = item.overridePriceEnabled && item.overridePrice != null ? item.overridePrice : (item.variant ? item.variant.sellingPrice : item.product.sellingPrice);
+      const unitPrice = unitPriceOf(item);
       subtotal += round2(unitPrice * item.quantity);
       itemDiscountTotal += item.discount || 0;
+      tax += previewLine(unitPrice, item.quantity, item.discount, item.product.taxRate).tax;
+      itemCount += item.quantity;
     });
-    const total = round2(subtotal - itemDiscountTotal - (state.cartDiscount || 0));
-    const paidSoFar = round2(state.payments.reduce((s, p) => s + p.amount, 0));
-    return { subtotal, itemDiscountTotal, total, paidSoFar, balance: round2(total - paidSoFar) };
+    const total = Math.max(round2(subtotal - itemDiscountTotal - (state.cartDiscount || 0)), 0);
+    return { subtotal: round2(subtotal), itemDiscountTotal: round2(itemDiscountTotal), tax: round2(tax), itemCount, total };
   }
 
-  function renderCart() {
-    const el = document.getElementById('cart-body');
+  function renderCart(flashKey) {
+    renderTicket(flashKey);
+    renderCustomerButton();
+    renderTotals();
+  }
+
+  /* One row per product: Products half (# | Barcode | Name | Price) and Cart half (Qty | Discount | Subtotal | x) */
+  function renderTicket(flashKey) {
+    const el = $('pz-ticket');
     if (!el) return;
+    const foot = $('pz-products-foot');
+    const clearBtn = $('clear-cart-btn');
+    if (clearBtn) clearBtn.disabled = !state.cart.length;
 
     if (!state.cart.length) {
-      el.innerHTML = window.UI.emptyStateHtml({ icon: 'sales', title: 'Cart is empty', message: 'Search or scan a product to add it.' });
+      el.innerHTML = `<div class="pz-empty"><i class="fa-solid fa-barcode" aria-hidden="true"></i><strong>No products yet</strong>Scan a barcode or search above.<br/>Every product you add lands here with its quantity, discount and subtotal on the same line.</div>`;
+      if (foot) foot.innerHTML = '<span>Nothing scanned yet</span>';
       return;
     }
 
-    let tax = 0;
-    const lines = state.cart.map((item) => {
-      const unitPrice = item.overridePriceEnabled && item.overridePrice != null ? item.overridePrice : (item.variant ? item.variant.sellingPrice : item.product.sellingPrice);
-      const preview = previewLine(unitPrice, item.quantity, item.discount, item.product.taxRate);
-      tax += preview.tax;
-      return { item, unitPrice, preview };
-    });
-    const { subtotal, itemDiscountTotal, total, paidSoFar, balance } = computeTotals();
-
-    el.innerHTML = `
-      <div class="cart-items-list" id="cart-items"></div>
-      <div class="cart-section" id="cart-customer-row">
-        <button class="btn btn-secondary btn-sm btn-block" id="pick-customer-btn">
-          ${window.Icons.get('employees')} ${state.customer ? window.UI.escapeHtml(state.customer.name) : 'Walk-in customer (add one for credit)'}
-        </button>
-      </div>
-      <div class="field cart-section" id="cart-discount-row">
-        <label class="text-xs">Cart discount (KES)</label>
-        <input class="input" id="cart-discount-input" type="number" step="0.01" min="0" value="${state.cartDiscount || ''}" placeholder="0" />
-      </div>
-
-      <div class="pos-totals-row"><span>Subtotal</span><span>${window.UI.formatMoney(subtotal)}</span></div>
-      ${itemDiscountTotal ? `<div class="pos-totals-row"><span>Item discounts</span><span>-${window.UI.formatMoney(itemDiscountTotal)}</span></div>` : ''}
-      ${state.cartDiscount ? `<div class="pos-totals-row"><span>Cart discount</span><span>-${window.UI.formatMoney(state.cartDiscount)}</span></div>` : ''}
-      <div class="pos-totals-row"><span>Tax (est.)</span><span>${window.UI.formatMoney(tax)}</span></div>
-      <div class="pos-totals-row grand"><span>Total</span><span>${window.UI.formatMoney(total)}</span></div>
-
-      <div class="cart-section">
-        <div class="flex items-center justify-between" style="margin-bottom: var(--space-2)">
-          <label class="text-xs font-semibold">Payments</label>
-          <button class="btn btn-ghost btn-sm" id="add-payment-btn">${window.Icons.get('plus')} Add payment</button>
-        </div>
-        <div id="payments-list"></div>
-        <div class="pos-totals-row"><span>Paid</span><span>${window.UI.formatMoney(paidSoFar)}</span></div>
-        <div class="pos-totals-row" style="color: ${balance > 0 ? 'var(--color-warning)' : 'var(--color-text)'}"><span>Balance${balance > 0 ? ' (credit)' : ''}</span><span>${window.UI.formatMoney(Math.max(balance, 0))}</span></div>
-      </div>
-
-      <button class="btn btn-primary btn-block btn-lg" id="checkout-btn" style="margin-top: var(--space-4)">
-        Complete sale - ${window.UI.formatMoney(total)}
-      </button>
-    `;
-
-    renderCartItems(lines);
-    renderPaymentsList();
-
-    document.getElementById('cart-discount-input').addEventListener('change', (e) => {
-      state.cartDiscount = Number(e.target.value) || 0;
-      renderCart();
-    });
-    document.getElementById('pick-customer-btn').addEventListener('click', () => {
-      window.CustomerPicker.open({ onSelect: (customer) => { state.customer = customer; renderCart(); } });
-    });
-    document.getElementById('add-payment-btn').addEventListener('click', () => openAddPaymentModal(balance > 0 ? balance : total));
-    document.getElementById('checkout-btn').addEventListener('click', checkout);
-  }
-
-  function renderCartItems(lines) {
-    const el = document.getElementById('cart-items');
-    el.innerHTML = lines.map(({ item, unitPrice, preview }, i) => `
-      <div class="pos-cart-item">
-        <div class="pos-cart-item-info">
-          <div class="font-semibold text-sm pos-cart-item-name">${window.UI.escapeHtml(item.product.name)}${item.variant ? ` <span class="text-muted">(${Object.values(item.variant.attributes || {}).join(', ')})</span>` : ''}</div>
-          <div class="text-xs text-muted">${window.UI.formatMoney(unitPrice)} each${item.discount ? ` &middot; -${window.UI.formatMoney(item.discount)}` : ''}</div>
-          <div class="pos-qty-control">
-            <div class="pos-qty-stepper">
+    const scrollTop = el.scrollTop;
+    const canOverride = window.Permissions.can(window.AppShell.getUser(), 'sales.price_override');
+    el.innerHTML = state.cart.map((item, i) => {
+      const k = keyOf(item);
+      const cls = `${k === state.lastAdded ? 'latest' : ''} ${k === flashKey ? 'flash' : ''}`;
+      const unit = unitPriceOf(item);
+      const preview = previewLine(unit, item.quantity, item.discount, item.product.taxRate);
+      const bc = barcodeOf(item.product, item.variant);
+      const d = item.discount || 0;
+      return `
+        <div class="pz-tr ${cls}" data-idx="${i}" data-key="${esc(k)}">
+          <div class="pz-left">
+            <span class="pz-c-no">${i + 1}</span>
+            <span class="pz-c-bc pz-mono">${esc(bc) || '-'}</span>
+            <span class="pz-c-name pz-name">${esc(nameOf(item.product, item.variant))}${bc ? `<small class="pz-name-bc">${esc(bc)}</small>` : ''}</span>
+            <span class="pz-c-price pz-price">@ ${fm(unit)}${item.overridePriceEnabled ? '<small>price changed</small>' : ''}</span>
+          </div>
+          <div class="pz-rgt">
+            <div class="pz-c-qty pz-stepper">
               <button type="button" data-action="dec" data-idx="${i}" aria-label="Decrease quantity">−</button>
-              <span class="pos-qty-value">${item.quantity}</span>
+              <input type="number" inputmode="numeric" min="0" step="1" value="${item.quantity}" data-action="qty" data-idx="${i}" aria-label="Quantity" />
               <button type="button" data-action="inc" data-idx="${i}" aria-label="Increase quantity">+</button>
             </div>
-            <button type="button" class="btn btn-ghost btn-sm pos-discount-btn" data-action="discount" data-idx="${i}">Discount</button>
+            <button type="button" class="pz-c-disc pz-disc ${d ? 'has' : ''}" data-action="discount" data-idx="${i}" title="Tap to set a discount${canOverride ? ' or change the price' : ''}">${d ? Number(d).toLocaleString() : '0'}</button>
+            <div class="pz-c-sub pz-sub">${fm(preview.total)}</div>
+            <button type="button" class="pz-c-x pz-x" data-action="remove" data-idx="${i}" aria-label="Remove item">${window.Icons.get('close')}</button>
           </div>
-        </div>
-        <div class="pos-cart-item-side">
-          <span class="font-semibold text-sm">${window.UI.formatMoney(preview.total)}</span>
-          <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="remove" data-idx="${i}" aria-label="Remove item">${window.Icons.get('trash')}</button>
-        </div>
-      </div>
-    `).join('');
+        </div>`;
+    }).join('');
+    el.scrollTop = scrollTop;
+    if (flashKey) el.querySelector('.pz-tr.flash')?.scrollIntoView({ block: 'nearest' });
 
-    el.querySelectorAll('[data-action="inc"]').forEach((b) => b.addEventListener('click', () => { state.cart[Number(b.dataset.idx)].quantity += 1; renderCart(); }));
-    el.querySelectorAll('[data-action="dec"]').forEach((b) => b.addEventListener('click', () => {
+    if (foot) {
+      const { itemCount } = computeTotals();
+      foot.innerHTML = `<span><strong>${state.cart.length}</strong> product${state.cart.length === 1 ? '' : 's'}</span><span><strong>${itemCount}</strong> unit${itemCount === 1 ? '' : 's'}</span>`;
+    }
+  }
+
+  /* Ticket events are delegated once per render of the view (rows are rebuilt on every change). */
+  function bindTicketEvents() {
+    const el = $('pz-ticket');
+
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-action]');
+      if (!b) return;
       const idx = Number(b.dataset.idx);
-      state.cart[idx].quantity -= 1;
-      if (state.cart[idx].quantity <= 0) state.cart.splice(idx, 1);
+      const item = state.cart[idx];
+      if (!item) return;
+      switch (b.dataset.action) {
+        case 'inc':
+          item.quantity += 1;
+          renderCart();
+          break;
+        case 'dec':
+          item.quantity -= 1;
+          if (item.quantity <= 0) state.cart.splice(idx, 1);
+          renderCart();
+          break;
+        case 'remove':
+          state.cart.splice(idx, 1);
+          renderCart();
+          $('pos-search')?.focus();
+          break;
+        case 'discount':
+          openLineDiscountModal(idx);
+          break;
+        default:
+      }
+    });
+
+    el.addEventListener('change', (e) => {
+      const inp = e.target.closest('input[data-action="qty"]');
+      if (!inp) return;
+      const idx = Number(inp.dataset.idx);
+      const n = Math.floor(Number(inp.value));
+      if (!Number.isFinite(n) || n <= 0) state.cart.splice(idx, 1);
+      else if (state.cart[idx]) state.cart[idx].quantity = n;
       renderCart();
-    }));
-    el.querySelectorAll('[data-action="remove"]').forEach((b) => b.addEventListener('click', () => { state.cart.splice(Number(b.dataset.idx), 1); renderCart(); }));
-    el.querySelectorAll('[data-action="discount"]').forEach((b) => b.addEventListener('click', () => openLineDiscountModal(Number(b.dataset.idx))));
+      // Hand the keyboard back to the search box unless the cashier clicked into something else.
+      setTimeout(() => {
+        if (!document.activeElement || document.activeElement === document.body) $('pos-search')?.focus();
+      }, 0);
+    });
+
+    el.addEventListener('focusin', (e) => {
+      if (e.target.matches('input[data-action="qty"]')) e.target.select();
+    });
+
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.matches('input[data-action="qty"]')) {
+        e.preventDefault();
+        e.target.blur(); // fires "change", which re-renders and refocuses the search box
+        $('pos-search')?.focus();
+      }
+    });
+  }
+
+  function renderTotals() {
+    const foot = $('pz-cart-foot');
+    if (!foot) return;
+    const { subtotal, itemDiscountTotal, tax, itemCount, total } = computeTotals();
+    const discounts = round2(itemDiscountTotal + (state.cartDiscount || 0));
+    const countEl = $('pz-count');
+    if (countEl) countEl.textContent = itemCount;
+
+    const lines = $('pz-sum-lines');
+    if (lines) {
+      lines.innerHTML = `
+        <div class="pz-mini"><span>Subtotal</span><span>${fm(subtotal)}</span></div>
+        ${discounts ? `<div class="pz-mini"><span>Discounts</span><span>-${fm(discounts)}</span></div>` : ''}
+        <div class="pz-mini"><span>Tax (est.)</span><span>${fm(tax)}</span></div>
+      `;
+    }
+
+    foot.innerHTML = `
+      <div class="pz-total" aria-live="polite">
+        <div class="pz-total-label"><span>Total to pay</span><span>${itemCount} unit${itemCount === 1 ? '' : 's'}</span></div>
+        <div class="pz-total-amount">${fm(total)}</div>
+      </div>
+      <button class="btn btn-success pz-pay-btn" id="checkout-btn" ${state.cart.length ? '' : 'disabled'}>
+        Add payment to complete sale
+        <small>Press F9</small>
+      </button>
+    `;
+    $('checkout-btn').addEventListener('click', () => openPaymentModal());
   }
 
   function openLineDiscountModal(idx) {
@@ -613,7 +892,7 @@
       toggle.addEventListener('change', () => { priceInput.disabled = !toggle.checked; });
     }
 
-    modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { window.UI.closeModal(); $('pos-search')?.focus(); });
     modal.querySelector('[data-action="save"]').addEventListener('click', () => {
       const raw = window.UI.serializeForm(modal.querySelector('#line-adjust-form'));
       item.discount = Number(raw.discount) || 0;
@@ -623,36 +902,236 @@
       }
       window.UI.closeModal();
       renderCart();
+      $('pos-search')?.focus();
     });
   }
 
-  function renderPaymentsList() {
-    const el = document.getElementById('payments-list');
-    if (!state.payments.length) {
-      el.innerHTML = '<p class="text-xs text-muted">No payments added - sale will be fully on credit (requires a customer).</p>';
-      return;
-    }
-    el.innerHTML = state.payments.map((p, i) => `
-      <div class="flex items-center justify-between text-sm" style="padding: 4px 0">
-        <span>${window.UI.escapeHtml(p.method)}${p.reference ? ` <span class="text-muted">(${window.UI.escapeHtml(p.reference)})</span>` : ''}</span>
-        <span class="flex items-center gap-2">
-          ${window.UI.formatMoney(p.amount)}
-          <button type="button" class="btn btn-ghost btn-sm btn-icon" data-remove-payment="${i}">${window.Icons.get('close')}</button>
-        </span>
-      </div>
-    `).join('');
-    el.querySelectorAll('[data-remove-payment]').forEach((b) => b.addEventListener('click', () => { state.payments.splice(Number(b.dataset.removePayment), 1); renderCart(); }));
+  /* ================================================================== *
+   * PAYMENT WINDOW
+   * ================================================================== */
+  function ceilTo(n, step) { return Math.ceil(n / step) * step; }
+
+  function quickCashAmounts(total) {
+    const set = new Set([round2(total), ceilTo(total, 50), ceilTo(total, 100), ceilTo(total, 500), ceilTo(total, 1000)]);
+    return [...set].filter((n) => n >= total).sort((a, b) => a - b).slice(0, 5);
   }
 
-  /* ---- M-PESA STK status panel (used inside the payment modal) ---- */
+  function openPaymentModal(initialMethod) {
+    if (!state.cart.length) return window.UI.toast.error('Cart is empty');
+    const { total } = computeTotals();
+    const resumeMpesa = !!state.pendingMpesa;
+    if (total <= 0 && !resumeMpesa) return window.UI.toast.error('Total must be greater than zero');
+
+    const dueAmount = resumeMpesa ? state.pendingMpesa.amount : total;
+    const methods = METHODS.filter((m) => m.id !== 'MPESA' || state.flags.mpesaEnabled);
+    let method = resumeMpesa ? 'MPESA' : (initialMethod && methods.some((m) => m.id === initialMethod) ? initialMethod : 'CASH');
+
+    const modal = window.UI.openModal({
+      title: 'Payment',
+      maxWidth: '600px',
+      bodyHtml: `
+        <div class="pz-pay-total"><span>Amount due</span><strong>${fm(dueAmount)}</strong></div>
+        <div class="pz-methods" id="pz-methods">
+          ${methods.map((m) => `<button type="button" class="pz-method" data-method="${m.id}"><span class="pz-method-ico"><i class="${m.ico}" aria-hidden="true"></i></span>${m.label}</button>`).join('')}
+        </div>
+        <div id="pz-pay-panel"></div>
+      `,
+      footerHtml: `
+        <button class="btn btn-secondary" data-action="cancel">Cancel</button>
+        <button class="btn btn-success pz-complete-btn" data-action="complete" id="pz-complete-btn">Complete sale</button>
+      `,
+    });
+
+    const panel = modal.querySelector('#pz-pay-panel');
+    const completeBtn = modal.querySelector('#pz-complete-btn');
+    let onComplete = null;
+
+    function setComplete({ enabled = true, hidden = false, label = 'Complete sale & print receipt' } = {}) {
+      completeBtn.style.display = hidden ? 'none' : '';
+      completeBtn.disabled = !enabled;
+      completeBtn.textContent = label;
+    }
+
+    function selectMethod(next) {
+      if (state.pendingMpesa && next !== 'MPESA') return window.UI.toast.error('M-PESA payment already received - complete the sale first');
+      clearMpesaPolling(modal);
+      method = next;
+      modal.querySelectorAll('.pz-method').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
+      const renderers = { CASH: renderCash, MPESA: renderMpesa, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
+      renderers[method]();
+    }
+
+    /* ---- CASH ---- */
+    function renderCash() {
+      const noShift = !state.currentShift;
+      panel.innerHTML = `
+        ${noShift ? '<div class="pz-note warn">No open shift. Open a shift before taking cash so the drawer balances.</div>' : ''}
+        <div class="field">
+          <label for="pz-tendered">Amount received from customer (KES)</label>
+          <input class="input pz-cash-input" id="pz-tendered" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00" />
+        </div>
+        <div class="pz-quick">
+          ${quickCashAmounts(dueAmount).map((a, i) => `<button type="button" data-amt="${a}">${i === 0 && a === round2(dueAmount) ? 'Exact' : fm(a)}</button>`).join('')}
+        </div>
+        <div class="pz-change" id="pz-change"></div>
+      `;
+      const input = panel.querySelector('#pz-tendered');
+      const changeEl = panel.querySelector('#pz-change');
+
+      const update = () => {
+        const tendered = Number(input.value);
+        if (!input.value || !Number.isFinite(tendered)) {
+          changeEl.className = 'pz-change';
+          changeEl.innerHTML = '<span>Change to give back</span><strong>-</strong>';
+          setComplete({ enabled: false });
+          return;
+        }
+        const diff = round2(tendered - dueAmount);
+        if (diff >= 0) {
+          changeEl.className = 'pz-change ok';
+          changeEl.innerHTML = `<span>Change to give back</span><strong>${fm(diff)}</strong>`;
+          setComplete({ enabled: true });
+        } else {
+          changeEl.className = 'pz-change short';
+          changeEl.innerHTML = `<span>Customer still owes</span><strong>${fm(Math.abs(diff))}</strong>`;
+          setComplete({ enabled: false });
+        }
+      };
+      input.addEventListener('input', update);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !completeBtn.disabled) completeBtn.click(); });
+      panel.querySelectorAll('[data-amt]').forEach((b) => b.addEventListener('click', () => { input.value = b.dataset.amt; update(); }));
+      update();
+      setTimeout(() => input.focus(), 50);
+
+      onComplete = async () => {
+        const tendered = Number(input.value);
+        state.payments = [{ method: 'CASH', amount: dueAmount, amountTendered: tendered }];
+        await checkout({ btn: completeBtn, change: round2(tendered - dueAmount) });
+      };
+    }
+
+    /* ---- BANK / CARD ---- */
+    function renderRef() {
+      const label = method === 'BANK' ? 'Bank transfer' : 'Card';
+      panel.innerHTML = `
+        <div class="pz-note">${label} payment of <strong>${fm(dueAmount)}</strong>. Confirm the money has arrived before completing the sale.</div>
+        <div class="field">
+          <label for="pz-ref">Reference / code <span class="text-muted">(optional)</span></label>
+          <input class="input" id="pz-ref" placeholder="Transaction code, slip number, etc" />
+        </div>
+      `;
+      setComplete({ enabled: true });
+      panel.querySelector('#pz-ref').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !completeBtn.disabled) completeBtn.click(); });
+      onComplete = async () => {
+        state.payments = [{ method, amount: dueAmount, reference: panel.querySelector('#pz-ref').value.trim() || undefined }];
+        await checkout({ btn: completeBtn });
+      };
+    }
+
+    /* ---- CREDIT ---- */
+    async function renderCredit() {
+      panel.innerHTML = `
+        <div class="pz-note warn">The full <strong>${fm(dueAmount)}</strong> will be recorded as a debt against the customer.</div>
+        <div class="field">
+          <label for="pz-customer">Customer</label>
+          <select class="select" id="pz-customer"><option value="">Loading customers…</option></select>
+        </div>
+      `;
+      setComplete({ enabled: false });
+      const select = panel.querySelector('#pz-customer');
+      let customers = [];
+      try {
+        const { data } = await window.Api.get('/customers', { limit: 200 });
+        customers = data.items || data.customers || [];
+      } catch { /* fall through to picker */ }
+      if (method !== 'CREDIT') return;
+
+      if (!customers.length) {
+        // Fallback: the shared customer picker (also lets the cashier add a new customer)
+        panel.querySelector('.field').innerHTML = `
+          <label>Customer</label>
+          <button type="button" class="btn btn-secondary btn-block" id="pz-pick">${state.customer ? esc(state.customer.name) : 'Choose customer'}</button>`;
+        panel.querySelector('#pz-pick').addEventListener('click', () => {
+          window.UI.closeModal();
+          window.CustomerPicker.open({ onSelect: (c) => { state.customer = c; renderCustomerButton(); openPaymentModal('CREDIT'); } });
+        });
+        setComplete({ enabled: !!state.customer });
+      } else {
+        select.innerHTML = `<option value="">Select customer…</option>` + customers.map((c) =>
+          `<option value="${c._id}" ${state.customer && state.customer._id === c._id ? 'selected' : ''}>${esc(c.name)}${c.phone ? ` - ${esc(c.phone)}` : ''}</option>`).join('');
+        select.addEventListener('change', () => {
+          state.customer = customers.find((c) => c._id === select.value) || null;
+          renderCustomerButton();
+          setComplete({ enabled: !!state.customer });
+        });
+        setComplete({ enabled: !!state.customer });
+      }
+
+      onComplete = async () => {
+        if (!state.customer) return window.UI.toast.error('Choose a customer for credit sales');
+        state.payments = []; // no payment lines = whole sale on credit
+        await checkout({ btn: completeBtn });
+      };
+    }
+
+    /* ---- M-PESA (STK push) ---- */
+    function renderMpesa() {
+      const already = state.pendingMpesa;
+      panel.innerHTML = `
+        <div class="field">
+          <label for="pz-mpesa-phone">Customer M-PESA number</label>
+          <div class="input-button-row">
+            <input class="input" id="pz-mpesa-phone" name="mpesaPhone" inputmode="tel" placeholder="07XXXXXXXX" value="${esc(state.customer?.phone || '')}" ${already ? 'disabled' : ''} />
+            <button type="button" class="btn btn-primary" id="mpesa-send-btn" ${already ? 'disabled' : ''}>Send prompt</button>
+          </div>
+        </div>
+        <div id="mpesa-stk-status"></div>
+      `;
+      if (already) {
+        renderMpesaStatus(modal, { tone: 'warning', label: 'Paid - sale not saved', message: `M-PESA payment of ${fm(already.amount)} was received. Tap "Save sale" to finish. Do not send another prompt.` });
+        setComplete({ enabled: true, label: 'Save sale & print receipt' });
+        onComplete = async () => { state.payments = [{ method: 'MPESA', amount: already.amount, reference: already.reference }]; await checkout({ btn: completeBtn }); };
+      } else {
+        setComplete({ hidden: true });
+        onComplete = null;
+        bindMpesaSend(modal, dueAmount, {
+          onPaid: async (reference) => {
+            state.pendingMpesa = { reference, amount: dueAmount };
+            state.payments = [{ method: 'MPESA', amount: dueAmount, reference }];
+            const ok = await checkout({ btn: null });
+            if (!ok) {
+              renderMpesaStatus(modal, { tone: 'warning', label: 'Paid - sale not saved', message: 'The M-PESA payment is confirmed but the sale could not be saved. Tap "Save sale" to try again. Do not send another prompt.' });
+              setComplete({ enabled: true, label: 'Save sale & print receipt' });
+              onComplete = async () => { await checkout({ btn: completeBtn }); };
+            }
+          },
+        });
+      }
+    }
+
+    modal.querySelector('#pz-methods').addEventListener('click', (e) => {
+      const b = e.target.closest('.pz-method');
+      if (b) selectMethod(b.dataset.method);
+    });
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+      clearMpesaPolling(modal);
+      window.UI.closeModal();
+      $('pos-search')?.focus();
+    });
+    completeBtn.addEventListener('click', () => { if (onComplete) onComplete(); });
+
+    selectMethod(method);
+  }
+
+  /* ---- M-PESA status panel + polling ---- */
   function renderMpesaStatus(modal, viewState) {
     const el = modal.querySelector('#mpesa-stk-status');
     if (!el) return;
     const toneClass = { pending: 'badge-info', error: 'badge-danger', warning: 'badge-warning', success: 'badge-success' }[viewState.tone] || 'badge-neutral';
     el.innerHTML = `
       <div style="display:flex; gap:var(--space-2); align-items:flex-start; padding:var(--space-3); border-radius:var(--radius-md); background:var(--color-bg)">
-        <span class="badge ${toneClass}">${window.UI.escapeHtml(viewState.label)}</span>
-        <span class="text-sm text-secondary" style="flex:1">${window.UI.escapeHtml(viewState.message)}</span>
+        <span class="badge ${toneClass}">${esc(viewState.label)}</span>
+        <span class="text-sm text-secondary" style="flex:1">${esc(viewState.message)}</span>
       </div>
       ${viewState.retry ? `<button type="button" class="btn btn-secondary btn-sm" id="mpesa-retry-btn" style="margin-top:var(--space-2)">Try again</button>` : ''}
     `;
@@ -660,21 +1139,16 @@
   }
 
   function clearMpesaPolling(modal) {
-    if (modal._mpesaPoll) {
-      clearInterval(modal._mpesaPoll);
-      modal._mpesaPoll = null;
-    }
+    if (modal._mpesaPoll) { clearInterval(modal._mpesaPoll); modal._mpesaPoll = null; }
+    if (modal._mpesaSlow) { clearTimeout(modal._mpesaSlow); modal._mpesaSlow = null; }
   }
 
-  function bindMpesaSend(modal) {
+  function bindMpesaSend(modal, amount, { onPaid }) {
     modal.querySelector('#mpesa-send-btn').addEventListener('click', async () => {
-      const phone = modal.querySelector('[name="mpesaPhone"]').value.trim();
-      const amount = Number(modal.querySelector('[name="amount"]').value);
-      if (!phone || !amount) return window.UI.toast.error('Enter a phone number and amount first');
+      const phone = modal.querySelector('#pz-mpesa-phone').value.trim();
+      if (!phone || !amount) return window.UI.toast.error('Enter the customer phone number first');
 
-      delete modal.dataset.mpesaReference;
       clearMpesaPolling(modal);
-
       const sendBtn = modal.querySelector('#mpesa-send-btn');
       window.UI.setButtonLoading(sendBtn, true, 'Sending…');
       renderMpesaStatus(modal, { tone: 'pending', label: 'Sending', message: 'Sending prompt to customer\u2019s phone…' });
@@ -686,80 +1160,55 @@
         const reference = data.reference;
         renderMpesaStatus(modal, { tone: 'pending', label: 'Waiting', message: 'Ask the customer to enter their M-PESA PIN on their phone.' });
 
-        modal._mpesaPoll = setInterval(async () => {
-          let s;
-          try {
-            ({ data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`));
-          } catch {
-            return; // transient network hiccup - keep polling
-          }
+        let handled = false;
+        // One handler for both the 3-second poll and the manual "check now" button.
+        const handleStatus = async (s, manual) => {
+          if (handled) return;
           if (s.status === 'SUCCESS') {
+            handled = true;
             clearMpesaPolling(modal);
-            renderMpesaStatus(modal, { tone: 'success', label: 'Confirmed', message: s.message });
+            renderMpesaStatus(modal, { tone: 'success', label: 'Confirmed', message: s.message || 'Payment received. Saving sale…' });
             window.UI.toast.success('M-PESA payment confirmed');
-
-            // Auto-finish: the money has already moved, so don't make the
-            // cashier click Add then Complete Sale separately - push the
-            // payment now, and if the sale is fully paid, complete it
-            // immediately. A brief pause so "Confirmed" is actually seen
-            // before the modal closes.
-            state.payments.push({ method: 'MPESA', amount, reference });
-            setTimeout(() => {
-              window.UI.closeModal();
-              renderCart();
-              const { balance } = computeTotals();
-              if (balance <= 0) checkout();
-            }, 700);
+            // brief pause so "Confirmed" is actually seen, then save + print automatically
+            setTimeout(() => onPaid(reference), 700);
           } else if (s.status === 'FAILED') {
+            handled = true;
             clearMpesaPolling(modal);
             const label = MPESA_FAILURE_LABELS[s.failureType] || 'Payment failed';
             renderMpesaStatus(modal, { tone: s.failureType === 'timeout' ? 'warning' : 'error', label, message: s.message, retry: true });
             window.UI.toast.error(label);
+          } else if (manual) {
+            window.UI.toast.success('Still pending on M-PESA\u2019s side - keep waiting.');
           }
+        };
+
+        modal._mpesaPoll = setInterval(async () => {
+          if (!document.body.contains(modal)) { clearMpesaPolling(modal); return; } // window closed
+          try {
+            const { data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`);
+            handleStatus(s, false);
+          } catch { /* transient - keep polling */ }
         }, 3000);
 
-        // After ~15s of silent waiting, give the cashier a manual recheck
-        // instead of leaving them staring at a spinner with no way out -
-        // and reassure them that closing the tab doesn't lose the payment,
-        // since the reconciliation job still resolves it server-side.
-        setTimeout(() => {
-          if (modal._mpesaPoll && !modal.dataset.mpesaReference) {
-            const area = modal.querySelector('#mpesa-stk-status');
-            if (area && !area.querySelector('#mpesa-check-now-btn')) {
-              area.insertAdjacentHTML('beforeend', `
-                <button type="button" class="btn btn-secondary btn-sm" id="mpesa-check-now-btn" style="margin-top:var(--space-2)">Check status now</button>
-                <p class="text-xs text-muted" style="margin-top:var(--space-2)">Taking a while? If the customer already entered their PIN, it's still safe to wait - this doesn't create a second charge.</p>
-              `);
-              modal.querySelector('#mpesa-check-now-btn').addEventListener('click', async () => {
-                try {
-                  const { data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`);
-                  if (s.status === 'SUCCESS') {
-                    clearMpesaPolling(modal);
-                    renderMpesaStatus(modal, { tone: 'success', label: 'Confirmed', message: s.message });
-                    state.payments.push({ method: 'MPESA', amount, reference });
-                    setTimeout(() => {
-                      window.UI.closeModal();
-                      renderCart();
-                      const { balance } = computeTotals();
-                      if (balance <= 0) checkout();
-                    }, 700);
-                  } else if (s.status === 'FAILED') {
-                    clearMpesaPolling(modal);
-                    const label = MPESA_FAILURE_LABELS[s.failureType] || 'Payment failed';
-                    renderMpesaStatus(modal, { tone: s.failureType === 'timeout' ? 'warning' : 'error', label, message: s.message, retry: true });
-                  } else {
-                    window.UI.toast.success('Still pending on M-PESA\u2019s side - keep waiting.');
-                  }
-                } catch (err) {
-                  window.UI.toast.error(err.message);
-                }
-              });
+        // After ~15s of silence offer a manual re-check (closing the tab never loses the payment:
+        // the server-side reconciliation job still resolves it).
+        modal._mpesaSlow = setTimeout(() => {
+          const area = modal.querySelector('#mpesa-stk-status');
+          if (!modal._mpesaPoll || !area || area.querySelector('#mpesa-check-now-btn')) return;
+          area.insertAdjacentHTML('beforeend', `
+            <button type="button" class="btn btn-secondary btn-sm" id="mpesa-check-now-btn" style="margin-top:var(--space-2)">Check status now</button>
+            <p class="text-xs text-muted" style="margin-top:var(--space-2)">Taking a while? If the customer already entered their PIN it is still safe to wait - this does not create a second charge.</p>
+          `);
+          modal.querySelector('#mpesa-check-now-btn').addEventListener('click', async () => {
+            try {
+              const { data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`);
+              handleStatus(s, true);
+            } catch (err) {
+              window.UI.toast.error(err.message);
             }
-          }
+          });
         }, 15000);
       } catch (err) {
-        // Send-time failure (bad credentials, rate-limited, wallet empty,
-        // network) - err.data.failureType comes straight from mpesa.controller.js.
         const failureType = err.data?.failureType;
         const label = MPESA_FAILURE_LABELS[failureType] || 'Could not send prompt';
         renderMpesaStatus(modal, { tone: 'error', label, message: err.message, retry: true });
@@ -770,93 +1219,26 @@
     });
   }
 
-  function openAddPaymentModal(suggestedAmount) {
-    const mpesaFieldHtml = state.flags.mpesaEnabled ? `
-      <div class="field" id="mpesa-stk-field" style="display:none">
-        <label>Customer phone (M-PESA)</label>
-        <div class="input-button-row">
-          <input class="input" name="mpesaPhone" placeholder="07XXXXXXXX" />
-          <button type="button" class="btn btn-secondary" id="mpesa-send-btn">Send prompt</button>
-        </div>
-        <div id="mpesa-stk-status" style="margin-top: var(--space-3)"></div>
-      </div>
-    ` : '';
-
-    const modal = window.UI.openModal({
-      title: 'Add payment',
-      bodyHtml: `
-        <form id="payment-form">
-          <div class="field">
-            <label>Method</label>
-            <select class="select" name="method" id="payment-method">
-              <option value="CASH">Cash</option>
-              <option value="MPESA">M-PESA</option>
-              <option value="CARD">Card</option>
-              <option value="BANK">Bank transfer</option>
-              <option value="OTHER">Other</option>
-            </select>
-          </div>
-          <div class="field"><label>Amount (KES)</label><input class="input" name="amount" type="number" step="0.01" min="0.01" required value="${suggestedAmount > 0 ? suggestedAmount : ''}" /></div>
-          <div class="field" id="tendered-field"><label>Amount tendered (KES) <span class="text-muted">(for change)</span></label><input class="input" name="amountTendered" type="number" step="0.01" min="0" /></div>
-          <div class="field" id="reference-field" style="display:none"><label>Reference / code</label><input class="input" name="reference" placeholder="Till number, transaction code, etc" /></div>
-          ${mpesaFieldHtml}
-        </form>
-      `,
-      footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="save">Add</button>`,
-    });
-
-    const methodSelect = modal.querySelector('#payment-method');
-    const toggleFields = () => {
-      const isCash = methodSelect.value === 'CASH';
-      const isMpesa = methodSelect.value === 'MPESA';
-      modal.querySelector('#tendered-field').style.display = isCash ? '' : 'none';
-      modal.querySelector('#reference-field').style.display = isCash || isMpesa ? 'none' : '';
-      const mpesaField = modal.querySelector('#mpesa-stk-field');
-      if (mpesaField) mpesaField.style.display = isMpesa ? '' : 'none';
-    };
-    methodSelect.addEventListener('change', toggleFields);
-    toggleFields();
-
-    if (state.flags.mpesaEnabled) bindMpesaSend(modal);
-
-    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => {
-      clearMpesaPolling(modal);
-      window.UI.closeModal();
-    });
-    modal.querySelector('[data-action="save"]').addEventListener('click', () => {
-      const form = modal.querySelector('#payment-form');
-      if (!form.reportValidity()) return;
-      const raw = window.UI.serializeForm(form);
-
-      if (raw.method === 'MPESA') {
-        // The auto-finish path above already pushes the payment and closes
-        // the modal on confirmation - if we get here with MPESA selected,
-        // the cashier clicked Add before confirmation landed.
-        return window.UI.toast.error('Wait for the M-PESA payment to be confirmed first');
-      }
-
-      state.payments.push({
-        method: raw.method,
-        amount: Number(raw.amount),
-        reference: raw.reference,
-        amountTendered: raw.amountTendered ? Number(raw.amountTendered) : undefined,
-      });
-      window.UI.closeModal();
-      renderCart();
-    });
-  }
-
+  /* ================================================================== *
+   * CHECKOUT
+   * ================================================================== */
   function resetCart() {
     state.cart = [];
     state.customer = null;
     state.cartDiscount = 0;
     state.payments = [];
+    state.pendingMpesa = null;
+    state.lastAdded = null;
     checkoutKey = window.Api.newIdempotencyKey();
+    const d = $('cart-discount-input');
+    if (d) d.value = '';
     renderCart();
   }
 
-  async function checkout() {
-    if (!state.cart.length) return window.UI.toast.error('Cart is empty');
+  /** Returns true when the sale was saved. */
+  async function checkout({ btn, change } = {}) {
+    if (checkingOut) return false;
+    if (!state.cart.length) { window.UI.toast.error('Cart is empty'); return false; }
 
     const branchId = window.AppShell.getActiveBranchId();
     const payload = {
@@ -876,18 +1258,24 @@
       })),
     };
 
-    const btn = document.getElementById('checkout-btn');
+    checkingOut = true;
     if (btn) window.UI.setButtonLoading(btn, true, 'Completing sale…');
     try {
       const { data } = await window.Api.post('/sales', payload, { idempotencyKey: checkoutKey });
+      if (document.querySelector('.modal-backdrop')) window.UI.closeModal();
       window.UI.toast.success(`Sale ${data.sale.receiptNumber} completed`);
-      window.ReceiptView.showReceiptModal(data.receipt);
+      if (change > 0) window.UI.toast.success(`Give change: ${fm(change)}`);
+      // Open the receipt and ask it to print straight away.
+      window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: true });
       resetCart();
       loadShift();
+      return true;
     } catch (err) {
       window.UI.toast.error(err.message);
+      return false;
     } finally {
-      if (btn) window.UI.setButtonLoading(btn, false);
+      checkingOut = false;
+      if (btn && document.body.contains(btn)) window.UI.setButtonLoading(btn, false);
     }
   }
 
@@ -895,7 +1283,8 @@
    * SALES HISTORY VIEW
    * ================================================================== */
   function renderHistory() {
-    const body = document.getElementById('view-body');
+    const body = $('view-body');
+    body.className = 'pz-view pz-view-history';
     body.innerHTML = `
       <div class="card">
         <div class="toolbar">
@@ -918,11 +1307,11 @@
       </div>
     `;
 
-    document.getElementById('history-search').addEventListener('input', window.UI.debounce((e) => {
+    $('history-search').addEventListener('input', window.UI.debounce((e) => {
       state.history.search = e.target.value.trim(); state.history.page = 1; fetchHistory();
     }));
-    document.getElementById('history-from').addEventListener('change', (e) => { state.history.from = e.target.value; state.history.page = 1; fetchHistory(); });
-    document.getElementById('history-to').addEventListener('change', (e) => { state.history.to = e.target.value; state.history.page = 1; fetchHistory(); });
+    $('history-from').addEventListener('change', (e) => { state.history.from = e.target.value; state.history.page = 1; fetchHistory(); });
+    $('history-to').addEventListener('change', (e) => { state.history.to = e.target.value; state.history.page = 1; fetchHistory(); });
 
     fetchHistory();
   }
@@ -930,7 +1319,8 @@
   const PAYMENT_BADGE = { PAID: 'badge-success', PARTIAL: 'badge-warning', CREDIT: 'badge-danger', UNPAID: 'badge-neutral' };
 
   async function fetchHistory() {
-    const tbody = document.getElementById('history-tbody');
+    const tbody = $('history-tbody');
+    if (!tbody) return;
     tbody.innerHTML = window.UI.skeletonRows(7, 6);
 
     const branchId = window.AppShell.getActiveBranchId();
@@ -946,9 +1336,9 @@
           <tr data-id="${s._id}">
             <td class="cell-primary">${s.receiptNumber}</td>
             <td class="text-sm">${window.UI.formatDateTime(s.createdAt)}</td>
-            <td class="text-sm">${window.UI.escapeHtml(s.cashierId?.name || '')}</td>
-            <td class="text-sm">${s.customerId ? window.UI.escapeHtml(s.customerId.name) : '<span class="text-muted">Walk-in</span>'}</td>
-            <td class="font-semibold">${window.UI.formatMoney(s.total)}</td>
+            <td class="text-sm">${esc(s.cashierId?.name || '')}</td>
+            <td class="text-sm">${s.customerId ? esc(s.customerId.name) : '<span class="text-muted">Walk-in</span>'}</td>
+            <td class="font-semibold">${fm(s.total)}</td>
             <td>
               <span class="badge ${PAYMENT_BADGE[s.paymentStatus] || 'badge-neutral'}">${s.paymentStatus}</span>
               ${s.saleStatus === 'CANCELLED' ? '<span class="badge badge-neutral">Cancelled</span>' : ''}
@@ -957,7 +1347,7 @@
           </tr>
         `).join('');
       }
-      window.UI.renderPagination(document.getElementById('history-pagination'), data, (p) => { state.history.page = p; fetchHistory(); });
+      window.UI.renderPagination($('history-pagination'), data, (p) => { state.history.page = p; fetchHistory(); });
 
       tbody.querySelectorAll('[data-action="view"]').forEach((btn) => {
         btn.addEventListener('click', () => openSaleDetail(btn.closest('tr').dataset.id));
@@ -986,22 +1376,22 @@
       maxWidth: '520px',
       bodyHtml: `
         <div class="text-sm text-secondary" style="margin-bottom: var(--space-3)">
-          ${window.UI.formatDateTime(sale.createdAt)} &middot; Cashier: ${window.UI.escapeHtml(sale.cashierId?.name || '')}
-          ${sale.customerId ? ` &middot; Customer: ${window.UI.escapeHtml(sale.customerId.name)}` : ''}
+          ${window.UI.formatDateTime(sale.createdAt)} &middot; Cashier: ${esc(sale.cashierId?.name || '')}
+          ${sale.customerId ? ` &middot; Customer: ${esc(sale.customerId.name)}` : ''}
         </div>
         <div class="table-wrap" style="margin-bottom: var(--space-4)">
           <table class="table">
             <thead><tr><th>Item</th><th>Qty</th><th>Total</th></tr></thead>
             <tbody>
-              ${sale.items.map((i) => `<tr><td class="text-sm">${window.UI.escapeHtml(i.nameSnapshot)}${i.refundedQuantity ? ` <span class="text-xs text-muted">(${i.refundedQuantity} refunded)</span>` : ''}</td><td>${i.quantity}</td><td>${window.UI.formatMoney(i.total)}</td></tr>`).join('')}
+              ${sale.items.map((i) => `<tr><td class="text-sm">${esc(i.nameSnapshot)}${i.refundedQuantity ? ` <span class="text-xs text-muted">(${i.refundedQuantity} refunded)</span>` : ''}</td><td>${i.quantity}</td><td>${fm(i.total)}</td></tr>`).join('')}
             </tbody>
           </table>
         </div>
-        <div class="pos-totals-row"><span>Subtotal</span><span>${window.UI.formatMoney(sale.subtotal)}</span></div>
-        <div class="pos-totals-row"><span>Tax</span><span>${window.UI.formatMoney(sale.tax)}</span></div>
-        <div class="pos-totals-row grand"><span>Total</span><span>${window.UI.formatMoney(sale.total)}</span></div>
-        ${sale.balance > 0 ? `<div class="pos-totals-row" style="color:var(--color-warning)"><span>Balance owed</span><span>${window.UI.formatMoney(sale.balance)}</span></div>` : ''}
-        ${sale.saleStatus === 'CANCELLED' ? `<div class="form-alert form-alert-error" style="margin-top: var(--space-3)">Cancelled: ${window.UI.escapeHtml(sale.cancelReason || '')}</div>` : ''}
+        <div class="pos-totals-row"><span>Subtotal</span><span>${fm(sale.subtotal)}</span></div>
+        <div class="pos-totals-row"><span>Tax</span><span>${fm(sale.tax)}</span></div>
+        <div class="pos-totals-row grand"><span>Total</span><span>${fm(sale.total)}</span></div>
+        ${sale.balance > 0 ? `<div class="pos-totals-row" style="color:var(--color-warning)"><span>Balance owed</span><span>${fm(sale.balance)}</span></div>` : ''}
+        ${sale.saleStatus === 'CANCELLED' ? `<div class="form-alert form-alert-error" style="margin-top: var(--space-3)">Cancelled: ${esc(sale.cancelReason || '')}</div>` : ''}
       `,
       footerHtml: `
         <button class="btn btn-secondary" data-action="close">Close</button>
@@ -1032,11 +1422,9 @@
   }
 
   /**
-   * openRefundModal - lets a manager/cashier pick how many units of each
-   * still-refundable line to return. The refund AMOUNT is never entered by
-   * hand here - the backend computes it proportionally from what was
-   * actually charged on the original sale, so this form only collects
-   * quantities plus the reason and how the money is being given back.
+   * openRefundModal - pick how many units of each still-refundable line to
+   * return. The refund AMOUNT is never entered by hand: the backend computes
+   * it proportionally from what was actually charged on the original sale.
    */
   function openRefundModal(sale) {
     const refundable = sale.items
@@ -1052,7 +1440,7 @@
             <label>Items to refund</label>
             ${refundable.map((i) => `
               <div class="flex items-center justify-between" style="padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border)">
-                <span class="text-sm">${window.UI.escapeHtml(i.nameSnapshot)}<br/><span class="text-xs text-muted">${i.remaining} available to refund</span></span>
+                <span class="text-sm">${esc(i.nameSnapshot)}<br/><span class="text-xs text-muted">${i.remaining} available to refund</span></span>
                 <input class="input" type="number" min="0" max="${i.remaining}" step="1" value="0" data-refund-qty="${i.idx}" style="width:80px" />
               </div>
             `).join('')}
@@ -1081,7 +1469,7 @@
       if (!items.length) return window.UI.toast.error('Enter a quantity for at least one item');
 
       const raw = window.UI.serializeForm(form);
-      const btn = document.getElementById('refund-save-btn');
+      const btn = $('refund-save-btn');
       window.UI.setButtonLoading(btn, true, 'Submitting…');
       try {
         const { data } = await window.Api.post('/refunds', {

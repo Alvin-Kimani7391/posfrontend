@@ -3,7 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Dashboard · Kenya POS</title>
+  <title>Dashboard · Six Star POS</title>
+
+  <!-- PWA (added) -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0f766e" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Six Star POS" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+
   <link rel="stylesheet" href="css/variables.css" />
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/components.css" />
@@ -19,6 +30,9 @@
   <script src="js/core/api.js"></script>
   <script src="js/core/permissions.js"></script>
   <script src="js/core/ui.js"></script>
+  <script src="js/core/pwa.js"></script>
+  <!-- PWA (added): keep after ui.js so install/update toasts can use window.UI -->
+  <script src="js/core/sidebar-rail.js"></script>
   <script src="js/core/notification-types.js"></script>
   <script src="js/core/notifications.js"></script>
   <script src="js/core/app-shell.js"></script>

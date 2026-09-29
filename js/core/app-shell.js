@@ -9,22 +9,28 @@
  * Usage in a page's own script:
  *   const content = AppShell.mount({ title: 'Branches' });
  *   const user = AppShell.getUser();
+ *
+ * BRAND: the product name lives in ONE place (APP_NAME below). It is used for
+ * the sidebar brand AND the browser tab title (set in mount()), so every page
+ * that mounts the shell is consistent automatically.
  */
 (function (window) {
+  const APP_NAME = 'Six Star Pos';
+
   const NAV_ITEMS = [
     { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', href: 'dashboard.html' },
     { key: 'sales', label: 'Sales', icon: 'sales', href: 'sales.html', permission: 'sales.view' },
     { key: 'products', label: 'Products', icon: 'products', href: 'products.html', permission: 'products.view' },
     { key: 'inventory', label: 'Inventory', icon: 'inventory', href: 'inventory.html', permission: 'inventory.view' },
-    
-     { key: 'suppliers', label: 'Suppliers', icon: 'branches', href: 'suppliers.html', permission: 'suppliers.view' },
+
+    { key: 'suppliers', label: 'Suppliers', icon: 'branches', href: 'suppliers.html', permission: 'suppliers.view' },
     { key: 'purchases', label: 'Purchases', icon: 'box', href: 'purchases.html', permission: 'purchases.view' },
     { key: 'expenses', label: 'Expenses', icon: 'reports', href: 'expenses.html', permission: 'expenses.view' },
     { key: 'refunds', label: 'Refunds', icon: 'sales', href: 'refunds.html', permission: 'refunds.view' },
 
     { key: 'reports',   label: 'Reports',   icon: 'reports',  href: 'reports.html',    permission: 'reports.view' },
     { key: 'audit',     label: 'Audit log', icon: 'settings', href: 'audit-logs.html', permission: 'audit.view' },
-    
+
     { key: 'branches', label: 'Branches', icon: 'branches', href: 'branches.html', permission: 'branches.view' },
     { key: 'employees', label: 'Employees', icon: 'employees', href: 'employees.html', permission: 'employees.view' },
     { key: 'customers', label: 'Customers', icon: 'employees', href: 'customers.html', permission: 'customers.view' },
@@ -66,6 +72,13 @@
    *   2. Rendering the switcher dropdown with branch names - needs the
    *      /branches list, requires permission, fails gracefully by just
    *      not showing a switcher.
+   *
+   * getActiveBranchName() follows the same rule: it never makes a request.
+   * It answers from the /branches cache when that loaded, or from branch
+   * objects already on the logged-in user (if the login response populated
+   * them), and returns '' when the name is not known. Pages that show the
+   * name listen with onBranchesLoaded() so they can fill it in once the
+   * list arrives.
    * ------------------------------------------------------------------ */
   let branchesCache = null;
 
@@ -73,10 +86,30 @@
     let id = window.Storage.getActiveBranchId();
     if (!id) {
       const user = getUser();
-      id = (user?.branchIds || [])[0] || null;
+      const first = (user?.branchIds || [])[0];
+      id = (first && typeof first === 'object' ? first._id || first.id : first) || null;
       if (id) window.Storage.setActiveBranchId(id);
     }
     return id || null;
+  }
+
+  /** Name of the active branch, or '' when it is not known (yet). Never makes a network call. */
+  function getActiveBranchName() {
+    const id = getActiveBranchId();
+    if (!id) return '';
+
+    const cached = branchesCache?.find((b) => b._id === id);
+    if (cached?.name) return cached.name;
+
+    // Some login responses already carry populated branch objects.
+    const user = getUser();
+    const pools = [user?.branches, user?.branchIds, user?.branch];
+    for (const pool of pools) {
+      const list = Array.isArray(pool) ? pool : pool ? [pool] : [];
+      const hit = list.find((b) => b && typeof b === 'object' && (b._id === id || b.id === id));
+      if (hit?.name) return hit.name;
+    }
+    return '';
   }
 
   async function loadBranchSwitcher() {
@@ -101,11 +134,13 @@
       // the active branch id is already set above; we just don't have
       // names to render a dropdown with, so skip it silently.
       wrap.innerHTML = '';
+      window.dispatchEvent(new CustomEvent('branchesloaded'));
       return;
     }
 
     if (!branchesCache.length) {
       wrap.innerHTML = '';
+      window.dispatchEvent(new CustomEvent('branchesloaded'));
       return;
     }
 
@@ -115,11 +150,13 @@
     let resolvedId = activeId;
     if (!branchesCache.some((b) => b._id === resolvedId)) {
       const user = getUser();
-      resolvedId = (user?.branchIds || []).find((id) => branchesCache.some((b) => b._id === id)) || branchesCache[0]._id;
+      const ownIds = (user?.branchIds || []).map((b) => (b && typeof b === 'object' ? b._id || b.id : b));
+      resolvedId = ownIds.find((id) => branchesCache.some((b) => b._id === id)) || branchesCache[0]._id;
       window.Storage.setActiveBranchId(resolvedId);
     }
 
     renderBranchSwitcher(wrap, resolvedId);
+    window.dispatchEvent(new CustomEvent('branchesloaded'));
   }
 
   function renderBranchSwitcher(wrap, activeId) {
@@ -171,6 +208,13 @@
     return () => window.removeEventListener('branchchange', handler);
   }
 
+  /** Registers a callback for when the branch list (and so branch names) finished loading; returns an unsubscribe function. */
+  function onBranchesLoaded(callback) {
+    const handler = () => callback();
+    window.addEventListener('branchesloaded', handler);
+    return () => window.removeEventListener('branchesloaded', handler);
+  }
+
   function buildSidebarNav(activePage) {
     return NAV_ITEMS.map((item) => {
       const gated = item.permission ? `data-requires-permission="${item.permission}"` : '';
@@ -204,7 +248,7 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
           <span class="logo-mark">${window.Icons.get('store')}</span>
-          <span>${window.APP_CONFIG.APP_NAME}</span>
+          <span>${window.UI.escapeHtml(APP_NAME)}</span>
         </div>
         <nav class="sidebar-nav">
           <div class="sidebar-section-label">Menu</div>
@@ -227,7 +271,7 @@
             <button class="menu-btn desktop-hidden" id="sidebar-toggle" aria-label="Open menu">${window.Icons.get('menu')}</button>
             <div class="topbar-title">${window.UI.escapeHtml(title)}</div>
           </div>
-                    <div class="topbar-right">
+          <div class="topbar-right">
             <div class="dropdown" id="branch-switcher-wrap"></div>
             <div class="dropdown" id="notif-bell-wrap"></div>
             <button class="btn btn-ghost btn-icon" id="logout-btn" title="Log out">${window.Icons.get('logout')}</button>
@@ -281,8 +325,9 @@
 
   /**
    * AppShell.mount({ title })
-   * Renders the shell into #app-shell, gates nav items by permission, and
-   * returns the #page-content element for the page script to render into.
+   * Renders the shell into #app-shell, gates nav items by permission, sets the
+   * browser tab title ("<page> · Six Star Pos"), and returns the #page-content
+   * element for the page script to render into.
    */
   function mount({ title = '' } = {}) {
     if (!requireAuthOrRedirect()) return null;
@@ -295,13 +340,24 @@
       return null;
     }
 
+    document.title = title ? `${title} · ${APP_NAME}` : APP_NAME;
+
     root.innerHTML = shellTemplate(user, title, activePage);
     bindShellEvents();
     window.Permissions.applyPermissionGates(root, user);
     loadBranchSwitcher(); // async, fills in the dropdown once branches load - doesn't block the page. getActiveBranchId() itself does NOT depend on this.
-     window.NotificationCenter?.mount(document.getElementById('notif-bell-wrap'), user); // new
+    window.NotificationCenter?.mount(document.getElementById('notif-bell-wrap'), user);
     return document.getElementById('page-content');
   }
 
-  window.AppShell = { mount, getUser, requireAuthOrRedirect, getActiveBranchId, onBranchChange };
+  window.AppShell = {
+    APP_NAME,
+    mount,
+    getUser,
+    requireAuthOrRedirect,
+    getActiveBranchId,
+    getActiveBranchName,
+    onBranchChange,
+    onBranchesLoaded,
+  };
 })(window);
