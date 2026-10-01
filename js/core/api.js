@@ -61,64 +61,57 @@
     return body.data.accessToken;
   }
 
-  async function request(method, path, { body, query, isRetry, headers: extraHeaders } = {}) {
-    const headers = { 'Content-Type': 'application/json', ...extraHeaders };
-    const token = window.Storage.getAccessToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
+  async function request(method, path, { body, formData, query, isRetry, headers: extraHeaders } = {}) {
+  const headers = { ...extraHeaders };
+  // For FormData the browser sets Content-Type (with the multipart boundary) itself.
+  if (!formData) headers['Content-Type'] = 'application/json';
+  const token = window.Storage.getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
 
-    let res;
-    try {
-      res = await fetch(buildUrl(path, query), {
-        method,
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
-    } catch (networkErr) {
-      // PWA: when the device itself is offline (installed app opened with no
-      // signal) say so plainly. The error CODE stays NETWORK_ERROR so any
-      // caller that already branches on it keeps working unchanged.
-      const deviceOffline = typeof window.navigator !== 'undefined' && window.navigator.onLine === false;
-      throw new ApiError(
-        deviceOffline
-          ? "You're offline. Reconnect to the internet and try again."
-          : 'Could not reach the server. Check your connection.',
-        { code: 'NETWORK_ERROR' }
-      );
-    }
-
-    let payload;
-    try {
-      payload = await res.json();
-    } catch {
-      payload = {};
-    }
-
-    // Token expired/invalid - try ONE silent refresh-and-retry.
-    if (res.status === 401 && !isRetry && window.Storage.getRefreshToken()) {
-      try {
-        if (!refreshPromise) refreshPromise = refreshAccessToken().finally(() => { refreshPromise = null; });
-        await refreshPromise;
-        return request(method, path, { body, query, isRetry: true, headers: extraHeaders });
-      } catch {
-        window.Storage.clearSession();
-        if (!window.location.pathname.endsWith('login.html')) {
-          window.location.href = 'login.html?sessionExpired=1';
-        }
-        throw new ApiError('Session expired, please log in again', { code: 'SESSION_EXPIRED', status: 401 });
-      }
-    }
-
-    if (!res.ok || payload.success === false) {
-      throw new ApiError(payload.message || `Request failed (${res.status})`, {
-        code: payload.code,
-        status: res.status,
-        errors: payload.errors,
-        data: payload.data,
-      });
-    }
-
-    return payload; // { success, message, data }
+  let res;
+  try {
+    res = await fetch(buildUrl(path, query), {
+      method,
+      headers,
+      body: formData || (body !== undefined ? JSON.stringify(body) : undefined),
+    });
+  } catch (networkErr) {
+    const deviceOffline = typeof window.navigator !== 'undefined' && window.navigator.onLine === false;
+    throw new ApiError(
+      deviceOffline
+        ? "You're offline. Reconnect to the internet and try again."
+        : 'Could not reach the server. Check your connection.',
+      { code: 'NETWORK_ERROR' }
+    );
   }
+
+  let payload;
+  try { payload = await res.json(); } catch { payload = {}; }
+
+  if (res.status === 401 && !isRetry && window.Storage.getRefreshToken()) {
+    try {
+      if (!refreshPromise) refreshPromise = refreshAccessToken().finally(() => { refreshPromise = null; });
+      await refreshPromise;
+      return request(method, path, { body, formData, query, isRetry: true, headers: extraHeaders });
+    } catch {
+      window.Storage.clearSession();
+      if (!window.location.pathname.endsWith('login.html')) {
+        window.location.href = window.location.pathname.includes('admin-') ? 'admin-login.html?sessionExpired=1' : 'login.html?sessionExpired=1';
+      }
+      throw new ApiError('Session expired, please log in again', { code: 'SESSION_EXPIRED', status: 401 });
+    }
+  }
+
+  if (!res.ok || payload.success === false) {
+    throw new ApiError(payload.message || `Request failed (${res.status})`, {
+      code: payload.code,
+      status: res.status,
+      errors: payload.errors,
+      data: payload.data,
+    });
+  }
+  return payload;
+}
 
   /** Generates a random key suitable for the Idempotency-Key header (one per logical "attempt", reused across retries of the SAME attempt). */
   function newIdempotencyKey() {
@@ -126,12 +119,14 @@
   }
 
   window.Api = {
-    ApiError,
-    newIdempotencyKey,
-    get: (path, query) => request('GET', path, { query }),
-    post: (path, body, opts) => request('POST', path, { body, headers: opts?.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : undefined }),
-    put: (path, body) => request('PUT', path, { body }),
-    patch: (path, body) => request('PATCH', path, { body }),
-    delete: (path) => request('DELETE', path),
-  };
+  ApiError,
+  newIdempotencyKey,
+  get: (path, query) => request('GET', path, { query }),
+  post: (path, body, opts) => request('POST', path, { body, headers: opts?.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : undefined }),
+  put: (path, body) => request('PUT', path, { body }),
+  patch: (path, body) => request('PATCH', path, { body }),
+  delete: (path) => request('DELETE', path),
+  /** multipart upload (screenshots). `formData` is a FormData instance. */
+  upload: (path, formData, method = 'POST') => request(method, path, { formData }),
+};
 })(window);

@@ -616,3 +616,44 @@ table.table {
   font-size: var(--text-sm); cursor: pointer; padding: 0;
 }
 .btn-link:hover { text-decoration: underline; }
+
+
+
+
+
+/* ---- Cash count (closing a shift by note/coin) + read-only breakdown ---- */
+.cc-list { display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.cc-row {
+  display: grid;
+  grid-template-columns: 110px 16px 96px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.cc-row:last-child { border-bottom: none; }
+.cc-row:focus-within { background: var(--color-primary-50); }
+.cc-label { font-weight: var(--font-semibold); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.cc-x { color: var(--color-text-muted); text-align: center; }
+.cc-input { height: 40px; text-align: right; font-weight: var(--font-bold); font-variant-numeric: tabular-nums; }
+.cc-sub { text-align: right; font-size: var(--text-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cc-total {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  margin-top: var(--space-3); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg); background: var(--color-text); color: #fff;
+}
+.cc-total span { font-size: var(--text-sm); opacity: 0.85; }
+.cc-total small { display: block; font-size: var(--text-xs); opacity: 0.7; }
+.cc-total strong { font-size: clamp(1.4rem, 5vw, 2rem); font-weight: 800; font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) {
+  .cc-row { grid-template-columns: 92px 12px 80px minmax(0, 1fr); padding: 6px var(--space-2); }
+}
+
+.cc-breakdown { margin-top: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.cc-breakdown-title { padding: var(--space-2) var(--space-3); background: var(--color-bg); font-size: var(--text-xs); font-weight: var(--font-semibold); color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.cc-breakdown table { width: 100%; border-collapse: collapse; }
+.cc-breakdown th, .cc-breakdown td { padding: 6px var(--space-3); font-size: var(--text-sm); text-align: left; border-bottom: 1px solid var(--color-border); font-variant-numeric: tabular-nums; }
+.cc-breakdown th { font-size: var(--text-xs); color: var(--color-text-secondary); font-weight: var(--font-semibold); }
+.cc-breakdown .num { text-align: right; }
+.cc-breakdown tfoot td { font-weight: var(--font-bold); border-bottom: none; background: var(--color-bg); }
+.cc-breakdown tbody tr:last-child td { border-bottom: 1px solid var(--color-border); }

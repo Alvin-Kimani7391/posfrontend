@@ -19,6 +19,7 @@
     OWNER:[
 
       'notifications.view', 'notifications.send', 
+      'tickets.view', 'tickets.create',
     ],
     MANAGER: [
       'categories.view', 'categories.create', 'categories.update',
@@ -38,6 +39,7 @@
       'branches.view',
       'audit.view',
       'notifications.view', 'notifications.send',   // new
+      'tickets.view', 'tickets.create',
     ],
     CASHIER: [
       'categories.view',
@@ -49,6 +51,7 @@
       'customers.view', 'customers.create',
       'shifts.open', 'shifts.close', 'shifts.view',
       'notifications.view', 'notifications.send',   // new
+      'tickets.view', 'tickets.create',
     ],
     STOREKEEPER: [
       'categories.view', 'categories.create', 'categories.update',
@@ -57,6 +60,7 @@
       'suppliers.view', 'suppliers.create',
       'purchases.view', 'purchases.create', 'purchases.receive',
       'notifications.view', 'notifications.send',   // new
+      'tickets.view', 'tickets.create',
     ],
     ACCOUNTANT: [
       'categories.view', 'products.view',
@@ -69,6 +73,7 @@
       'audit.view',
       'etims.view',
       'notifications.view',   // new - view only, accountants don't raise ops alerts
+      'tickets.view', 'tickets.create',
     ],
   };
 

@@ -408,3 +408,61 @@ body.pz-focus-on { overflow: hidden; }
 .pz-note.warn { background: var(--color-warning-bg); color: var(--color-warning); }
 .pz-complete-btn { min-width: 220px; height: 52px; font-size: var(--text-md); }
 @media (max-width: 480px) { .pz-complete-btn { min-width: 0; flex: 1; } }
+
+/* ---- M-PESA Till (Buy Goods) panel ---- */
+.pz-till { margin-bottom: var(--space-3); }
+.pz-till-steps { margin: 0 0 var(--space-3); padding-left: 1.25rem; font-size: var(--text-sm); color: var(--color-text-secondary); line-height: 1.6; }
+.pz-till-steps strong { color: var(--color-text); }
+.pz-till-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+.pz-till-grid > div { padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); background: var(--color-primary-50); border: 1px solid var(--color-primary); text-align: center; min-width: 0; }
+.pz-till-grid span { display: block; font-size: var(--text-xs); font-weight: var(--font-semibold); color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.pz-till-grid strong { display: block; font-size: clamp(1.5rem, 5vw, 2.25rem); font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; color: var(--color-primary-dark); overflow-wrap: anywhere; }
+.pz-code-box { margin-top: var(--space-3); }
+.pz-linkbtn { border: none; background: transparent; padding: 0; color: var(--color-primary); font-size: var(--text-sm); font-weight: var(--font-semibold); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.pz-linkbtn:hover { color: var(--color-primary-dark); }
+.pz-code-row { display: none; gap: var(--space-2); margin-top: var(--space-2); }
+.pz-code-row.open { display: flex; }
+.pz-code-input { flex: 1; min-width: 0; height: 48px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 1.15rem; font-weight: var(--font-bold); letter-spacing: 0.12em; text-transform: uppercase; }
+
+
+
+
+
+
+
+/* ---- Cash count (closing a shift by note/coin) + read-only breakdown ---- */
+.cc-list { display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.cc-row {
+  display: grid;
+  grid-template-columns: 110px 16px 96px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.cc-row:last-child { border-bottom: none; }
+.cc-row:focus-within { background: var(--color-primary-50); }
+.cc-label { font-weight: var(--font-semibold); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.cc-x { color: var(--color-text-muted); text-align: center; }
+.cc-input { height: 40px; text-align: right; font-weight: var(--font-bold); font-variant-numeric: tabular-nums; }
+.cc-sub { text-align: right; font-size: var(--text-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cc-total {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  margin-top: var(--space-3); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg); background: var(--color-text); color: #fff;
+}
+.cc-total span { font-size: var(--text-sm); opacity: 0.85; }
+.cc-total small { display: block; font-size: var(--text-xs); opacity: 0.7; }
+.cc-total strong { font-size: clamp(1.4rem, 5vw, 2rem); font-weight: 800; font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) {
+  .cc-row { grid-template-columns: 92px 12px 80px minmax(0, 1fr); padding: 6px var(--space-2); }
+}
+
+.cc-breakdown { margin-top: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.cc-breakdown-title { padding: var(--space-2) var(--space-3); background: var(--color-bg); font-size: var(--text-xs); font-weight: var(--font-semibold); color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.cc-breakdown table { width: 100%; border-collapse: collapse; }
+.cc-breakdown th, .cc-breakdown td { padding: 6px var(--space-3); font-size: var(--text-sm); text-align: left; border-bottom: 1px solid var(--color-border); font-variant-numeric: tabular-nums; }
+.cc-breakdown th { font-size: var(--text-xs); color: var(--color-text-secondary); font-weight: var(--font-semibold); }
+.cc-breakdown .num { text-align: right; }
+.cc-breakdown tfoot td { font-weight: var(--font-bold); border-bottom: none; background: var(--color-bg); }
+.cc-breakdown tbody tr:last-child td { border-bottom: 1px solid var(--color-border); }

@@ -30,10 +30,12 @@
 
     { key: 'reports',   label: 'Reports',   icon: 'reports',  href: 'reports.html',    permission: 'reports.view' },
     { key: 'audit',     label: 'Audit log', icon: 'settings', href: 'audit-logs.html', permission: 'audit.view' },
+        { key: 'cash', label: 'Registers & Shifts', icon: 'store', href: 'cash-register.html', permission: 'registers.view' },
 
     { key: 'branches', label: 'Branches', icon: 'branches', href: 'branches.html', permission: 'branches.view' },
     { key: 'employees', label: 'Employees', icon: 'employees', href: 'employees.html', permission: 'employees.view' },
     { key: 'customers', label: 'Customers', icon: 'employees', href: 'customers.html', permission: 'customers.view' },
+    { key: 'tickets', label: 'Tickets', icon: 'alert', href: 'tickets.html', permission: 'tickets.view' },
     { key: 'notifications', label: 'Notifications', icon: 'bell', href: 'notifications.html', permission: 'notifications.view' },
     { key: 'settings', label: 'Settings', icon: 'settings', href: 'settings.html', permission: 'settings.view' },
   ];

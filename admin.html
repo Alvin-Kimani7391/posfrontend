@@ -1,0 +1,3 @@
+<!doctype html><html><head><meta charset="UTF-8" /><title>Admin</title>
+<script src="js/core/config.js"></script><script src="js/core/storage.js"></script>
+<script>var u=window.Storage.getUser();location.replace(window.Storage.isAuthenticated()&&u&&u.role==='SUPER_ADMIN'?'admin-dashboard.html':'admin-login.html');</script></head><body></body></html>

@@ -17,6 +17,11 @@
     CUSTOMER_PAYMENT: { label: 'Payment received', icon: 'check', severity: 'info' },
     SYSTEM_ALERT: { label: 'System alert', icon: 'alert', severity: 'warning' },
     EMPLOYEE_ALERT: { label: 'Staff alert', icon: 'alert', severity: 'warning' },
+    TICKET_CREATED:  { label: 'Ticket raised',    icon: 'alert', severity: 'info' },
+TICKET_REPLY:    { label: 'Support replied',  icon: 'bell',  severity: 'info' },
+TICKET_UPDATED:  { label: 'Ticket updated',   icon: 'check', severity: 'info' },
+TICKET_RESOLVED: { label: 'Ticket resolved',  icon: 'check', severity: 'info' },
+TICKET_CLOSED:   { label: 'Ticket closed',    icon: 'check', severity: 'info' },
   };
 
   // Same subset the backend's POST /notifications/alert accepts.

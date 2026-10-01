@@ -1,0 +1,40 @@
+/* Support tickets - shared by tickets.html and admin-tickets.html */
+.tk-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: var(--space-5); text-align: center; cursor: pointer;
+  border: 2px dashed var(--color-border-strong); border-radius: var(--radius-md);
+  color: var(--color-text-secondary); font-size: var(--text-sm); background: var(--color-bg);
+}
+.tk-drop:hover, .tk-drop.drag { border-color: var(--color-primary); background: var(--color-primary-50); }
+.tk-drop small { color: var(--color-text-muted); }
+.tk-previews, .tk-thumbs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.tk-prev { position: relative; width: 84px; height: 84px; }
+.tk-prev img, .tk-thumbs img {
+  width: 84px; height: 84px; object-fit: cover; display: block;
+  border-radius: var(--radius-sm); border: 1px solid var(--color-border);
+}
+.tk-thumbs img { width: 110px; height: 110px; }
+.tk-prev button {
+  position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%;
+  border: none; background: var(--color-danger); color: #fff; cursor: pointer; line-height: 1; font-size: 14px;
+}
+.tk-error { margin: var(--space-3) 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.tk-error-head { display: flex; justify-content: space-between; align-items: center; padding: var(--space-2) var(--space-3); background: var(--color-bg); font-size: var(--text-xs); font-weight: var(--font-semibold); color: var(--color-text-secondary); }
+.tk-error pre { margin: 0; padding: var(--space-3); max-height: 180px; overflow: auto; font-size: 12px; white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #e2e8f0; }
+.tk-thread { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-4) 0; }
+.tk-msg { padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-bg); border: 1px solid var(--color-border); max-width: 92%; }
+.tk-msg-staff { align-self: flex-end; background: var(--color-primary-50); border-color: var(--color-primary-light); }
+.tk-msg-head { display: flex; justify-content: space-between; gap: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); margin-bottom: 4px; }
+.tk-msg-head b { color: var(--color-text); }
+.tk-msg p { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: var(--text-sm); }
+.tk-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); margin: var(--space-3) 0; }
+.tk-meta div span { display: block; font-size: var(--text-xs); color: var(--color-text-muted); }
+.tk-meta div b { font-size: var(--text-sm); font-weight: var(--font-semibold); word-break: break-word; }
+.tk-resolution { padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-success-bg); color: var(--color-success); font-size: var(--text-sm); margin: var(--space-3) 0; }
+.tk-section-title { font-size: var(--text-sm); font-weight: var(--font-semibold); margin: var(--space-4) 0 var(--space-2); }
+.tk-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--space-3); margin-bottom: var(--space-4); }
+.tk-stat { padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
+.tk-stat b { display: block; font-size: var(--text-2xl); }
+.tk-stat span { font-size: var(--text-xs); color: var(--color-text-secondary); }
+.tk-stat.alert b { color: var(--color-danger); }
+.tk-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--color-danger); margin-right: 6px; }

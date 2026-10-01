@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Admin sign in · Platform Admin</title>
+  <meta name="robots" content="noindex" />
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/reports.css" />
+  <link rel="stylesheet" href="css/admin.css" />
+</head>
+<body>
+  <div class="auth-screen">
+    <div class="auth-card">
+      <div class="auth-logo"><span class="logo-mark" id="logo-mark"></span><span>Platform Admin</span></div>
+      <h1>Admin sign in</h1>
+      <p class="auth-subtitle">Restricted to platform administrators.</p>
+      <div id="form-alert-slot"></div>
+      <form id="admin-login-form" novalidate>
+        <div class="field"><label for="identifier">Email or phone</label><input class="input" id="identifier" name="identifier" required autocomplete="username" /></div>
+        <div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" required autocomplete="current-password" /></div>
+        <button class="btn btn-primary btn-block btn-lg" id="admin-login-btn" type="submit">Sign in</button>
+      </form>
+    </div>
+  </div>
+  <script src="js/core/config.js"></script>
+  <script src="js/core/icons.js"></script>
+  <script src="js/core/storage.js"></script>
+  <script src="js/core/api.js"></script>
+  <script src="js/core/ui.js"></script>
+  <script src="js/pages/admin-login.js"></script>
+</body>
+</html>

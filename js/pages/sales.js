@@ -24,10 +24,13 @@
  *   2. Added products appear in the ticket. Adjust quantity / discount inline.
  *   3. ONE button: "Add payment to complete sale" (F9).
  *   4. The payment window asks how the customer is paying:
- *        CASH   -> amount received, system shows the CHANGE
- *        M-PESA -> STK push; once confirmed the sale completes automatically
- *        BANK / CARD -> optional reference, then Complete sale
- *        CREDIT -> pick the customer, then Complete sale
+ *        CASH         -> amount received, system shows the CHANGE
+ *        M-PESA STK   -> STK push; once confirmed the sale completes automatically
+ *        M-PESA TILL  -> customer pays the Buy Goods till themselves; the POS
+ *                        matches the payment automatically (or by the customer's
+ *                        M-PESA code if matching is ambiguous), then completes the sale
+ *        BANK / CARD  -> optional reference, then Complete sale
+ *        CREDIT       -> pick the customer, then Complete sale
  *   5. Receipt opens after every sale (auto-print requested).
  *
  * PRICING NOTE: everything shown while building the cart is a CLIENT-SIDE
@@ -41,6 +44,9 @@
  * M-PESA: the reference is never typed. It only exists once
  * GET /payments/mpesa/:reference/status returns SUCCESS, and the backend
  * re-verifies it against its own MpesaTransaction when the sale is saved.
+ * The only thing a cashier may type for the TILL option is the customer's
+ * M-PESA confirmation code, and the backend checks it against payments PayHero
+ * reported (exact amount, never used before) - a made-up code is rejected.
  *
  * SHORTCUTS (new sale view): F2 search | Up/Down pick | Enter add | F9 payment
  */
@@ -60,14 +66,17 @@
   };
 
   // Font Awesome 6 (free, solid) icon classes - loaded in sales.html
+  // MPESA_TILL is a UI-only option: it is sent to the backend as method 'MPESA' like STK.
   const METHODS = [
     { id: 'CASH', label: 'Cash', ico: 'fa-solid fa-money-bill-wave' },
-    { id: 'MPESA', label: 'M-PESA', ico: 'fa-solid fa-mobile-screen-button' },
+    { id: 'MPESA', label: 'M-PESA STK', ico: 'fa-solid fa-mobile-screen-button' },
+    { id: 'MPESA_TILL', label: 'M-PESA Till', ico: 'fa-solid fa-store' },
     { id: 'BANK', label: 'Bank', ico: 'fa-solid fa-building-columns' },
     { id: 'CREDIT', label: 'Credit', ico: 'fa-solid fa-file-invoice-dollar' },
     { id: 'CARD', label: 'Card', ico: 'fa-solid fa-credit-card' },
   ];
 
+  const DEFAULT_FLAGS = { mpesaEnabled: false, etimsEnabled: false, mpesaManualEnabled: false, tillNumber: null };
   const FOCUS_KEY = 'pos.fullView';
 
   const state = {
@@ -77,10 +86,10 @@
     customer: null,
     cartDiscount: 0,
     payments: [], // built when the payment window completes: { method, amount, reference, amountTendered }
-    pendingMpesa: null, // { reference, amount } - confirmed M-PESA money that has not been saved as a sale yet
+    pendingMpesa: null, // { reference, amount (KES), mode: 'STK' | 'MANUAL' } - confirmed M-PESA money that has not been saved as a sale yet
     lastAdded: null, // key of the last product added
     currentShift: null,
-    flags: { mpesaEnabled: false, etimsEnabled: false },
+    flags: { ...DEFAULT_FLAGS },
     history: { page: 1, limit: 10, search: '', from: '', to: '' },
   };
 
@@ -304,7 +313,7 @@
     ]);
 
     state.currentShift = shiftResult.status === 'fulfilled' ? shiftResult.value.data.shift : null;
-    state.flags = flagsResult.status === 'fulfilled' ? flagsResult.value.data : { mpesaEnabled: false, etimsEnabled: false };
+    state.flags = flagsResult.status === 'fulfilled' ? { ...DEFAULT_FLAGS, ...flagsResult.value.data } : { ...DEFAULT_FLAGS };
 
     renderShiftBanner();
   }
@@ -428,35 +437,17 @@
   }
 
   function openCloseShiftModal() {
-    const modal = window.UI.openModal({
+    window.CashCount.openCountModal({
       title: 'Close shift',
-      bodyHtml: `
-        <form id="close-shift-form">
-          <p class="text-sm text-secondary" style="margin-bottom: var(--space-4)">Count the cash in the drawer and enter it below. The system will calculate the expected amount and show any difference.</p>
-          <div class="field"><label>Actual cash counted (KES)</label><input class="input" name="actualCash" type="number" step="0.01" min="0" required /></div>
-          <div class="field"><label>Notes <span class="text-muted">(optional)</span></label><textarea class="textarea" name="notes"></textarea></div>
-        </form>
-      `,
-      footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-danger" data-action="save" id="close-shift-save">Close shift</button>`,
-    });
-
-    modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
-    modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
-      const form = modal.querySelector('#close-shift-form');
-      if (!form.reportValidity()) return;
-      const raw = window.UI.serializeForm(form);
-      const btn = $('close-shift-save');
-      window.UI.setButtonLoading(btn, true, 'Closing…');
-      try {
-        const { data } = await window.Api.post(`/shifts/${state.currentShift._id}/close`, { actualCash: raw.actualCash, notes: raw.notes });
+      intro: 'Count the cash in the drawer and enter how many of each note and coin you have. The total is added up for you, and the system compares it with what the drawer should hold.',
+      confirmText: 'Close shift',
+      confirmClass: 'btn-danger',
+      onSubmit: async ({ denominations, notes }) => {
+        const { data } = await window.Api.post(`/shifts/${state.currentShift._id}/close`, { denominations, notes });
         window.UI.closeModal();
         showShiftSummary(data.shift);
         loadShift();
-      } catch (err) {
-        window.UI.toast.error(err.message);
-      } finally {
-        window.UI.setButtonLoading(btn, false);
-      }
+      },
     });
   }
 
@@ -464,6 +455,7 @@
     const diff = shift.cashDifference;
     const modal = window.UI.openModal({
       title: 'Shift summary',
+      maxWidth: '520px',
       bodyHtml: `
         <div class="pos-totals-row"><span>Opening float</span><span>${fm(shift.openingCash)}</span></div>
         <div class="pos-totals-row"><span>Expected cash</span><span>${fm(shift.expectedCash)}</span></div>
@@ -471,6 +463,7 @@
         <div class="pos-totals-row grand" style="color:${diff === 0 ? 'var(--color-success)' : 'var(--color-danger)'}">
           <span>${diff === 0 ? 'Balanced' : diff > 0 ? 'Over' : 'Short'}</span><span>${fm(Math.abs(diff))}</span>
         </div>
+        ${window.CashCount.breakdownHtml(shift.denominations)}
       `,
       footerHtml: `<button class="btn btn-primary" data-action="close">Done</button>`,
     });
@@ -916,6 +909,11 @@
     return [...set].filter((n) => n >= total).sort((a, b) => a - b).slice(0, 5);
   }
 
+  /** Which payment tab a confirmed-but-unsaved M-PESA payment belongs to. */
+  function mpesaMethodIdFor(pending) {
+    return pending && pending.mode === 'MANUAL' ? 'MPESA_TILL' : 'MPESA';
+  }
+
   function openPaymentModal(initialMethod) {
     if (!state.cart.length) return window.UI.toast.error('Cart is empty');
     const { total } = computeTotals();
@@ -923,8 +921,14 @@
     if (total <= 0 && !resumeMpesa) return window.UI.toast.error('Total must be greater than zero');
 
     const dueAmount = resumeMpesa ? state.pendingMpesa.amount : total;
-    const methods = METHODS.filter((m) => m.id !== 'MPESA' || state.flags.mpesaEnabled);
-    let method = resumeMpesa ? 'MPESA' : (initialMethod && methods.some((m) => m.id === initialMethod) ? initialMethod : 'CASH');
+    const resumeId = resumeMpesa ? mpesaMethodIdFor(state.pendingMpesa) : null;
+    const methods = METHODS.filter((m) => {
+      if (m.id === resumeId) return true; // always show the tab that holds already-received money
+      if (m.id === 'MPESA') return state.flags.mpesaEnabled;
+      if (m.id === 'MPESA_TILL') return state.flags.mpesaManualEnabled;
+      return true;
+    });
+    let method = resumeId || (initialMethod && methods.some((m) => m.id === initialMethod) ? initialMethod : 'CASH');
 
     const modal = window.UI.openModal({
       title: 'Payment',
@@ -953,11 +957,21 @@
     }
 
     function selectMethod(next) {
-      if (state.pendingMpesa && next !== 'MPESA') return window.UI.toast.error('M-PESA payment already received - complete the sale first');
+      const lockedTo = state.pendingMpesa ? mpesaMethodIdFor(state.pendingMpesa) : null;
+      if (lockedTo && next !== lockedTo) return window.UI.toast.error('M-PESA payment already received - complete the sale first');
+      if (next === 'MPESA_TILL' && method === 'MPESA_TILL' && modal._manualRef) return; // already waiting on this tab
+
       clearMpesaPolling(modal);
+      // Leaving the Till tab while still waiting: release the request so it cannot confuse matching for other cashiers.
+      if (modal._manualRef && next !== 'MPESA_TILL') {
+        cancelManualAttempt(modal, () => { if (document.body.contains(modal)) selectMethod('MPESA_TILL'); });
+      }
+      modal._onRetry = null;
+      modal._handleStatus = null;
+
       method = next;
       modal.querySelectorAll('.pz-method').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
-      const renderers = { CASH: renderCash, MPESA: renderMpesa, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
+      const renderers = { CASH: renderCash, MPESA: renderMpesa, MPESA_TILL: renderMpesaTill, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
       renderers[method]();
     }
 
@@ -1074,6 +1088,17 @@
       };
     }
 
+    /* ---- M-PESA shared: save the sale once the money is confirmed ---- */
+    async function finalizeMpesa(reference, amount) {
+      state.payments = [{ method: 'MPESA', amount, reference }];
+      const ok = await checkout({ btn: null });
+      if (!ok) {
+        renderMpesaStatus(modal, { tone: 'warning', label: 'Paid - sale not saved', message: 'The M-PESA payment is confirmed but the sale could not be saved. Tap "Save sale" to try again. Do not start another payment.' });
+        setComplete({ enabled: true, label: 'Save sale & print receipt' });
+        onComplete = async () => { await checkout({ btn: completeBtn }); };
+      }
+    }
+
     /* ---- M-PESA (STK push) ---- */
     function renderMpesa() {
       const already = state.pendingMpesa;
@@ -1094,19 +1119,100 @@
       } else {
         setComplete({ hidden: true });
         onComplete = null;
-        bindMpesaSend(modal, dueAmount, {
-          onPaid: async (reference) => {
-            state.pendingMpesa = { reference, amount: dueAmount };
-            state.payments = [{ method: 'MPESA', amount: dueAmount, reference }];
-            const ok = await checkout({ btn: null });
-            if (!ok) {
-              renderMpesaStatus(modal, { tone: 'warning', label: 'Paid - sale not saved', message: 'The M-PESA payment is confirmed but the sale could not be saved. Tap "Save sale" to try again. Do not send another prompt.' });
-              setComplete({ enabled: true, label: 'Save sale & print receipt' });
-              onComplete = async () => { await checkout({ btn: completeBtn }); };
-            }
-          },
-        });
+        bindMpesaSend(modal, dueAmount, { onPaid: (reference) => finalizeMpesa(reference, dueAmount) });
       }
+    }
+
+    /* ---- M-PESA TILL (Buy Goods, customer pays by themselves) ---- */
+    function renderMpesaTill() {
+      const already = state.pendingMpesa && state.pendingMpesa.mode === 'MANUAL' ? state.pendingMpesa : null;
+      const hasCents = Math.round(dueAmount * 100) % 100 !== 0;
+
+      panel.innerHTML = `
+        <div class="pz-till">
+          <ol class="pz-till-steps">
+            <li>Customer opens <strong>M-PESA</strong> on their phone</li>
+            <li>Chooses <strong>Lipa na M-PESA → Buy Goods and Services</strong></li>
+            <li>Enters the <strong>Till number</strong> and <strong>Amount</strong> below, then their PIN</li>
+          </ol>
+          <div class="pz-till-grid">
+            <div><span>Till number</span><strong id="pz-till-no">${esc(state.flags.tillNumber || '-')}</strong></div>
+            <div><span>Amount</span><strong>${fm(dueAmount)}</strong></div>
+          </div>
+        </div>
+        ${hasCents && !already ? `<div class="pz-note warn">This total has cents. M-PESA till payments are normally whole shillings, so the customer may not be able to pay the exact amount. Consider rounding with the cart discount.</div>` : ''}
+        <div id="mpesa-stk-status"></div>
+        ${already ? '' : `
+        <div class="pz-code-box" id="pz-code-box">
+          <button type="button" class="pz-linkbtn" id="pz-code-toggle">Customer paid but nothing appears? Enter the M-PESA code</button>
+          <div class="pz-code-row" id="pz-code-row">
+            <input class="input pz-code-input" id="pz-code" maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. UJK1A2B3C4" />
+            <button type="button" class="btn btn-primary" id="pz-code-btn">Confirm</button>
+          </div>
+        </div>`}
+      `;
+
+      if (already) {
+        renderMpesaStatus(modal, { tone: 'warning', label: 'Paid - sale not saved', message: `M-PESA till payment of ${fm(already.amount)} was received. Tap "Save sale" to finish. Do not start another payment.` });
+        setComplete({ enabled: true, label: 'Save sale & print receipt' });
+        onComplete = async () => { state.payments = [{ method: 'MPESA', amount: already.amount, reference: already.reference }]; await checkout({ btn: completeBtn }); };
+        return;
+      }
+
+      setComplete({ hidden: true });
+      onComplete = null;
+
+      // Code box
+      const codeRow = panel.querySelector('#pz-code-row');
+      const codeInput = panel.querySelector('#pz-code');
+      panel.querySelector('#pz-code-toggle').addEventListener('click', () => {
+        codeRow.classList.toggle('open');
+        if (codeRow.classList.contains('open')) codeInput.focus();
+      });
+      codeInput.addEventListener('input', () => { codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
+      codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') panel.querySelector('#pz-code-btn').click(); });
+      panel.querySelector('#pz-code-btn').addEventListener('click', async () => {
+        const code = codeInput.value.trim().toUpperCase();
+        if (!/^[A-Z][A-Z0-9]{9}$/.test(code)) return window.UI.toast.error('An M-PESA code is 10 characters, e.g. UJK1A2B3C4');
+        if (!modal._manualRef) return window.UI.toast.error('No payment request is active. Tap "Try again" first.');
+        const btn = panel.querySelector('#pz-code-btn');
+        window.UI.setButtonLoading(btn, true, 'Checking…');
+        try {
+          const { data } = await window.Api.post(`/payments/mpesa/${modal._manualRef}/claim`, { receiptCode: code });
+          modal._handleStatus?.(data, true);
+        } catch (err) {
+          window.UI.toast.error(err.message);
+        } finally {
+          if (document.body.contains(btn)) window.UI.setButtonLoading(btn, false);
+        }
+      });
+
+      async function startManualAttempt() {
+        modal._manualView = null;
+        renderMpesaStatus(modal, { tone: 'pending', label: 'Starting', message: 'Preparing the payment request…' });
+        try {
+          const { data } = await window.Api.post('/payments/mpesa/manual', {
+            branchId: window.AppShell.getActiveBranchId(),
+            amountCents: Math.round(dueAmount * 100),
+          });
+          // The cashier may have switched tab / closed the window while the request was in flight.
+          if (method !== 'MPESA_TILL' || !document.body.contains(modal)) {
+            window.Api.post(`/payments/mpesa/${data.reference}/cancel`, {}).catch(() => {});
+            return;
+          }
+          modal._manualRef = data.reference;
+          const tillEl = panel.querySelector('#pz-till-no');
+          if (tillEl && data.tillNumber) tillEl.textContent = data.tillNumber;
+          renderMpesaStatus(modal, { tone: 'pending', label: 'Waiting', message: 'Waiting for the customer to pay to the Till number…' });
+          watchMpesa(modal, data.reference, { amount: dueAmount, mode: 'MANUAL', onPaid: (reference) => finalizeMpesa(reference, dueAmount) });
+        } catch (err) {
+          renderMpesaStatus(modal, { tone: 'error', label: 'Could not start', message: err.message, retry: true });
+          window.UI.toast.error(err.message);
+        }
+      }
+
+      modal._onRetry = startManualAttempt;
+      startManualAttempt();
     }
 
     modal.querySelector('#pz-methods').addEventListener('click', (e) => {
@@ -1115,6 +1221,7 @@
     });
     modal.querySelector('[data-action="cancel"]').addEventListener('click', () => {
       clearMpesaPolling(modal);
+      cancelManualAttempt(modal, () => openPaymentModal());
       window.UI.closeModal();
       $('pos-search')?.focus();
     });
@@ -1123,7 +1230,7 @@
     selectMethod(method);
   }
 
-  /* ---- M-PESA status panel + polling ---- */
+  /* ---- M-PESA status panel + polling (shared by STK and TILL) ---- */
   function renderMpesaStatus(modal, viewState) {
     const el = modal.querySelector('#mpesa-stk-status');
     if (!el) return;
@@ -1135,12 +1242,124 @@
       </div>
       ${viewState.retry ? `<button type="button" class="btn btn-secondary btn-sm" id="mpesa-retry-btn" style="margin-top:var(--space-2)">Try again</button>` : ''}
     `;
-    modal.querySelector('#mpesa-retry-btn')?.addEventListener('click', () => modal.querySelector('#mpesa-send-btn').click());
+    modal.querySelector('#mpesa-retry-btn')?.addEventListener('click', () => {
+      if (modal._onRetry) modal._onRetry();
+      else modal.querySelector('#mpesa-send-btn')?.click();
+    });
   }
 
   function clearMpesaPolling(modal) {
     if (modal._mpesaPoll) { clearInterval(modal._mpesaPoll); modal._mpesaPoll = null; }
     if (modal._mpesaSlow) { clearTimeout(modal._mpesaSlow); modal._mpesaSlow = null; }
+  }
+
+  /**
+   * Stops waiting on a TILL request and releases it on the server (so a stale request can never
+   * make matching ambiguous for another cashier). If the customer's money arrived in the very
+   * moment of cancelling, it is remembered in state.pendingMpesa and onAlreadyPaid() lets the
+   * caller bring the payment window back so the sale can still be saved.
+   */
+  function cancelManualAttempt(modal, onAlreadyPaid) {
+    const reference = modal._manualRef;
+    modal._manualRef = null;
+    clearMpesaPolling(modal);
+    if (!reference || state.pendingMpesa) return;
+    window.Api.post(`/payments/mpesa/${reference}/cancel`, {}).then(({ data }) => {
+      if (data && data.status === 'SUCCESS' && !state.pendingMpesa) {
+        state.pendingMpesa = { reference, amount: data.amount / 100, mode: 'MANUAL' };
+        window.UI.toast.success('The customer\u2019s payment just arrived - finish the sale');
+        if (onAlreadyPaid) onAlreadyPaid();
+      }
+    }).catch(() => { /* the server expires the request on its own */ });
+  }
+
+  /** TILL: what the cashier sees while a payment is still pending. */
+  function showManualPending(modal, s) {
+    const view = s.needsCode ? 'code' : 'wait';
+    if (modal._manualView === view) return; // don't redraw (and flicker) on every poll
+    modal._manualView = view;
+    if (s.needsCode) {
+      renderMpesaStatus(modal, {
+        tone: 'warning',
+        label: 'Enter M-PESA code',
+        message: 'This payment cannot be matched automatically (another payment or request has the same amount). Ask the customer for the code in their M-PESA confirmation SMS and enter it below.',
+      });
+      const row = modal.querySelector('#pz-code-row');
+      if (row && !row.classList.contains('open')) {
+        row.classList.add('open');
+        modal.querySelector('#pz-code')?.focus();
+      }
+    } else {
+      renderMpesaStatus(modal, { tone: 'pending', label: 'Waiting', message: 'Waiting for the customer to pay to the Till number…' });
+    }
+  }
+
+  /** Polls a confirmed-by-backend M-PESA request (STK or TILL) until it succeeds or fails. */
+  function watchMpesa(modal, reference, { amount, mode, onPaid }) {
+    clearMpesaPolling(modal);
+    let handled = false;
+
+    // One handler for the 3-second poll, the manual "check now" button and the TILL code box.
+    const handleStatus = (s, manual) => {
+      if (handled) return;
+      if (s.status === 'SUCCESS') {
+        handled = true;
+        clearMpesaPolling(modal);
+        // Remember the confirmed money straight away: closing or switching the window can never lose track of it.
+        state.pendingMpesa = { reference, amount, mode };
+        modal.querySelector('#pz-code-box')?.remove();
+        renderMpesaStatus(modal, { tone: 'success', label: 'Confirmed', message: s.message || 'Payment received. Saving sale…' });
+        window.UI.toast.success('M-PESA payment confirmed');
+        // brief pause so "Confirmed" is actually seen, then save + print automatically
+        setTimeout(() => onPaid(reference), 700);
+      } else if (s.status === 'FAILED' || s.status === 'CANCELLED') {
+        handled = true;
+        clearMpesaPolling(modal);
+        const label = mode === 'MANUAL'
+          ? (s.failureType === 'timeout' ? 'No payment received' : 'Not completed')
+          : (MPESA_FAILURE_LABELS[s.failureType] || 'Payment failed');
+        renderMpesaStatus(modal, { tone: s.failureType === 'timeout' ? 'warning' : 'error', label, message: s.message, retry: true });
+        window.UI.toast.error(label);
+      } else if (mode === 'MANUAL') {
+        showManualPending(modal, s);
+      } else if (manual) {
+        window.UI.toast.success('Still pending on M-PESA\u2019s side - keep waiting.');
+      }
+    };
+    modal._handleStatus = handleStatus;
+
+    modal._mpesaPoll = setInterval(async () => {
+      if (!document.body.contains(modal)) { // window closed
+        clearMpesaPolling(modal);
+        if (mode === 'MANUAL') cancelManualAttempt(modal, () => openPaymentModal());
+        return;
+      }
+      try {
+        const { data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`);
+        handleStatus(s, false);
+      } catch { /* transient - keep polling */ }
+    }, 3000);
+
+    if (mode === 'STK') {
+      // After ~15s of silence offer a manual re-check (closing the tab never loses the payment:
+      // the server-side reconciliation job still resolves it).
+      modal._mpesaSlow = setTimeout(() => {
+        const area = modal.querySelector('#mpesa-stk-status');
+        if (!modal._mpesaPoll || !area || area.querySelector('#mpesa-check-now-btn')) return;
+        area.insertAdjacentHTML('beforeend', `
+          <button type="button" class="btn btn-secondary btn-sm" id="mpesa-check-now-btn" style="margin-top:var(--space-2)">Check status now</button>
+          <p class="text-xs text-muted" style="margin-top:var(--space-2)">Taking a while? If the customer already entered their PIN it is still safe to wait - this does not create a second charge.</p>
+        `);
+        modal.querySelector('#mpesa-check-now-btn').addEventListener('click', async () => {
+          try {
+            const { data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`);
+            handleStatus(s, true);
+          } catch (err) {
+            window.UI.toast.error(err.message);
+          }
+        });
+      }, 15000);
+    }
   }
 
   function bindMpesaSend(modal, amount, { onPaid }) {
@@ -1159,55 +1378,7 @@
         });
         const reference = data.reference;
         renderMpesaStatus(modal, { tone: 'pending', label: 'Waiting', message: 'Ask the customer to enter their M-PESA PIN on their phone.' });
-
-        let handled = false;
-        // One handler for both the 3-second poll and the manual "check now" button.
-        const handleStatus = async (s, manual) => {
-          if (handled) return;
-          if (s.status === 'SUCCESS') {
-            handled = true;
-            clearMpesaPolling(modal);
-            renderMpesaStatus(modal, { tone: 'success', label: 'Confirmed', message: s.message || 'Payment received. Saving sale…' });
-            window.UI.toast.success('M-PESA payment confirmed');
-            // brief pause so "Confirmed" is actually seen, then save + print automatically
-            setTimeout(() => onPaid(reference), 700);
-          } else if (s.status === 'FAILED') {
-            handled = true;
-            clearMpesaPolling(modal);
-            const label = MPESA_FAILURE_LABELS[s.failureType] || 'Payment failed';
-            renderMpesaStatus(modal, { tone: s.failureType === 'timeout' ? 'warning' : 'error', label, message: s.message, retry: true });
-            window.UI.toast.error(label);
-          } else if (manual) {
-            window.UI.toast.success('Still pending on M-PESA\u2019s side - keep waiting.');
-          }
-        };
-
-        modal._mpesaPoll = setInterval(async () => {
-          if (!document.body.contains(modal)) { clearMpesaPolling(modal); return; } // window closed
-          try {
-            const { data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`);
-            handleStatus(s, false);
-          } catch { /* transient - keep polling */ }
-        }, 3000);
-
-        // After ~15s of silence offer a manual re-check (closing the tab never loses the payment:
-        // the server-side reconciliation job still resolves it).
-        modal._mpesaSlow = setTimeout(() => {
-          const area = modal.querySelector('#mpesa-stk-status');
-          if (!modal._mpesaPoll || !area || area.querySelector('#mpesa-check-now-btn')) return;
-          area.insertAdjacentHTML('beforeend', `
-            <button type="button" class="btn btn-secondary btn-sm" id="mpesa-check-now-btn" style="margin-top:var(--space-2)">Check status now</button>
-            <p class="text-xs text-muted" style="margin-top:var(--space-2)">Taking a while? If the customer already entered their PIN it is still safe to wait - this does not create a second charge.</p>
-          `);
-          modal.querySelector('#mpesa-check-now-btn').addEventListener('click', async () => {
-            try {
-              const { data: s } = await window.Api.get(`/payments/mpesa/${reference}/status`);
-              handleStatus(s, true);
-            } catch (err) {
-              window.UI.toast.error(err.message);
-            }
-          });
-        }, 15000);
+        watchMpesa(modal, reference, { amount, mode: 'STK', onPaid });
       } catch (err) {
         const failureType = err.data?.failureType;
         const label = MPESA_FAILURE_LABELS[failureType] || 'Could not send prompt';
