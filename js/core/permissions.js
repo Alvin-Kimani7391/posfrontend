@@ -16,10 +16,11 @@
   });
 
   const DEFAULT_ROLE_PERMISSIONS = {
-    OWNER:[
-
-      'notifications.view', 'notifications.send', 
+    // OWNER and ADMIN are granted everything in can() below, so this list is only informational.
+    OWNER: [
+      'notifications.view', 'notifications.send',
       'tickets.view', 'tickets.create',
+      'shortages.view', 'shortages.manage',
     ],
     MANAGER: [
       'categories.view', 'categories.create', 'categories.update',
@@ -36,9 +37,10 @@
       'purchases.view', 'purchases.create', 'purchases.receive', 'purchases.pay',
       'registers.manage',
       'shifts.open', 'shifts.close', 'shifts.view',
+      'shortages.view', 'shortages.manage',
       'branches.view',
       'audit.view',
-      'notifications.view', 'notifications.send',   // new
+      'notifications.view', 'notifications.send',
       'tickets.view', 'tickets.create',
     ],
     CASHIER: [
@@ -50,7 +52,8 @@
       'payments.view',
       'customers.view', 'customers.create',
       'shifts.open', 'shifts.close', 'shifts.view',
-      'notifications.view', 'notifications.send',   // new
+      'shortages.view', // own records only (backend self-scopes)
+      'notifications.view', 'notifications.send',
       'tickets.view', 'tickets.create',
     ],
     STOREKEEPER: [
@@ -59,7 +62,7 @@
       'inventory.view', 'inventory.adjust', 'inventory.receive', 'inventory.transfer',
       'suppliers.view', 'suppliers.create',
       'purchases.view', 'purchases.create', 'purchases.receive',
-      'notifications.view', 'notifications.send',   // new
+      'notifications.view', 'notifications.send',
       'tickets.view', 'tickets.create',
     ],
     ACCOUNTANT: [
@@ -72,7 +75,8 @@
       'suppliers.view',
       'audit.view',
       'etims.view',
-      'notifications.view',   // new - view only, accountants don't raise ops alerts
+      'shortages.view', // read-only; cannot clear
+      'notifications.view', // view only, accountants don't raise ops alerts
       'tickets.view', 'tickets.create',
     ],
   };

@@ -2,10 +2,15 @@
  * notifications.js
  * Full notification centre: server-filtered list (type + unread-only),
  * pagination, mark-as-read / mark-all-read, and the "raise an alert" flow
- * for any employee with notifications.send. The detail modal understands
- * the shift-close cash breakdown (data.sales) specially; everything else
- * in `data` falls back to a generic key/value view, same pattern as the
- * audit log's detail modal.
+ * for any employee with notifications.send.
+ *
+ * The detail modal formats everything properly:
+ *   - money fields in `data` are integer cents -> shown as KES with .00
+ *   - shift close: cash summary box, denominations table, cash-sales table
+ *   - everything else: friendly labels instead of raw keys / JSON
+ *
+ * Deep link: notifications.html?open=<id> (and the 'notification:open' event
+ * fired by the topbar bell) opens that specific notification's detail.
  */
 (function () {
   const esc = window.UI.escapeHtml;
@@ -15,6 +20,9 @@
   let contentEl;
   let user;
   let branches = null;
+
+  /** `data` amounts are integer cents. */
+  const moneyC = (cents) => window.UI.formatMoney((Number(cents) || 0) / 100);
 
   document.addEventListener('DOMContentLoaded', init);
 
@@ -31,7 +39,31 @@
     contentEl.innerHTML = pageSkeleton();
     bindFilters();
     bindRaiseAlert();
+
+    // The bell dropdown (js/core/notifications.js) fires this when you click an
+    // item while you're already on this page.
+    window.addEventListener('notification:open', (e) => { if (e.detail) openDetail(e.detail); });
+
     await fetchNotifications();
+    handleDeepLink();
+  }
+
+  /** ?open=<id> -> open that notification (from the list, else the copy the bell cached). */
+  function handleDeepLink() {
+    const id = new URLSearchParams(window.location.search).get('open');
+    if (!id) return;
+
+    let target = state.items.find((n) => n._id === id);
+    if (!target) {
+      try {
+        const cached = JSON.parse(sessionStorage.getItem('notif:open') || 'null');
+        if (cached && cached._id === id) target = cached;
+      } catch { /* ignore */ }
+    }
+    try { sessionStorage.removeItem('notif:open'); } catch { /* ignore */ }
+    window.history.replaceState(null, '', window.location.pathname);
+
+    if (target) openDetail(target);
   }
 
   function pageSkeleton() {
@@ -171,59 +203,148 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Detail modal - understands the shift-close cash breakdown specially,
-   * falls back to a generic key/value view for everything else.
+   * Detail modal - formatted sections
    * ------------------------------------------------------------------ */
+
+  // Keys in notification `data` that hold integer cents.
+  const MONEY_KEYS = new Set([
+    'openingCash', 'expectedCash', 'actualCash', 'cashDifference', 'denominationTotal',
+    'amount', 'total', 'subtotal', 'newBalance', 'creditLimit', 'availableCredit', 'outstandingBalance',
+    'shortageAmount', 'paymentAmount', 'totalPaid', 'balance',
+  ]);
+
+  const LABELS = {
+    openingCash: 'Opening float', expectedCash: 'Expected cash', actualCash: 'Counted cash',
+    cashDifference: 'Difference', denominationTotal: 'Total counted', cashSaleCount: 'Cash sales',
+    shortageAmount: 'Shortage', paymentAmount: 'Payment', totalPaid: 'Repaid so far', balance: 'Still owing',
+    newBalance: 'New balance', creditLimit: 'Credit limit', availableCredit: 'Available credit',
+    outstandingBalance: 'Outstanding balance', receiptNumber: 'Receipt', customerName: 'Customer',
+    cashierName: 'Cashier', recordedBy: 'Recorded by', paymentStatus: 'Payment status',
+    transferNumber: 'Transfer', refundNumber: 'Refund', itemCount: 'Items',
+  };
+
+  // Internal ids / noise - never worth showing to a human.
+  const HIDDEN_KEYS = new Set([
+    'sales', 'denominations', 'notes',
+    'shortageId', 'shiftId', 'cashierId', 'customerId', 'saleId', 'registerId', 'productId', 'variantId',
+    'fromBranchId', 'toBranchId', 'externalTransactionId',
+  ]);
+
+  const humanize = (k) => LABELS[k] || k.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
+  function row(label, value, cls = '') {
+    return `<div class="pos-totals-row ${cls}"><span>${esc(label)}</span><span>${value}</span></div>`;
+  }
+
+  function cashSummaryHtml(d, used) {
+    ['openingCash', 'expectedCash', 'actualCash', 'cashDifference'].forEach((k) => used.add(k));
+    if (d.expectedCash === undefined && d.actualCash === undefined) return '';
+    const diff = Number(d.cashDifference) || 0;
+    const tone = diff === 0 ? 'ok' : diff > 0 ? 'over' : 'short';
+    const label = diff === 0 ? 'Balanced' : diff > 0 ? 'Over' : 'Short';
+    return `
+      <div class="notif-detail-box">
+        ${d.openingCash !== undefined ? row('Opening float', moneyC(d.openingCash)) : ''}
+        ${d.expectedCash !== undefined ? row('Expected cash', moneyC(d.expectedCash)) : ''}
+        ${d.actualCash !== undefined ? row('Counted cash', moneyC(d.actualCash)) : ''}
+        ${row(label, moneyC(Math.abs(diff)), `grand notif-val-${tone}`)}
+      </div>`;
+  }
+
+  function denominationsHtml(list, totalCents) {
+    const lines = (list || []).filter((l) => l.count > 0).sort((a, b) => b.denomination - a.denomination);
+    if (!lines.length) return '';
+    const units = lines.reduce((s, l) => s + l.count, 0);
+    const total = totalCents != null ? totalCents : lines.reduce((s, l) => s + (l.subtotal || 0), 0);
+    return `
+      <div class="notif-detail-title">Cash counted by denomination</div>
+      <div class="cc-breakdown" style="margin-top:0">
+        <table>
+          <thead><tr><th>Note / coin</th><th class="num">Count</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            ${lines.map((l) => `
+              <tr>
+                <td>${window.UI.formatMoney(l.denomination)}</td>
+                <td class="num">${l.count}</td>
+                <td class="num">${moneyC(l.subtotal != null ? l.subtotal : l.denomination * l.count * 100)}</td>
+              </tr>`).join('')}
+          </tbody>
+          <tfoot><tr><td>Total</td><td class="num">${units}</td><td class="num">${moneyC(total)}</td></tr></tfoot>
+        </table>
+      </div>`;
+  }
+
   function saleBreakdownHtml(sales) {
     if (!sales || !sales.length) return '<p class="text-sm text-muted">No cash sales recorded for this shift.</p>';
     return `
-      <table class="diff-table">
-        <thead><tr><th>Receipt</th><th>When</th><th class="num">Amount</th><th class="num">Tendered</th><th class="num">Change</th></tr></thead>
-        <tbody>${sales.map((s) => `
-          <tr>
-            <td class="mono">${esc(s.receiptNumber || '—')}</td>
-            <td class="text-sm">${window.UI.formatDateTime(s.at)}</td>
-            <td class="num">${window.UI.formatMoney((s.amount || 0) / 100)}</td>
-            <td class="num">${window.UI.formatMoney((s.amountTendered || 0) / 100)}</td>
-            <td class="num">${window.UI.formatMoney((s.changeGiven || 0) / 100)}</td>
-          </tr>`).join('')}</tbody>
-      </table>`;
+      <div class="table-wrap">
+        <table class="diff-table" style="width:100%">
+          <thead><tr><th>Receipt</th><th>When</th><th class="num">Amount</th><th class="num">Tendered</th><th class="num">Change</th></tr></thead>
+          <tbody>${sales.map((s) => `
+            <tr>
+              <td class="mono">${esc(s.receiptNumber || '—')}</td>
+              <td class="text-sm">${window.UI.formatDateTime(s.at)}</td>
+              <td class="num">${moneyC(s.amount)}</td>
+              <td class="num">${moneyC(s.amountTendered)}</td>
+              <td class="num">${moneyC(s.changeGiven)}</td>
+            </tr>`).join('')}</tbody>
+        </table>
+      </div>`;
   }
 
-  function genericDataHtml(data) {
-    if (!data || !Object.keys(data).length) return '';
-    const entries = Object.entries(data).filter(([k]) => k !== 'sales');
+  function formatValue(key, v) {
+    if (MONEY_KEYS.has(key) && typeof v === 'number') return moneyC(v);
+    if (/At$/.test(key) && v) return window.UI.formatDateTime(v);
+    if (key === 'method') return esc(String(v).replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase()));
+    return esc(String(v));
+  }
+
+  function genericDataHtml(data, used) {
+    const entries = Object.entries(data || {}).filter(([k, v]) =>
+      !used.has(k) && !HIDDEN_KEYS.has(k) && v !== null && v !== undefined && v !== '' && typeof v !== 'object');
     if (!entries.length) return '';
-    return `
-      <dl class="kv-grid">
-        ${entries.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(typeof v === 'object' ? JSON.stringify(v) : String(v))}</dd>`).join('')}
-      </dl>`;
+    return `<div class="notif-detail-box">${entries.map(([k, v]) => row(humanize(k), formatValue(k, v))).join('')}</div>`;
+  }
+
+  function detailBodyHtml(n) {
+    const d = n.data || {};
+    const used = new Set();
+    let html = '';
+
+    html += cashSummaryHtml(d, used);
+    if (Array.isArray(d.denominations)) { used.add('denominationTotal'); html += denominationsHtml(d.denominations, d.denominationTotal); }
+    if (Array.isArray(d.sales)) {
+      used.add('cashSaleCount');
+      html += `<div class="notif-detail-title">Cash sales in this shift (${d.sales.length})</div>${saleBreakdownHtml(d.sales)}`;
+    }
+    if (d.notes) html += `<div class="notif-detail-title">Cashier notes</div><p class="text-sm">${esc(d.notes)}</p>`;
+    html += genericDataHtml(d, used);
+    return html;
   }
 
   function openDetail(n) {
     const meta = NT.meta(n.type);
     const when = new Intl.DateTimeFormat('en-KE', { dateStyle: 'full', timeStyle: 'medium' }).format(new Date(n.createdAt));
-    const hasSaleBreakdown = Array.isArray(n.data?.sales);
 
     const modal = window.UI.openModal({
       title: n.title,
       maxWidth: '640px',
       bodyHtml: `
-        <div style="display:flex; align-items:center; gap:var(--space-2); margin-bottom:var(--space-3)">
+        <div style="display:flex; align-items:center; gap:var(--space-2); margin-bottom:var(--space-3); flex-wrap:wrap">
           <span class="notif-dot notif-dot-${n.severity || meta.severity}"></span>
           <span class="badge badge-neutral">${esc(meta.label)}</span>
           <span class="text-xs text-muted">${esc(when)}</span>
         </div>
         <p>${esc(n.message)}</p>
         ${n.branchId?.name ? `<p class="text-sm text-muted">Branch: ${esc(n.branchId.name)}</p>` : ''}
-        ${hasSaleBreakdown ? `<div class="detail-title">Cash sales in this shift</div>${saleBreakdownHtml(n.data.sales)}` : ''}
-        ${genericDataHtml(n.data)}
+        ${detailBodyHtml(n)}
       `,
       footerHtml: `<button class="btn btn-primary" data-action="close">Close</button>`,
     });
     modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
 
     if (!n.readAt) {
+      n.readAt = new Date().toISOString();
       window.Api.post(`/notifications/${n._id}/read`).then(fetchNotifications).catch(() => {});
     }
   }

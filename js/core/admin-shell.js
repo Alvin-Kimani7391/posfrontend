@@ -15,7 +15,7 @@
     { key: 'products', label: 'Products', icon: 'products', href: 'admin-products.html' },
     { key: 'audit', label: 'Audit log', icon: 'settings', href: 'admin-audit.html' },
     { key: 'tickets', label: 'Tickets', icon: 'alert', href: 'admin-tickets.html' },
-    
+    { key: 'announcements', label: 'Announcements', icon: 'bell', href: 'admin-announcements.html' },
   ];
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
 
@@ -56,14 +56,21 @@
       </div>`;
   }
 
-
-
-  window.Api.get('/admin/tickets/stats').then(({ data }) => {
-  if (!data.awaitingAdmin) return;
-  const link = document.querySelector('.sidebar-link[href="admin-tickets.html"]');
-  if (link) link.insertAdjacentHTML('beforeend', `<span class="badge badge-danger" style="margin-left:auto">${data.awaitingAdmin}</span>`);
-}).catch(() => {});
-
+  /**
+   * "Waiting on you" badge on the Tickets link.
+   * (Previously this ran at script-load time, before the sidebar existed, so the
+   * badge never appeared and it fired an API call even before the login guard.
+   * It now runs from mount(), after the sidebar is rendered.)
+   */
+  function loadTicketBadge() {
+    window.Api.get('/admin/tickets/stats').then(({ data }) => {
+      if (!data.awaitingAdmin) return;
+      const link = document.querySelector('.sidebar-link[href="admin-tickets.html"]');
+      if (link && !link.querySelector('.badge')) {
+        link.insertAdjacentHTML('beforeend', `<span class="badge badge-danger" style="margin-left:auto">${data.awaitingAdmin}</span>`);
+      }
+    }).catch(() => { /* non-fatal */ });
+  }
 
   async function logout() {
     const ok = await window.UI.confirmDialog({ title: 'Log out?', message: 'You will need to sign in again.', confirmText: 'Log out', danger: true });
@@ -86,6 +93,7 @@
     document.getElementById('sidebar-toggle')?.addEventListener('click', open);
     overlay.addEventListener('click', close);
     document.getElementById('logout-btn').addEventListener('click', logout);
+    loadTicketBadge();
     return document.getElementById('page-content');
   }
 

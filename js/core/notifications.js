@@ -4,6 +4,10 @@
  * most recent notifications, mark-as-read, and a link through to the full
  * Notifications page. Mounted once by app-shell.js (mirrors how the branch
  * switcher is mounted) so the badge is visible everywhere.
+ *
+ * Clicking an item marks it read and OPENS THAT NOTIFICATION on
+ * notifications.html (?open=<id>). If you're already on that page it opens
+ * the detail window directly via a 'notification:open' event.
  */
 (function (window) {
   const POLL_MS = 30000;
@@ -54,6 +58,16 @@
     `;
   }
 
+  /** Open one notification's detail on the Notifications page. */
+  function openNotification(n) {
+    if (document.body.dataset.page === 'notifications') {
+      window.dispatchEvent(new CustomEvent('notification:open', { detail: n }));
+      return;
+    }
+    try { sessionStorage.setItem('notif:open', JSON.stringify(n)); } catch { /* ignore */ }
+    window.location.href = `notifications.html?open=${encodeURIComponent(n._id)}`;
+  }
+
   function toggleDropdown() {
     const existing = wrapEl.querySelector('.dropdown-menu');
     if (existing) { existing.remove(); return; }
@@ -74,13 +88,16 @@
 
     menu.querySelectorAll('.notif-item').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        try {
-          await window.Api.post(`/notifications/${btn.dataset.id}/read`);
-          btn.classList.remove('unread');
-          await fetchUnread();
-        } catch {
-          // non-fatal - stays marked unread until the next poll
+        const n = recent.find((x) => x._id === btn.dataset.id);
+        if (!n) return;
+        const wasUnread = !n.readAt;
+        n.readAt = n.readAt || new Date().toISOString(); // so the detail page doesn't re-mark it
+        menu.remove();
+        if (wasUnread) {
+          try { await window.Api.post(`/notifications/${n._id}/read`); } catch { /* non-fatal */ }
         }
+        openNotification(n);
+        fetchUnread();
       });
     });
 

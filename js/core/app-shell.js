@@ -13,31 +13,38 @@
  * BRAND: the product name lives in ONE place (APP_NAME below). It is used for
  * the sidebar brand AND the browser tab title (set in mount()), so every page
  * that mounts the shell is consistent automatically.
+ *
+ * GUIDED TOURS: mount() also loads js/core/tour.js (see loadTour below), so every
+ * page gets the first-visit tour and the ? help button without editing any HTML.
+ *
+ * ANNOUNCEMENTS: mount() also loads js/core/announcements.js (see loadAnnouncements
+ * below) - platform notices from the super admin, shown as a pop-up or a scrolling
+ * ticker depending on the page. The page is read from <body data-page="...">.
  */
 (function (window) {
   const APP_NAME = 'Six Star Pos';
 
   const NAV_ITEMS = [
-    { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', href: 'dashboard.html' },
-    { key: 'sales', label: 'Sales', icon: 'sales', href: 'sales.html', permission: 'sales.view' },
-    { key: 'products', label: 'Products', icon: 'products', href: 'products.html', permission: 'products.view' },
-    { key: 'inventory', label: 'Inventory', icon: 'inventory', href: 'inventory.html', permission: 'inventory.view' },
+    { key: 'dashboard',     label: 'Dashboard',          icon: 'dashboard', href: 'dashboard.html' },
+    { key: 'sales',         label: 'Sales',              icon: 'sales',     href: 'sales.html',         permission: 'sales.view' },
+    { key: 'products',      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
+    { key: 'inventory',     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view' },
 
-    { key: 'suppliers', label: 'Suppliers', icon: 'branches', href: 'suppliers.html', permission: 'suppliers.view' },
-    { key: 'purchases', label: 'Purchases', icon: 'box', href: 'purchases.html', permission: 'purchases.view' },
-    { key: 'expenses', label: 'Expenses', icon: 'reports', href: 'expenses.html', permission: 'expenses.view' },
-    { key: 'refunds', label: 'Refunds', icon: 'sales', href: 'refunds.html', permission: 'refunds.view' },
+    { key: 'suppliers',     label: 'Suppliers',          icon: 'truck',     href: 'suppliers.html',     permission: 'suppliers.view' },
+    { key: 'purchases',     label: 'Purchases',          icon: 'bag',       href: 'purchases.html',     permission: 'purchases.view' },
+    { key: 'expenses',      label: 'Expenses',           icon: 'wallet',    href: 'expenses.html',      permission: 'expenses.view' },
+    { key: 'refunds',       label: 'Refunds',            icon: 'refund',    href: 'refunds.html',       permission: 'refunds.view' },
 
-    { key: 'reports',   label: 'Reports',   icon: 'reports',  href: 'reports.html',    permission: 'reports.view' },
-    { key: 'audit',     label: 'Audit log', icon: 'settings', href: 'audit-logs.html', permission: 'audit.view' },
-        { key: 'cash', label: 'Registers & Shifts', icon: 'store', href: 'cash-register.html', permission: 'registers.view' },
+    { key: 'reports',       label: 'Reports',            icon: 'reports',   href: 'reports.html',       permission: 'reports.view' },
+    { key: 'audit',         label: 'Audit log',          icon: 'audit',     href: 'audit-logs.html',    permission: 'audit.view' },
+    { key: 'cash',          label: 'Registers & Shifts', icon: 'cash',      href: 'cash-register.html', permission: 'registers.view' },
 
-    { key: 'branches', label: 'Branches', icon: 'branches', href: 'branches.html', permission: 'branches.view' },
-    { key: 'employees', label: 'Employees', icon: 'employees', href: 'employees.html', permission: 'employees.view' },
-    { key: 'customers', label: 'Customers', icon: 'employees', href: 'customers.html', permission: 'customers.view' },
-    { key: 'tickets', label: 'Tickets', icon: 'alert', href: 'tickets.html', permission: 'tickets.view' },
-    { key: 'notifications', label: 'Notifications', icon: 'bell', href: 'notifications.html', permission: 'notifications.view' },
-    { key: 'settings', label: 'Settings', icon: 'settings', href: 'settings.html', permission: 'settings.view' },
+    { key: 'branches',      label: 'Branches',           icon: 'store',     href: 'branches.html',      permission: 'branches.view' },
+    { key: 'employees',     label: 'Employees',          icon: 'employees', href: 'employees.html',     permission: 'employees.view' },
+    { key: 'customers',     label: 'Customers',          icon: 'user',      href: 'customers.html',     permission: 'customers.view' },
+    { key: 'tickets',       label: 'Tickets',            icon: 'ticket',    href: 'tickets.html',       permission: 'tickets.view' },
+    { key: 'notifications', label: 'Notifications',      icon: 'bell',      href: 'notifications.html', permission: 'notifications.view' },
+    { key: 'settings',      label: 'Settings',           icon: 'settings',  href: 'settings.html',      permission: 'settings.view' },
   ];
 
   // Items shown in the mobile bottom nav (kept short - 5 max is the mobile UX norm).
@@ -326,6 +333,46 @@
   }
 
   /**
+   * Guided tours (first-visit walkthrough + ? help button).
+   * Injected once per page, after the shell exists. Wrapped so a missing or
+   * broken tour file can never affect the app itself.
+   */
+  function loadTour() {
+    try {
+      if (window.Tour || document.getElementById('tour-script')) return;
+      const s = document.createElement('script');
+      s.id = 'tour-script';
+      s.src = 'js/core/tour.js';
+      s.async = true;
+      s.onerror = () => console.warn('Tour: js/core/tour.js could not be loaded');
+      document.head.appendChild(s);
+    } catch (err) {
+      console.warn('Tour: not loaded', err);
+    }
+  }
+
+  /**
+   * Platform announcements (pop-up / scrolling ticker set by the super admin).
+   * Same pattern as loadTour: injected once per page, and wrapped so a missing
+   * or broken file can never affect the app. announcements.js starts itself once
+   * it loads (AppShell is already defined by then) and fetches only what is
+   * targeted at this user's role and this page (<body data-page>).
+   */
+  function loadAnnouncements() {
+    try {
+      if (window.Announcements || document.getElementById('announcements-script')) return;
+      const s = document.createElement('script');
+      s.id = 'announcements-script';
+      s.src = 'js/core/announcements.js';
+      s.async = true;
+      s.onerror = () => console.warn('Announcements: js/core/announcements.js could not be loaded');
+      document.head.appendChild(s);
+    } catch (err) {
+      console.warn('Announcements: not loaded', err);
+    }
+  }
+
+  /**
    * AppShell.mount({ title })
    * Renders the shell into #app-shell, gates nav items by permission, sets the
    * browser tab title ("<page> · Six Star Pos"), and returns the #page-content
@@ -349,6 +396,8 @@
     window.Permissions.applyPermissionGates(root, user);
     loadBranchSwitcher(); // async, fills in the dropdown once branches load - doesn't block the page. getActiveBranchId() itself does NOT depend on this.
     window.NotificationCenter?.mount(document.getElementById('notif-bell-wrap'), user);
+    loadTour();
+    loadAnnouncements();
     return document.getElementById('page-content');
   }
 

@@ -33,6 +33,19 @@
  *        CREDIT       -> pick the customer, then Complete sale
  *   5. Receipt opens after every sale (auto-print requested).
  *
+ * PRODUCT DISCOUNT (set on the Products page, Product.defaultDiscount, KES PER UNIT)
+ *   - When a product is scanned/searched, its line discount is pre-filled with
+ *     (discount per unit x quantity). The cart item is flagged `autoDiscount`.
+ *   - While a line is `autoDiscount`, changing the quantity (+, -, typing)
+ *     re-scales the discount, and an override price re-clamps it so it can
+ *     never exceed the line total.
+ *   - As soon as the cashier types a DIFFERENT discount in the line editor the
+ *     line becomes manual (`autoDiscount = false`) and keeps their figure.
+ *     Typing exactly the preset amount puts it back to auto.
+ *   - The backend recomputes and enforces everything on "Complete sale": the
+ *     preset part is trusted from the Product record, only the extra the
+ *     cashier added by hand is checked against their discount limit.
+ *
  * PRICING NOTE: everything shown while building the cart is a CLIENT-SIDE
  * PREVIEW (tax-inclusive assumption, cashier lacks settings.view). On
  * "Complete sale" the backend recomputes everything from Product/Variant
@@ -82,7 +95,7 @@
   const state = {
     view: 'new-sale',
     focus: true, // "full view": workspace pinned over the whole window
-    cart: [], // { product, variant, quantity, discount, overridePriceEnabled, overridePrice }
+    cart: [], // { product, variant, quantity, discount, autoDiscount, overridePriceEnabled, overridePrice }
     customer: null,
     cartDiscount: 0,
     payments: [], // built when the payment window completes: { method, amount, reference, amountTendered }
@@ -473,6 +486,8 @@
   /* ================================================================== *
    * NEW SALE VIEW
    * ================================================================== */
+  function round2(n) { return Math.round(n * 100) / 100; }
+
   function barcodeOf(product, variant) {
     return (variant && variant.barcode) || product.barcode || '';
   }
@@ -484,6 +499,33 @@
     if (item.overridePriceEnabled && item.overridePrice != null) return item.overridePrice;
     return item.variant ? item.variant.sellingPrice : item.product.sellingPrice;
   }
+
+  /* ---- Product discount (per unit, set on the Products page) ---- */
+
+  /** The product's standing discount PER UNIT in KES (0 when none). */
+  function unitDiscountOf(product) {
+    const d = Number(product && product.defaultDiscount);
+    return Number.isFinite(d) && d > 0 ? d : 0;
+  }
+
+  /** The preset discount for this cart line right now: per-unit x quantity, never above the line total. */
+  function autoDiscountFor(item) {
+    const per = unitDiscountOf(item.product);
+    if (per <= 0) return 0;
+    const gross = round2(unitPriceOf(item) * item.quantity);
+    return Math.min(round2(per * item.quantity), gross);
+  }
+
+  /** Re-scales the discount of a line that is still on its preset (quantity or price changed). */
+  /** Keeps a line's discount valid after a quantity or price change. */
+function syncAutoDiscount(item) {
+  if (item.autoDiscount) {
+    item.discount = autoDiscountFor(item);
+  } else {
+    const gross = round2(unitPriceOf(item) * item.quantity);
+    if ((item.discount || 0) > gross) item.discount = gross;
+  }
+}
 
   function renderNewSaleView() {
     const body = $('view-body');
@@ -605,12 +647,15 @@
       if (!rows.length) { dd.innerHTML = `<div class="pz-dd-msg">No product found for “${esc(term)}”</div>`; return; }
       dd.innerHTML = `
         <div class="pz-dd-head"><span>Barcode</span><span>Product name</span><span class="pz-right">Price per unit</span></div>
-        ${rows.map((r, i) => `
+        ${rows.map((r, i) => {
+          const off = unitDiscountOf(r.product);
+          return `
           <div class="pz-dd-row ${i === active ? 'active' : ''}" data-idx="${i}" role="option">
             <span class="pz-mono">${esc(barcodeOf(r.product, r.variant)) || '-'}</span>
             <span class="pz-name">${esc(nameOf(r.product, r.variant))}<small>SKU ${esc(r.variant ? r.variant.sku : r.product.sku)}</small></span>
-            <span class="pz-price">${fm(r.variant ? r.variant.sellingPrice : r.product.sellingPrice)}</span>
-          </div>`).join('')}
+            <span class="pz-price">${fm(r.variant ? r.variant.sellingPrice : r.product.sellingPrice)}${off ? `<small>${fm(off)} off</small>` : ''}</span>
+          </div>`;
+        }).join('')}
       `;
       dd.querySelectorAll('.pz-dd-row').forEach((el) => {
         el.addEventListener('mouseenter', () => setActive(Number(el.dataset.idx)));
@@ -681,13 +726,21 @@
   function addToCart(product, variant) {
     const key = variant ? variant._id : product._id;
     const existing = state.cart.find((i) => keyOf(i) === key);
-    if (existing) existing.quantity += 1;
-    else state.cart.push({ product, variant, quantity: 1, discount: 0, overridePriceEnabled: false, overridePrice: null });
+    if (existing) {
+      existing.quantity += 1;
+      syncAutoDiscount(existing); // preset discount grows with the quantity; a manual discount is left alone
+    } else {
+      const item = { product, variant, quantity: 1, discount: 0, autoDiscount: false, overridePriceEnabled: false, overridePrice: null };
+      const preset = autoDiscountFor(item);
+      if (preset > 0) {
+        item.discount = preset;
+        item.autoDiscount = true;
+      }
+      state.cart.push(item);
+    }
     state.lastAdded = key;
     renderCart(key); // scrolls the new / updated row into view
   }
-
-  function round2(n) { return Math.round(n * 100) / 100; }
 
   /** Client-side preview only - see the file header note. */
   function previewLine(unitPrice, qty, discount, taxRate) {
@@ -739,13 +792,17 @@
       const preview = previewLine(unit, item.quantity, item.discount, item.product.taxRate);
       const bc = barcodeOf(item.product, item.variant);
       const d = item.discount || 0;
+      const priceHint = item.overridePriceEnabled ? 'price changed' : (item.autoDiscount ? 'product discount' : '');
+      const discTitle = item.autoDiscount
+        ? `Product discount (${fm(unitDiscountOf(item.product))} per unit) - tap to change`
+        : `Tap to set a discount${canOverride ? ' or change the price' : ''}`;
       return `
         <div class="pz-tr ${cls}" data-idx="${i}" data-key="${esc(k)}">
           <div class="pz-left">
             <span class="pz-c-no">${i + 1}</span>
             <span class="pz-c-bc pz-mono">${esc(bc) || '-'}</span>
             <span class="pz-c-name pz-name">${esc(nameOf(item.product, item.variant))}${bc ? `<small class="pz-name-bc">${esc(bc)}</small>` : ''}</span>
-            <span class="pz-c-price pz-price">@ ${fm(unit)}${item.overridePriceEnabled ? '<small>price changed</small>' : ''}</span>
+            <span class="pz-c-price pz-price">@ ${fm(unit)}${priceHint ? `<small>${priceHint}</small>` : ''}</span>
           </div>
           <div class="pz-rgt">
             <div class="pz-c-qty pz-stepper">
@@ -753,7 +810,7 @@
               <input type="number" inputmode="numeric" min="0" step="1" value="${item.quantity}" data-action="qty" data-idx="${i}" aria-label="Quantity" />
               <button type="button" data-action="inc" data-idx="${i}" aria-label="Increase quantity">+</button>
             </div>
-            <button type="button" class="pz-c-disc pz-disc ${d ? 'has' : ''}" data-action="discount" data-idx="${i}" title="Tap to set a discount${canOverride ? ' or change the price' : ''}">${d ? Number(d).toLocaleString() : '0'}</button>
+            <button type="button" class="pz-c-disc pz-disc ${d ? 'has' : ''}" data-action="discount" data-idx="${i}" title="${esc(discTitle)}">${d ? Number(d).toLocaleString() : '0'}</button>
             <div class="pz-c-sub pz-sub">${fm(preview.total)}</div>
             <button type="button" class="pz-c-x pz-x" data-action="remove" data-idx="${i}" aria-label="Remove item">${window.Icons.get('close')}</button>
           </div>
@@ -781,11 +838,13 @@
       switch (b.dataset.action) {
         case 'inc':
           item.quantity += 1;
+          syncAutoDiscount(item);
           renderCart();
           break;
         case 'dec':
           item.quantity -= 1;
           if (item.quantity <= 0) state.cart.splice(idx, 1);
+          else syncAutoDiscount(item);
           renderCart();
           break;
         case 'remove':
@@ -806,7 +865,10 @@
       const idx = Number(inp.dataset.idx);
       const n = Math.floor(Number(inp.value));
       if (!Number.isFinite(n) || n <= 0) state.cart.splice(idx, 1);
-      else if (state.cart[idx]) state.cart[idx].quantity = n;
+      else if (state.cart[idx]) {
+        state.cart[idx].quantity = n;
+        syncAutoDiscount(state.cart[idx]);
+      }
       renderCart();
       // Hand the keyboard back to the search box unless the cashier clicked into something else.
       setTimeout(() => {
@@ -861,12 +923,17 @@
     const item = state.cart[idx];
     const user = window.AppShell.getUser();
     const canOverride = window.Permissions.can(user, 'sales.price_override');
+    const perUnit = unitDiscountOf(item.product);
 
     const modal = window.UI.openModal({
       title: `Adjust - ${item.product.name}`,
       bodyHtml: `
         <form id="line-adjust-form">
-          <div class="field"><label>Discount (KES)</label><input class="input" name="discount" type="number" step="0.01" min="0" value="${item.discount || ''}" placeholder="0" /></div>
+          <div class="field">
+            <label>Discount (KES)</label>
+            <input class="input" name="discount" type="number" step="0.01" min="0" value="${item.discount || ''}" placeholder="0" />
+            ${perUnit > 0 ? `<span class="field-hint">Product discount: ${esc(fm(perUnit))} per unit (${esc(fm(autoDiscountFor(item)))} for ${item.quantity} unit${item.quantity === 1 ? '' : 's'}).</span>` : ''}
+          </div>
           ${canOverride ? `
             <div class="checkbox-row" style="margin-bottom: var(--space-2)">
               <input type="checkbox" id="override-toggle" ${item.overridePriceEnabled ? 'checked' : ''} />
@@ -888,11 +955,39 @@
     modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { window.UI.closeModal(); $('pos-search')?.focus(); });
     modal.querySelector('[data-action="save"]').addEventListener('click', () => {
       const raw = window.UI.serializeForm(modal.querySelector('#line-adjust-form'));
-      item.discount = Number(raw.discount) || 0;
+      const prevDiscount = round2(item.discount || 0);
+      const newDiscount = round2(Number(raw.discount) || 0);
+
+      // Work out the price this line WILL have, without touching the item yet,
+      // so an invalid entry can be rejected and nothing is half-applied.
+      let overrideEnabled = item.overridePriceEnabled;
+      let overridePrice = item.overridePrice;
       if (canOverride) {
-        item.overridePriceEnabled = !!raw.overridePrice && modal.querySelector('#override-toggle').checked;
-        item.overridePrice = item.overridePriceEnabled ? Number(raw.overridePrice) : null;
+        overrideEnabled = !!raw.overridePrice && modal.querySelector('#override-toggle').checked;
+        overridePrice = overrideEnabled ? Number(raw.overridePrice) : null;
       }
+      const nextUnit = overrideEnabled && overridePrice != null
+        ? overridePrice
+        : (item.variant ? item.variant.sellingPrice : item.product.sellingPrice);
+      const gross = round2(nextUnit * item.quantity);
+      if (newDiscount > gross) {
+        window.UI.toast.error('Discount cannot be more than the line total');
+        return;
+      }
+
+      item.overridePriceEnabled = overrideEnabled;
+      item.overridePrice = overridePrice;
+
+      if (newDiscount === prevDiscount) {
+        // Discount field untouched: a preset line follows the (possibly new) price.
+        syncAutoDiscount(item);
+      } else {
+        item.discount = newDiscount;
+        // Typing exactly the preset amount puts the line back on auto; anything else is a manual discount.
+        const preset = autoDiscountFor(item);
+        item.autoDiscount = preset > 0 && Math.abs(newDiscount - preset) < 0.005;
+      }
+
       window.UI.closeModal();
       renderCart();
       $('pos-search')?.focus();

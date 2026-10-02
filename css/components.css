@@ -657,3 +657,38 @@ table.table {
 .cc-breakdown .num { text-align: right; }
 .cc-breakdown tfoot td { font-weight: var(--font-bold); border-bottom: none; background: var(--color-bg); }
 .cc-breakdown tbody tr:last-child td { border-bottom: 1px solid var(--color-border); }
+
+
+
+
+
+
+
+
+
+/* ==========================================================================
+   APPEND THIS to the END of css/components.css
+   Notification detail window: cash summary box, section titles, tone colours
+   ========================================================================== */
+
+.notif-detail-title {
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.notif-detail-box {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+.notif-detail-box .pos-totals-row { padding: 4px 0; }
+.notif-detail-box .pos-totals-row span:last-child { font-variant-numeric: tabular-nums; font-weight: var(--font-medium); }
+
+.notif-val-short { color: var(--color-danger); }
+.notif-val-over  { color: var(--color-warning); }
+.notif-val-ok    { color: var(--color-success); }

@@ -9,6 +9,8 @@
     CASH_OVER: { label: 'Cash over', icon: 'alert', severity: 'warning' },
     SHIFT_OPENED: { label: 'Shift opened', icon: 'check', severity: 'info' },
     SHIFT_CLOSED: { label: 'Shift closed', icon: 'check', severity: 'info' },
+    SHORTAGE_PAYMENT: { label: 'Shortage payment', icon: 'check', severity: 'info' },
+    SHORTAGE_CLEARED: { label: 'Shortage cleared', icon: 'check', severity: 'info' },
     SALE_CANCELLED: { label: 'Sale cancelled', icon: 'sales', severity: 'warning' },
     TRANSFER_REQUESTED: { label: 'Transfer requested', icon: 'branches', severity: 'info' },
     ETIMS_FAILED: { label: 'eTIMS failed', icon: 'alert', severity: 'critical' },
@@ -17,11 +19,11 @@
     CUSTOMER_PAYMENT: { label: 'Payment received', icon: 'check', severity: 'info' },
     SYSTEM_ALERT: { label: 'System alert', icon: 'alert', severity: 'warning' },
     EMPLOYEE_ALERT: { label: 'Staff alert', icon: 'alert', severity: 'warning' },
-    TICKET_CREATED:  { label: 'Ticket raised',    icon: 'alert', severity: 'info' },
-TICKET_REPLY:    { label: 'Support replied',  icon: 'bell',  severity: 'info' },
-TICKET_UPDATED:  { label: 'Ticket updated',   icon: 'check', severity: 'info' },
-TICKET_RESOLVED: { label: 'Ticket resolved',  icon: 'check', severity: 'info' },
-TICKET_CLOSED:   { label: 'Ticket closed',    icon: 'check', severity: 'info' },
+    TICKET_CREATED: { label: 'Ticket raised', icon: 'alert', severity: 'info' },
+    TICKET_REPLY: { label: 'Support replied', icon: 'bell', severity: 'info' },
+    TICKET_UPDATED: { label: 'Ticket updated', icon: 'check', severity: 'info' },
+    TICKET_RESOLVED: { label: 'Ticket resolved', icon: 'check', severity: 'info' },
+    TICKET_CLOSED: { label: 'Ticket closed', icon: 'check', severity: 'info' },
   };
 
   // Same subset the backend's POST /notifications/alert accepts.
@@ -29,6 +31,7 @@ TICKET_CLOSED:   { label: 'Ticket closed',    icon: 'check', severity: 'info' },
 
   const QUICK_FILTERS = [
     ['', 'All'], ['CASH_SHORTAGE', 'Cash shortage'], ['SHIFT_CLOSED', 'Shifts'],
+    ['SHORTAGE_PAYMENT', 'Shortage payments'], ['SHORTAGE_CLEARED', 'Shortages cleared'],
     ['LOW_STOCK', 'Stock'], ['SALE_CANCELLED', 'Sales'], ['REFUND_REQUEST', 'Refunds'],
     ['TRANSFER_REQUESTED', 'Transfers'], ['PAYMENT_FAILED', 'Payments'],
     ['CREDIT_DUE', 'Credit due'], ['CREDIT_SALE', 'Credit sales'], ['CUSTOMER_PAYMENT', 'Payments received'],

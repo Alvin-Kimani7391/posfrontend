@@ -5,6 +5,10 @@
  * variant management open as modals from this same page rather than
  * getting their own nav entries, since they're both small, closely
  * related surfaces rather than destinations on their own.
+ *
+ * DISCOUNT PER UNIT: each product can carry a standing per-unit discount
+ * (field "defaultDiscount", KES). The sales screen pre-fills it on the
+ * cart line whenever the product is scanned or searched (x quantity).
  */
 (function () {
   const state = { page: 1, limit: 10, search: '', categoryId: '', status: '' };
@@ -168,7 +172,9 @@
       return;
     }
 
-    tbody.innerHTML = items.map((p) => `
+    tbody.innerHTML = items.map((p) => {
+      const discount = Number(p.defaultDiscount) || 0;
+      return `
       <tr data-id="${p._id}">
         <td>
           <div class="cell-primary">${window.UI.escapeHtml(p.name)}</div>
@@ -179,7 +185,10 @@
           ${p.barcode ? `<div class="text-xs text-muted">${window.UI.escapeHtml(p.barcode)}</div>` : ''}
         </td>
         <td class="text-sm">${p.categoryId ? window.UI.escapeHtml(p.categoryId.name) : '<span class="text-muted">Uncategorized</span>'}</td>
-        <td class="cell-primary">${p.hasVariants ? 'Varies' : window.UI.formatMoney(p.sellingPrice)}</td>
+        <td>
+          <div class="cell-primary">${p.hasVariants ? 'Varies' : window.UI.formatMoney(p.sellingPrice)}</div>
+          ${discount > 0 ? `<div class="text-xs text-muted">${window.UI.formatMoney(discount)} off / unit</div>` : ''}
+        </td>
         <td><span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-neutral'}">${p.status}</span></td>
         <td class="actions">
           ${p.hasVariants ? `<button class="btn btn-ghost btn-sm btn-icon" data-action="variants" data-requires-permission="products.update" title="Manage variants">${window.Icons.get('box')}</button>` : ''}
@@ -187,7 +196,8 @@
           <button class="btn btn-ghost btn-sm btn-icon" data-action="archive" data-requires-permission="products.delete" title="Archive">${window.Icons.get('trash')}</button>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     tbody.querySelectorAll('[data-action="edit"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -359,6 +369,8 @@
     const isEdit = !!product;
     variantRowCount = 0;
 
+    const existingDiscount = isEdit ? Number(product.defaultDiscount) || 0 : 0;
+
     const bodyHtml = `
       <form id="product-form">
         <div class="field">
@@ -413,6 +425,12 @@
         </div>
         ${product.hasVariants ? '<p class="text-xs text-muted" style="margin-top:-8px; margin-bottom: var(--space-4)">This product has variants - manage their prices individually from the Variants screen.</p>' : ''}
         `}
+
+        <div class="field">
+          <label for="p-discount">Discount per unit (KES) <span class="text-muted">(optional)</span></label>
+          <input class="input" id="p-discount" name="defaultDiscount" type="number" step="0.01" min="0" inputmode="decimal" value="${existingDiscount > 0 ? existingDiscount : ''}" placeholder="0" style="max-width: 200px" />
+          <span class="field-hint">Applied automatically on the sales screen when this product is scanned or searched (multiplied by the quantity). Leave empty for no discount.</span>
+        </div>
 
         <div class="form-row">
           <div class="field">
@@ -489,9 +507,24 @@
       if (!form.reportValidity()) return;
 
       const raw = window.UI.serializeForm(form);
+
+      // Discount sanity check (the backend enforces the same rule). Skipped for
+      // variant products, whose prices are per variant. serializeForm drops
+      // empty fields, so an empty box means "no discount".
+      const discountValue = Number(raw.defaultDiscount) || 0;
+      const hasVariantRows = !isEdit && modal.querySelectorAll('.variant-row').length > 0;
+      const priceValue = Number(raw.sellingPrice);
+      if (discountValue > 0 && !hasVariantRows && Number.isFinite(priceValue) && discountValue > priceValue) {
+        window.UI.toast.error('Discount per unit cannot be more than the selling price');
+        modal.querySelector('#p-discount').focus();
+        return;
+      }
+
       const payload = {
         name: raw.name, sku: raw.sku, barcode: raw.barcode, categoryId: raw.categoryId || undefined,
         brand: raw.brand, costPrice: raw.costPrice, sellingPrice: raw.sellingPrice,
+        // Always sent (0 when empty) so that clearing the box on an existing product removes the discount.
+        defaultDiscount: discountValue,
         taxRate: raw.taxRate, unit: raw.unit, lowStockThreshold: raw.lowStockThreshold,
         description: raw.description,
         trackInventory: !!raw.trackInventory, trackSerialNumber: !!raw.trackSerialNumber,
