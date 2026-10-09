@@ -52,6 +52,14 @@
     body.innerHTML = `
       ${business ? businessCard(business) : ''}
       ${business ? salesSettingsCard(business) : ''}
+
+            ${window.Permissions.can(window.AppShell.getUser(), 'billing.view') ? `
+      <div class="card" style="margin-bottom: var(--space-6)">
+        <div class="card-header"><div><h2>Subscription & billing</h2><p class="text-sm text-muted">Your plan, invoices, payments and arrears.</p></div>
+          <a class="btn btn-secondary btn-sm" href="billing.html">Open billing</a></div>
+      </div>` : ''}
+
+      
       <div class="section-label" style="margin: var(--space-2) 0 var(--space-3)"><h2 style="font-size:var(--text-lg, 1.125rem)">Payments</h2></div>
       ${mpesaStkCard(status)}
       <div id="till-card-wrap">${tillCard(status.mpesa, till)}</div>

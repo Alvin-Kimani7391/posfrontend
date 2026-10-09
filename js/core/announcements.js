@@ -20,6 +20,10 @@
   const HIDDEN_KEY = 'sixstar.ann.tickerHidden';
   const SEVERITY = { CRITICAL: 4, WARNING: 3, SUCCESS: 2, INFO: 1 };
 
+  // Pages the server's announcement targeting does not know about yet are asked for as a page it does
+  // know, so the request is valid. Remove an entry once the backend accepts that page name itself.
+  const PAGE_ALIAS = { crm: 'customers' };
+
   const svg = (inner) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
   const CLOSE_ICON = svg('<path d="M18 6 6 18M6 6l12 12"/>');
   const TYPE_META = {
@@ -266,7 +270,8 @@
   function currentPage() { return (document.body.dataset.page || '').trim(); }
 
   async function refresh() {
-    const page = currentPage();
+    const raw = currentPage();
+    const page = PAGE_ALIAS[raw] || raw;
     if (!page) return;
     lastRun = Date.now();
     let items;

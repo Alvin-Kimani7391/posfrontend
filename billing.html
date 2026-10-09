@@ -3,22 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <title>Sales · Six Star Pos</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <title>Billing · Six Star POS</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0f766e" />
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
   <link rel="stylesheet" href="css/variables.css" />
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/components.css" />
   <link rel="stylesheet" href="css/layout.css" />
-  <link rel="stylesheet" href="css/pos.css" />
   <link rel="stylesheet" href="css/billing.css" />
 </head>
-<body data-page="sales">
+<body data-page="billing">
   <div class="app-shell" id="app-shell"></div>
-
-  <noscript>
-    <p style="padding:2rem;text-align:center">Kenya POS needs JavaScript to run. Please enable it and reload.</p>
-  </noscript>
 
   <script src="js/core/config.js"></script>
   <script src="js/core/icons.js"></script>
@@ -27,16 +23,10 @@
   <script src="js/core/permissions.js"></script>
   <script src="js/core/ui.js"></script>
   <script src="js/core/pwa.js"></script>
-
-  <script src="js/core/barcode-scanner.js"></script>
+  <script src="js/core/sidebar-rail.js"></script>
   <script src="js/core/notification-types.js"></script>
   <script src="js/core/notifications.js"></script>
   <script src="js/core/app-shell.js"></script>
-  <script src="js/core/sidebar-rail.js"></script>
-  <script src="js/core/customer-picker.js"></script>
-  <script src="js/core/receipt-view.js"></script>
-  <script src="js/core/cash-count.js"></script>
-  <script src="js/core/cash-drawer.js"></script>
-  <script src="js/pages/sales.js"></script>
+  <script src="js/pages/billing.js"></script>
 </body>
 </html>

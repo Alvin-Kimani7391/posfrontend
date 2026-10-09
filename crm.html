@@ -3,22 +3,26 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>CRM · Six Star POS</title>
+
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0f766e" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <title>Sales · Six Star Pos</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Six Star POS" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+
   <link rel="stylesheet" href="css/variables.css" />
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/components.css" />
   <link rel="stylesheet" href="css/layout.css" />
-  <link rel="stylesheet" href="css/pos.css" />
+  <link rel="stylesheet" href="css/reports.css" />
+  <link rel="stylesheet" href="css/crm.css" />
   <link rel="stylesheet" href="css/billing.css" />
 </head>
-<body data-page="sales">
+<body data-page="crm">
   <div class="app-shell" id="app-shell"></div>
-
-  <noscript>
-    <p style="padding:2rem;text-align:center">Kenya POS needs JavaScript to run. Please enable it and reload.</p>
-  </noscript>
 
   <script src="js/core/config.js"></script>
   <script src="js/core/icons.js"></script>
@@ -27,16 +31,14 @@
   <script src="js/core/permissions.js"></script>
   <script src="js/core/ui.js"></script>
   <script src="js/core/pwa.js"></script>
-
-  <script src="js/core/barcode-scanner.js"></script>
+  <script src="js/core/sidebar-rail.js"></script>
   <script src="js/core/notification-types.js"></script>
   <script src="js/core/notifications.js"></script>
   <script src="js/core/app-shell.js"></script>
-  <script src="js/core/sidebar-rail.js"></script>
-  <script src="js/core/customer-picker.js"></script>
-  <script src="js/core/receipt-view.js"></script>
-  <script src="js/core/cash-count.js"></script>
-  <script src="js/core/cash-drawer.js"></script>
-  <script src="js/pages/sales.js"></script>
+  <script src="js/core/charts.js"></script>
+  <script src="js/core/report-tools.js"></script>
+  <!-- fills in any UI helper crm.js uses that ui.js does not define (never overrides yours) -->
+  <script src="js/pages/crm-compat.js"></script>
+  <script src="js/pages/crm.js"></script>
 </body>
 </html>

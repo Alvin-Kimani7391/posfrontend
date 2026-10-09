@@ -15,6 +15,8 @@
     { key: 'products', label: 'Products', icon: 'products', href: 'admin-products.html' },
     { key: 'audit', label: 'Audit log', icon: 'settings', href: 'admin-audit.html' },
     { key: 'tickets', label: 'Tickets', icon: 'alert', href: 'admin-tickets.html' },
+    { key: 'billing', label: 'Billing', icon: 'wallet', href: 'admin-billing.html' },
+        { key: 'sms', label: 'SMS', icon: 'bell', href: 'admin-sms.html' },
     { key: 'announcements', label: 'Announcements', icon: 'bell', href: 'admin-announcements.html' },
   ];
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
@@ -72,6 +74,27 @@
     }).catch(() => { /* non-fatal */ });
   }
 
+  /** "To verify" badge on the Billing link: manual payments waiting for approval. */
+function loadBillingBadge() {
+  window.Api.get('/admin/billing/payments', { status: 'SUBMITTED', limit: 1 }).then(({ data }) => {
+    if (!data.total) return;
+    const link = document.querySelector('.sidebar-link[href="admin-billing.html"]');
+    if (link && !link.querySelector('.badge')) {
+      link.insertAdjacentHTML('beforeend', `<span class="badge badge-warning" style="margin-left:auto">${data.total}</span>`);
+    }
+  }).catch(() => { /* non-fatal */ });
+}
+
+
+
+function loadSmsBadge() {
+  window.Api.get('/admin/sms/overview').then(({ data }) => {
+    const n = (data.awaitingVerification || 0) + (data.applicationsToProcess || 0);
+    const link = document.querySelector('.sidebar-link[href="admin-sms.html"]');
+    if (n && link && !link.querySelector('.badge')) link.insertAdjacentHTML('beforeend', `<span class="badge badge-warning" style="margin-left:auto">${n}</span>`);
+  }).catch(() => {});
+}
+
   async function logout() {
     const ok = await window.UI.confirmDialog({ title: 'Log out?', message: 'You will need to sign in again.', confirmText: 'Log out', danger: true });
     if (!ok) return;
@@ -93,7 +116,7 @@
     document.getElementById('sidebar-toggle')?.addEventListener('click', open);
     overlay.addEventListener('click', close);
     document.getElementById('logout-btn').addEventListener('click', logout);
-    loadTicketBadge();
+    loadTicketBadge();loadBillingBadge();loadSmsBadge();
     return document.getElementById('page-content');
   }
 

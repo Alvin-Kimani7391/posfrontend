@@ -42,8 +42,11 @@
     { key: 'branches',      label: 'Branches',           icon: 'store',     href: 'branches.html',      permission: 'branches.view' },
     { key: 'employees',     label: 'Employees',          icon: 'employees', href: 'employees.html',     permission: 'employees.view' },
     { key: 'customers',     label: 'Customers',          icon: 'user',      href: 'customers.html',     permission: 'customers.view' },
+    { key: 'crm', label: 'CRM', icon: 'employees', href: 'crm.html', permission: 'reports.view' },
+        { key: 'sms', label: 'SMS', icon: 'ticket', href: 'sms.html', permission: 'reports.view' },
     { key: 'tickets',       label: 'Tickets',            icon: 'ticket',    href: 'tickets.html',       permission: 'tickets.view' },
     { key: 'notifications', label: 'Notifications',      icon: 'bell',      href: 'notifications.html', permission: 'notifications.view' },
+    { key: 'billing', label: 'Billing', icon: 'wallet', href: 'billing.html', permission: 'billing.view' },
     { key: 'settings',      label: 'Settings',           icon: 'settings',  href: 'settings.html',      permission: 'settings.view' },
   ];
 
@@ -372,6 +375,25 @@
     }
   }
 
+
+  /** Billing banner (locked / overdue / trial). Same pattern as loadTour/loadAnnouncements. */
+function loadBillingBanner() {
+  try {
+    if (window.BillingBanner || document.getElementById('billing-banner-script')) return;
+    const s = document.createElement('script');
+    s.id = 'billing-banner-script';
+    s.src = 'js/core/billing-banner.js';
+    s.async = true;
+    s.onerror = () => console.warn('Billing banner: js/core/billing-banner.js could not be loaded');
+    document.head.appendChild(s);
+  } catch (err) {
+    console.warn('Billing banner: not loaded', err);
+  }
+}
+
+
+
+
   /**
    * AppShell.mount({ title })
    * Renders the shell into #app-shell, gates nav items by permission, sets the
@@ -398,6 +420,7 @@
     window.NotificationCenter?.mount(document.getElementById('notif-bell-wrap'), user);
     loadTour();
     loadAnnouncements();
+    loadBillingBanner();
     return document.getElementById('page-content');
   }
 

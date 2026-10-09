@@ -88,6 +88,7 @@
       }, 60000);
     }
     loadSetupChecklist();
+        loadBillingCard();
   }
 
   /* ------------------------------------------------------------------ *
@@ -114,12 +115,14 @@
         <a class="qa" href="products.html" data-requires-permission="products.view">${window.Icons.get('products')} Products</a>
         <a class="qa" href="inventory.html" data-requires-permission="inventory.view">${window.Icons.get('inventory')} Inventory</a>
         <a class="qa" href="customers.html" data-requires-permission="customers.view">${window.Icons.get('employees')} Customers</a>
+        <a class="qa" href="crm.html" data-requires-permission="reports.view">${window.Icons.get('employees')} CRM</a>
         <a class="qa" href="expenses.html" data-requires-permission="expenses.view">${window.Icons.get('reports')} Expenses</a>
         <a class="qa" href="reports.html" data-requires-permission="reports.view">${window.Icons.get('reports')} Reports</a>
         <a class="qa" href="audit-logs.html" data-requires-permission="audit.view">${window.Icons.get('settings')} Audit log</a>
       </div>
 
       ${canReports ? '<div id="dash-filters"></div>' : '<div id="dash-personal-filters"></div>'}
+            <div id="billing-slot"></div>
       <div id="dash-body"></div>
       <div id="setup-slot"></div>
       ${loginCard()}
@@ -274,6 +277,11 @@
     window.Permissions.applyPermissionGates(body, user);
   }
 
+
+
+
+
+  
   /* ==================================================================== *
    * PERSONAL DASHBOARD (no reports.view) - Cashier, Storekeeper, custom roles
    * ==================================================================== */
@@ -492,6 +500,40 @@
     } catch {
       return '';
     }
+  }
+
+
+
+
+
+    /* ------------------------------------------------------------------ *
+   * Subscription card (owner / anyone with billing.view)
+   * ------------------------------------------------------------------ */
+  async function loadBillingCard() {
+    if (!window.Permissions.can(user, 'billing.view')) return;
+    const slot = document.getElementById('billing-slot');
+    if (!slot) return;
+    let d;
+    try { ({ data: d } = await window.Api.get('/billing/overview')); } catch { return; }
+    if (!d.enabled || !d.subscription) return;
+
+    const s = d.subscription;
+    const labels = { TRIALING: ['Free trial', 'badge-info'], ACTIVE: ['Active', 'badge-success'], PAST_DUE: ['Payment overdue', 'badge-warning'], SUSPENDED: ['Locked', 'badge-danger'], CANCELLED: ['Cancelled', 'badge-neutral'] };
+    const [label, cls] = labels[s.status] || [s.status, 'badge-neutral'];
+    const u = d.upcoming;
+    let line = 'You are all paid up.';
+    if (s.arrearsCents > 0) line = `${fm(s.arrearsCents / 100)} is overdue${s.lockAt ? ` - account locks on ${window.UI.formatDate(s.lockAt)} if unpaid` : ''}.`;
+    else if (s.status === 'TRIALING') line = `Trial ends ${window.UI.formatDate(s.trialEndsAt)}.`;
+    else if (u && u.type === 'INVOICE') line = `Next: ${u.description} - ${fm(u.amountCents / 100)}${u.estimated ? ' (est.)' : ''}, due ${window.UI.formatDate(u.at)}.`;
+
+    slot.innerHTML = `
+      <div class="card" style="margin-bottom: var(--space-6)">
+        <div class="card-header">
+          <h2>Subscription <span class="badge ${cls}">${esc(label)}</span></h2>
+          <a class="btn ${s.arrearsCents > 0 ? 'btn-primary' : 'btn-secondary'} btn-sm" href="billing.html">${s.arrearsCents > 0 ? 'Pay now' : 'Open billing'}</a>
+        </div>
+        <div class="card-body"><p class="text-sm ${s.arrearsCents > 0 ? '' : 'text-secondary'}">${esc(s.planName || '')}${s.phase ? ` · ${esc(s.phase.name)}` : ''}</p><p class="text-sm" style="margin-top:var(--space-1)">${esc(line)}</p></div>
+      </div>`;
   }
 
   function loginLink() {

@@ -102,6 +102,17 @@
     }
   }
 
+
+    // Locked for non-payment: send the user to the one page that still works (Billing).
+  if (res.status === 402 && payload.code === 'SUBSCRIPTION_LOCKED') {
+    const path = window.location.pathname;
+    if (!/billing\.html$/.test(path) && !path.includes('admin-') && !/login\.html$/.test(path)) {
+      window.location.href = 'billing.html?locked=1';
+    }
+  }
+
+
+
   if (!res.ok || payload.success === false) {
     throw new ApiError(payload.message || `Request failed (${res.status})`, {
       code: payload.code,

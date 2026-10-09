@@ -71,6 +71,7 @@
         <a class="btn btn-secondary" href="admin-sales.html?businessId=${esc(b._id)}">Sales</a>
         <a class="btn btn-secondary" href="admin-employees.html?businessId=${esc(b._id)}">Staff</a>
         <a class="btn btn-secondary" href="admin-products.html?businessId=${esc(b._id)}">Products</a>
+        <a class="btn btn-secondary" href="admin-billing-business.html?id=${esc(b._id)}">Billing</a>
         <a class="btn btn-secondary" href="admin-audit.html?businessId=${esc(b._id)}">Audit</a>
         <button class="btn ${suspended ? 'btn-success' : 'btn-danger'}" data-action="toggle">${suspended ? 'Reactivate' : 'Suspend'}</button>`,
     });

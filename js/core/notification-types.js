@@ -24,6 +24,15 @@
     TICKET_UPDATED: { label: 'Ticket updated', icon: 'check', severity: 'info' },
     TICKET_RESOLVED: { label: 'Ticket resolved', icon: 'check', severity: 'info' },
     TICKET_CLOSED: { label: 'Ticket closed', icon: 'check', severity: 'info' },
+
+
+    BILLING_INVOICE: { label: 'New invoice', icon: 'wallet', severity: 'info' },
+BILLING_DUE: { label: 'Payment due', icon: 'alert', severity: 'warning' },
+BILLING_PAYMENT: { label: 'Billing payment', icon: 'check', severity: 'info' },
+BILLING_LOCKED: { label: 'Account locked', icon: 'alert', severity: 'critical' },
+BILLING_RESTORED: { label: 'Account restored', icon: 'check', severity: 'info' },
+BILLING_TRIAL: { label: 'Free trial', icon: 'bell', severity: 'warning' },
+BILLING_NOTICE: { label: 'Billing notice', icon: 'bell', severity: 'warning' },
   };
 
   // Same subset the backend's POST /notifications/alert accepts.
@@ -35,6 +44,7 @@
     ['LOW_STOCK', 'Stock'], ['SALE_CANCELLED', 'Sales'], ['REFUND_REQUEST', 'Refunds'],
     ['TRANSFER_REQUESTED', 'Transfers'], ['PAYMENT_FAILED', 'Payments'],
     ['CREDIT_DUE', 'Credit due'], ['CREDIT_SALE', 'Credit sales'], ['CUSTOMER_PAYMENT', 'Payments received'],
+    ['BILLING_DUE', 'Billing due'], ['BILLING_PAYMENT', 'Billing payments'],
   ];
 
   function meta(type) {
