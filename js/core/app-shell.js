@@ -20,6 +20,10 @@
  * ANNOUNCEMENTS: mount() also loads js/core/announcements.js (see loadAnnouncements
  * below) - platform notices from the super admin, shown as a pop-up or a scrolling
  * ticker depending on the page. The page is read from <body data-page="...">.
+ *
+ * CASH DRAWER: for users with sales.view, mount() loads js/core/cash-drawer.js and
+ * shows a small drawer status chip in the topbar (click it for drawer settings).
+ * Pages that need the drawer (sales.js) call AppShell.whenCashDrawerReady().
  */
 (function (window) {
   const APP_NAME = 'Six Star Pos';
@@ -42,11 +46,11 @@
     { key: 'branches',      label: 'Branches',           icon: 'store',     href: 'branches.html',      permission: 'branches.view' },
     { key: 'employees',     label: 'Employees',          icon: 'employees', href: 'employees.html',     permission: 'employees.view' },
     { key: 'customers',     label: 'Customers',          icon: 'user',      href: 'customers.html',     permission: 'customers.view' },
-    { key: 'crm', label: 'CRM', icon: 'employees', href: 'crm.html', permission: 'reports.view' },
-        { key: 'sms', label: 'SMS', icon: 'ticket', href: 'sms.html', permission: 'reports.view' },
+    { key: 'crm',           label: 'CRM',                icon: 'employees', href: 'crm.html',           permission: 'reports.view' },
+    { key: 'sms',           label: 'SMS',                icon: 'ticket',    href: 'sms.html',           permission: 'reports.view' },
     { key: 'tickets',       label: 'Tickets',            icon: 'ticket',    href: 'tickets.html',       permission: 'tickets.view' },
     { key: 'notifications', label: 'Notifications',      icon: 'bell',      href: 'notifications.html', permission: 'notifications.view' },
-    { key: 'billing', label: 'Billing', icon: 'wallet', href: 'billing.html', permission: 'billing.view' },
+    { key: 'billing',       label: 'Billing',            icon: 'wallet',    href: 'billing.html',       permission: 'billing.view' },
     { key: 'settings',      label: 'Settings',           icon: 'settings',  href: 'settings.html',      permission: 'settings.view' },
   ];
 
@@ -284,6 +288,7 @@
             <div class="topbar-title">${window.UI.escapeHtml(title)}</div>
           </div>
           <div class="topbar-right">
+            <div class="dropdown" id="drawer-chip-wrap"></div>
             <div class="dropdown" id="branch-switcher-wrap"></div>
             <div class="dropdown" id="notif-bell-wrap"></div>
             <button class="btn btn-ghost btn-icon" id="logout-btn" title="Log out">${window.Icons.get('logout')}</button>
@@ -297,6 +302,11 @@
   }
 
   async function handleLogout() {
+    // A cash drawer that is still open must be closed first.
+    if (window.CashDrawer?.isLocked()) {
+      window.UI.toast.error('Close the cash drawer before logging out.');
+      return;
+    }
     const ok = await window.UI.confirmDialog({
       title: 'Log out?',
       message: 'You will need to sign in again to continue.',
@@ -375,24 +385,75 @@
     }
   }
 
-
   /** Billing banner (locked / overdue / trial). Same pattern as loadTour/loadAnnouncements. */
-function loadBillingBanner() {
-  try {
-    if (window.BillingBanner || document.getElementById('billing-banner-script')) return;
-    const s = document.createElement('script');
-    s.id = 'billing-banner-script';
-    s.src = 'js/core/billing-banner.js';
-    s.async = true;
-    s.onerror = () => console.warn('Billing banner: js/core/billing-banner.js could not be loaded');
-    document.head.appendChild(s);
-  } catch (err) {
-    console.warn('Billing banner: not loaded', err);
+  function loadBillingBanner() {
+    try {
+      if (window.BillingBanner || document.getElementById('billing-banner-script')) return;
+      const s = document.createElement('script');
+      s.id = 'billing-banner-script';
+      s.src = 'js/core/billing-banner.js';
+      s.async = true;
+      s.onerror = () => console.warn('Billing banner: js/core/billing-banner.js could not be loaded');
+      document.head.appendChild(s);
+    } catch (err) {
+      console.warn('Billing banner: not loaded', err);
+    }
   }
-}
 
+  /* ------------------------------------------------------------------ *
+   * Cash drawer: lazy-loaded once per page (js/core/cash-drawer.js).
+   * whenCashDrawerReady() resolves with window.CashDrawer (after it has reconnected to
+   * the printer and restored any unfinished "close the drawer" lock) - or null when the
+   * file could not be loaded, so the POS keeps working without it.
+   * ------------------------------------------------------------------ */
+  let cashDrawerPromise = null;
 
+  function loadCashDrawer() {
+    if (cashDrawerPromise) return cashDrawerPromise;
+    cashDrawerPromise = new Promise((resolve) => {
+      const done = () => {
+        const cd = window.CashDrawer || null;
+        if (!cd) { resolve(null); return; }
+        Promise.resolve(cd.ready).then(() => resolve(cd), () => resolve(cd));
+      };
+      if (window.CashDrawer) { done(); return; }
+      try {
+        const s = document.createElement('script');
+        s.id = 'cash-drawer-script';
+        s.src = 'js/core/cash-drawer.js';
+        s.async = true;
+        s.onload = done;
+        s.onerror = () => { console.warn('Cash drawer: js/core/cash-drawer.js could not be loaded'); resolve(null); };
+        document.head.appendChild(s);
+      } catch (err) {
+        console.warn('Cash drawer: not loaded', err);
+        resolve(null);
+      }
+    });
+    return cashDrawerPromise;
+  }
 
+  function whenCashDrawerReady() { return loadCashDrawer(); }
+
+  /** Small topbar chip: Drawer ready / Drawer open / Drawer: manual. Click -> drawer settings. */
+  function mountDrawerChip(drawer) {
+    const wrap = document.getElementById('drawer-chip-wrap');
+    if (!wrap || !drawer) return;
+
+    const paint = () => {
+      const st = drawer.status();
+      const locked = drawer.isLocked();
+      const tone = locked ? 'open' : st.connected ? 'ok' : 'off';
+      const label = locked ? 'Drawer open' : !st.enabled ? 'No drawer' : st.connected ? 'Drawer ready' : 'Drawer: manual';
+      wrap.innerHTML = `
+        <button type="button" class="drawer-chip drawer-chip-${tone}" title="Cash drawer settings">
+          ${window.Icons.get('cash')}<span>${label}</span>
+        </button>`;
+      wrap.querySelector('button').addEventListener('click', () => drawer.openSetup());
+    };
+    drawer.on(paint);
+    paint();
+  }
 
   /**
    * AppShell.mount({ title })
@@ -421,6 +482,9 @@ function loadBillingBanner() {
     loadTour();
     loadAnnouncements();
     loadBillingBanner();
+    if (window.Permissions.can(user, 'sales.view')) {
+      loadCashDrawer().then((drawer) => { if (drawer) mountDrawerChip(drawer); });
+    }
     return document.getElementById('page-content');
   }
 
@@ -433,5 +497,6 @@ function loadBillingBanner() {
     getActiveBranchName,
     onBranchChange,
     onBranchesLoaded,
+    whenCashDrawerReady,
   };
 })(window);

@@ -16,8 +16,14 @@
  *    download); otherwise lazy-loads the html5-qrcode library from a CDN
  *    the first time it's actually needed.
  *
+ * PAUSE (used while the cash drawer is open): BarcodeScanner.setPaused(true)
+ *   - hardware scans are swallowed (their Enter key can never "click" a focused button)
+ *   - the camera scanner refuses to open
+ *   - an optional onBlocked(code) callback is told what was ignored
+ *   Call setPaused(false) to resume.
+ *
  * Usage:
- *   const stop = window.BarcodeScanner.listenHardwareScanner((code) => { ... });
+ *   const stop = window.BarcodeScanner.listenHardwareScanner((code) => { ... }, { onBlocked: (code) => {} });
  *   // later, when leaving the view: stop();
  *
  *   window.BarcodeScanner.openCameraModal({
@@ -39,6 +45,11 @@
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
     'stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>' +
     '<circle cx="12" cy="13" r="4"></circle></svg>';
+
+  let paused = false;
+
+  function setPaused(value) { paused = !!value; }
+  function isPaused() { return paused; }
 
   let html5QrcodeLoadPromise = null;
   function loadHtml5Qrcode() {
@@ -70,10 +81,14 @@
    * Ordinary human typing - even fast typing - has gaps well above
    * maxKeystrokeGapMs between keys, so it never accumulates a buffer long
    * enough to fire. Returns an unsubscribe function.
+   *
+   * While paused, a completed burst is NOT delivered to onScan; its Enter key is
+   * cancelled so it cannot activate whatever button happens to have focus.
    */
   function listenHardwareScanner(onScan, opts = {}) {
     const maxKeystrokeGapMs = opts.maxKeystrokeGapMs ?? 40;
     const minLength = opts.minLength ?? 4;
+    const onBlocked = opts.onBlocked;
 
     let buffer = '';
     let lastKeyTime = 0;
@@ -92,6 +107,12 @@
         if (buffer.length >= minLength) {
           const code = buffer;
           buffer = '';
+          if (paused) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            try { onBlocked?.(code); } catch { /* ignore */ }
+            return;
+          }
           onScan(code);
         }
         return;
@@ -106,6 +127,10 @@
 
   /* -------------------- Camera scanning modal -------------------- */
   function openCameraModal({ title = 'Scan barcode', onDetect, onCancel } = {}) {
+    if (paused) {
+      window.UI?.toast?.error('Close the cash drawer before scanning the next sale.');
+      return null;
+    }
     if (!isCameraLikelyAvailable()) {
       window.UI?.toast?.error('Camera not available on this device or browser.');
       return null;
@@ -152,6 +177,7 @@
     function handleDetected(code) {
       if (stopped) return;
       cleanup();
+      if (paused) return; // the drawer lock appeared while the camera was open
       onDetect(code);
     }
 
@@ -243,6 +269,8 @@
     openCameraModal,
     isCameraLikelyAvailable,
     hasNativeDetector,
+    setPaused,
+    isPaused,
     cameraIconSvg: CAMERA_ICON_SVG,
   };
 })(window);

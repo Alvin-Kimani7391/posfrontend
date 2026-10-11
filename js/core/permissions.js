@@ -42,6 +42,8 @@
       'audit.view',
       'notifications.view', 'notifications.send',
       'tickets.view', 'tickets.create',
+      'devices.manage', 'offline.review',
+
     ],
     CASHIER: [
       'categories.view',

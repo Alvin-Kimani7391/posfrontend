@@ -7,6 +7,7 @@
  * The detail modal formats everything properly:
  *   - money fields in `data` are integer cents -> shown as KES with .00
  *   - shift close: cash summary box, denominations table, cash-sales table
+ *   - cash drawer: change due, how long the drawer stayed open, how it was closed
  *   - everything else: friendly labels instead of raw keys / JSON
  *
  * Deep link: notifications.html?open=<id> (and the 'notification:open' event
@@ -23,6 +24,9 @@
 
   /** `data` amounts are integer cents. */
   const moneyC = (cents) => window.UI.formatMoney((Number(cents) || 0) / 100);
+
+  /** Keep the topbar bell badge in step with what happens on this page. */
+  const refreshBell = () => { try { window.NotificationCenter?.refresh?.(); } catch { /* ignore */ } };
 
   document.addEventListener('DOMContentLoaded', init);
 
@@ -72,7 +76,7 @@
       <div class="page-header">
         <div>
           <h1>Notifications</h1>
-          <p>Everything happening across your business - shifts, sales, stock, payments and more.</p>
+          <p>Everything happening across your business - shifts, sales, stock, payments, cash drawer and more.</p>
         </div>
         <div class="page-actions">
           ${canSend ? '<button class="btn btn-secondary btn-sm" id="raise-alert-btn">Raise an alert</button>' : ''}
@@ -116,7 +120,7 @@
       state.page = 1;
       fetchNotifications();
     });
-    document.getElementById('refresh-btn').addEventListener('click', () => fetchNotifications());
+    document.getElementById('refresh-btn').addEventListener('click', () => { fetchNotifications(); refreshBell(); });
     document.getElementById('mark-all-btn').addEventListener('click', markAllRead);
   }
 
@@ -125,6 +129,7 @@
       await window.Api.post('/notifications/mark-all-read');
       window.UI.toast.success('All notifications marked as read');
       await fetchNotifications();
+      refreshBell();
     } catch (err) {
       window.UI.toast.error(err.message);
     }
@@ -190,6 +195,7 @@
         try {
           await window.Api.post(`/notifications/${n._id}/read`);
           await fetchNotifications();
+          refreshBell();
         } catch (err) {
           window.UI.toast.error(err.message);
         }
@@ -211,6 +217,7 @@
     'openingCash', 'expectedCash', 'actualCash', 'cashDifference', 'denominationTotal',
     'amount', 'total', 'subtotal', 'newBalance', 'creditLimit', 'availableCredit', 'outstandingBalance',
     'shortageAmount', 'paymentAmount', 'totalPaid', 'balance',
+    'changeDue', 'changeGiven', 'amountTendered', 'cashReceived',
   ]);
 
   const LABELS = {
@@ -221,6 +228,18 @@
     outstandingBalance: 'Outstanding balance', receiptNumber: 'Receipt', customerName: 'Customer',
     cashierName: 'Cashier', recordedBy: 'Recorded by', paymentStatus: 'Payment status',
     transferNumber: 'Transfer', refundNumber: 'Refund', itemCount: 'Items',
+    changeDue: 'Change to give', changeGiven: 'Change given', amountTendered: 'Cash received',
+    cashReceived: 'Cash received', drawerOpenSeconds: 'Drawer open for', closeMethod: 'Closed by',
+    drawerOpenedAt: 'Drawer opened', drawerClosedAt: 'Drawer closed', drawerEvent: 'Drawer event',
+  };
+
+  // How the cash drawer ended up closed (value of data.closeMethod).
+  const CLOSE_METHODS = {
+    sensor: 'Drawer sensor (automatic)',
+    manual: 'Cashier confirmed it was closed',
+    override: 'Cashier override - sensor still said open',
+    restore: 'Automatic, after the page was reloaded',
+    'other-tab': 'Another POS window on the same device',
   };
 
   // Internal ids / noise - never worth showing to a human.
@@ -248,6 +267,26 @@
         ${d.expectedCash !== undefined ? row('Expected cash', moneyC(d.expectedCash)) : ''}
         ${d.actualCash !== undefined ? row('Counted cash', moneyC(d.actualCash)) : ''}
         ${row(label, moneyC(Math.abs(diff)), `grand notif-val-${tone}`)}
+      </div>`;
+  }
+
+  /** Cash drawer alert: change due, how long it stayed open, how it was closed. */
+  function drawerSummaryHtml(d, used) {
+    if (d.drawerOpenSeconds === undefined && d.closeMethod === undefined && d.drawerEvent === undefined) return '';
+    ['receiptNumber', 'changeDue', 'amountTendered', 'drawerOpenSeconds', 'closeMethod', 'drawerEvent', 'drawerOpenedAt', 'drawerClosedAt']
+      .forEach((k) => used.add(k));
+
+    const secs = Number(d.drawerOpenSeconds);
+    const long = Number.isFinite(secs) && secs >= 60;
+    return `
+      <div class="notif-detail-title">Cash drawer</div>
+      <div class="notif-detail-box">
+        ${d.receiptNumber ? row('Receipt', esc(d.receiptNumber)) : ''}
+        ${d.amountTendered !== undefined ? row('Cash received', moneyC(d.amountTendered)) : ''}
+        ${d.changeDue !== undefined ? row('Change to give', moneyC(d.changeDue)) : ''}
+        ${d.drawerOpenedAt ? row('Drawer opened', esc(window.UI.formatDateTime(d.drawerOpenedAt))) : ''}
+        ${Number.isFinite(secs) ? row('Drawer open for', esc(window.UI.formatDuration(secs)), long ? 'notif-val-short' : '') : ''}
+        ${d.closeMethod ? row('Closed by', esc(CLOSE_METHODS[d.closeMethod] || d.closeMethod), d.closeMethod === 'override' ? 'notif-val-short' : '') : ''}
       </div>`;
   }
 
@@ -295,6 +334,8 @@
   function formatValue(key, v) {
     if (MONEY_KEYS.has(key) && typeof v === 'number') return moneyC(v);
     if (/At$/.test(key) && v) return window.UI.formatDateTime(v);
+    if (/Seconds$/.test(key) && Number.isFinite(Number(v))) return esc(window.UI.formatDuration(Number(v)));
+    if (key === 'closeMethod') return esc(CLOSE_METHODS[v] || String(v));
     if (key === 'method') return esc(String(v).replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase()));
     return esc(String(v));
   }
@@ -312,6 +353,7 @@
     let html = '';
 
     html += cashSummaryHtml(d, used);
+    html += drawerSummaryHtml(d, used);
     if (Array.isArray(d.denominations)) { used.add('denominationTotal'); html += denominationsHtml(d.denominations, d.denominationTotal); }
     if (Array.isArray(d.sales)) {
       used.add('cashSaleCount');
@@ -345,7 +387,7 @@
 
     if (!n.readAt) {
       n.readAt = new Date().toISOString();
-      window.Api.post(`/notifications/${n._id}/read`).then(fetchNotifications).catch(() => {});
+      window.Api.post(`/notifications/${n._id}/read`).then(() => { fetchNotifications(); refreshBell(); }).catch(() => {});
     }
   }
 
@@ -411,6 +453,7 @@
         window.UI.closeModal();
         window.UI.toast.success('Alert sent to management');
         await fetchNotifications();
+        refreshBell();
       } catch (err) {
         window.UI.applyFormErrors(form, err.errors);
         window.UI.toast.error(err.message);

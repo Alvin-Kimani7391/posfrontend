@@ -5,6 +5,10 @@
  * states, formatting, and generic table/pagination rendering. Keeping this
  * here means every page looks and behaves consistently, and a visual
  * change (e.g. new toast style) only needs to happen once.
+ *
+ * NEW: UI.showDrawerLock() - the blocking "give change / close the cash drawer"
+ * screen used by the POS (see cash-drawer.js). It is NOT a modal: Escape and
+ * clicking outside do nothing, and the rest of the app is made inert behind it.
  */
 (function (window) {
   /* ------------------------------------------------------------------ *
@@ -130,6 +134,91 @@
   });
 
   /* ------------------------------------------------------------------ *
+   * Cash drawer lock screen
+   * showDrawerLock({ onReopen, onConfirm, onSetup }) -> controller
+   *   controller.update({ change, tendered, due, receiptNumber, tone, message,
+   *                       seconds, overdue, confirmVisible, confirmLabel, canReopen })
+   *   controller.close()
+   * Only one can exist at a time. The "Drawer is closed" button only reacts to a real
+   * pointer / touch click - a barcode scanner's Enter key can never press it.
+   * ------------------------------------------------------------------ */
+  let drawerLockCtl = null;
+
+  function formatTimer(totalSeconds) {
+    const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  function showDrawerLock({ onReopen, onConfirm, onSetup } = {}) {
+    if (drawerLockCtl) return drawerLockCtl;
+
+    const el = document.createElement('div');
+    el.className = 'drawer-lock';
+    el.setAttribute('role', 'alertdialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-labelledby', 'drawer-lock-title');
+    el.innerHTML = `
+      <div class="drawer-lock-card">
+        <div class="drawer-lock-ico">${window.Icons.get('cash')}</div>
+        <h2 id="drawer-lock-title">Give the change to the customer</h2>
+        <div class="drawer-lock-change"><span>Change to give back</span><strong data-f="change">-</strong></div>
+        <div class="drawer-lock-meta" data-f="meta"></div>
+        <div class="drawer-lock-status" data-f="status" data-tone="info">
+          <span data-f="msg">Opening the cash drawer…</span>
+          <b data-f="timer"></b>
+        </div>
+        <div class="drawer-lock-actions">
+          <button type="button" class="btn btn-secondary" data-f="reopen"><span>Open drawer again</span> <kbd class="kbd">F7</kbd></button>
+          <button type="button" class="btn btn-success btn-lg" data-f="confirm"><span data-f="confirm-label">Drawer is closed</span> <kbd class="kbd">F8</kbd></button>
+        </div>
+        <button type="button" class="btn-link" data-f="setup">Drawer settings</button>
+      </div>
+    `;
+    document.body.appendChild(el);
+
+    // Everything behind the lock screen becomes unreachable (mouse AND keyboard).
+    const appRoot = document.getElementById('app-shell');
+    if (appRoot) appRoot.inert = true;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+
+    const f = (name) => el.querySelector(`[data-f="${name}"]`);
+
+    // Enter / Space must never press a button here (a scanner burst ends with Enter).
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') e.preventDefault(); });
+
+    f('reopen').addEventListener('click', (e) => { if (e.detail === 0) return; onReopen?.(); });
+    f('confirm').addEventListener('click', (e) => { if (e.detail === 0) return; onConfirm?.(); });
+    f('setup').addEventListener('click', () => onSetup?.());
+
+    function update(p = {}) {
+      if (p.change !== undefined) f('change').textContent = formatMoney(p.change);
+      if (p.receiptNumber !== undefined || p.tendered !== undefined || p.due !== undefined) {
+        const parts = [];
+        if (p.receiptNumber) parts.push(`Receipt ${escapeHtml(p.receiptNumber)}`);
+        if (p.tendered) parts.push(`Received ${formatMoney(p.tendered)}`);
+        if (p.due) parts.push(`Total ${formatMoney(p.due)}`);
+        f('meta').innerHTML = parts.join(' &middot; ');
+      }
+      if (p.tone) f('status').dataset.tone = p.tone;
+      if (p.message !== undefined) f('msg').textContent = p.message;
+      if (p.seconds !== undefined) f('timer').textContent = formatTimer(p.seconds);
+      if (p.overdue !== undefined) el.classList.toggle('overdue', !!p.overdue);
+      if (p.confirmVisible !== undefined) f('confirm').style.display = p.confirmVisible ? '' : 'none';
+      if (p.confirmLabel !== undefined) f('confirm-label').textContent = p.confirmLabel;
+      if (p.canReopen !== undefined) f('reopen').style.display = p.canReopen ? '' : 'none';
+    }
+
+    function close() {
+      el.remove();
+      if (appRoot) appRoot.inert = false;
+      drawerLockCtl = null;
+    }
+
+    drawerLockCtl = { update, close, el };
+    return drawerLockCtl;
+  }
+
+  /* ------------------------------------------------------------------ *
    * Button loading state
    * ------------------------------------------------------------------ */
   function setButtonLoading(button, isLoading, loadingText = 'Please wait…') {
@@ -160,6 +249,13 @@
   function formatDateTime(dateLike) {
     if (!dateLike) return '—';
     return new Intl.DateTimeFormat('en-KE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(dateLike));
+  }
+
+  /** 75 -> "1m 15s", 8 -> "8s" */
+  function formatDuration(totalSeconds) {
+    const s = Math.max(0, Math.round(Number(totalSeconds) || 0));
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
   }
 
   function timeAgo(dateLike) {
@@ -301,10 +397,12 @@
     openModal,
     closeModal,
     confirmDialog,
+    showDrawerLock,
     setButtonLoading,
     formatMoney,
     formatDate,
     formatDateTime,
+    formatDuration,
     timeAgo,
     initials,
     escapeHtml,

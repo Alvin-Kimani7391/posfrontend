@@ -1,559 +1,638 @@
 /**
- * cash-drawer.js
- * Cash drawer control for the POS. The drawer's RJ11/RJ12 cable plugs into the
- * receipt printer; to pop it we send the printer the standard ESC/POS "kick"
- * command (ESC p m t1 t2). The browser talks to the printer directly through
- *   - WebUSB      (USB receipt printers; Chrome / Edge / Android Chrome), or
- *   - Web Serial  (printers that show up as a COM / serial port)
- * Both need HTTPS (or localhost). The printer is paired ONCE (user gesture);
- * after that it reconnects silently on every page load.
+ * cash-drawer.js  (NEW - loaded automatically by app-shell.js, no HTML change needed)
  *
- * RULES THIS MODULE ENFORCES (the sales screen reads them)
- *   - The drawer is only opened by open() - sales.js calls it ONLY for a cash
- *     sale that has change to give back. Exact cash / M-PESA / card never open it.
- *   - open() puts the drawer in the "open" state. While it is open the sales
- *     screen is locked: no new sale can start until the drawer is closed.
- *   - The state survives a page reload (a half-finished change hand-over can
- *     never be skipped by refreshing).
+ * Cash drawer control for the POS. Two jobs:
  *
- * HOW "CLOSED" IS KNOWN
- *   1. Sensor (optional, Settings -> "Detect when the drawer is shut"): while the
- *      drawer is open we poll the printer's real-time status (DLE EOT 1, bit 2 =
- *      drawer connector). It must be SEEN open first, then closed twice in a row,
- *      before the lock releases by itself. Needs the drawer's sensor wire.
- *   2. Manual: the cashier taps "Drawer is closed". With a working sensor that
- *      tap is refused while the sensor still says open (sales.js offers a
- *      timed manual override so a broken sensor can never freeze the till).
+ * 1. HARDWARE: send the ESC/POS "kick drawer" pulse to the receipt printer the drawer is
+ *    plugged into (RJ11 / DK port), over WebUSB or Web Serial (Chrome / Edge, HTTPS or
+ *    localhost). When the printer answers the ESC/POS drawer-status request
+ *    (DLE EOT 1) the system also KNOWS when the drawer is open or closed.
  *
- * API (window.CashDrawer)
- *   init()                       start (auto-reconnect paired printer). Safe to call twice.
- *   info()                       { state, active, connected, label, error, pending, sensor, settings, support }
- *                                state: 'unconfigured' | 'disconnected' | 'ready' | 'open'
- *   isActive() / isOpen()
- *   open({ change, receipt })    kick the drawer and enter the "open" state
- *   reopen()                     kick again while open (drawer did not pop)
- *   confirmClosed({ force })     manual "it is closed" -> true when accepted
- *   onChange(cb)                 subscribe, returns unsubscribe
- *   openSettings({ canTest })    pairing / options window
+ * 2. THE RULE: the drawer opens ONLY when a cash sale has change to give back. From that
+ *    moment the POS is LOCKED until the drawer is closed again:
+ *      - drawer sensor available  -> the lock releases by itself the moment the drawer shuts
+ *      - no sensor / no hardware  -> the cashier must tap "Drawer is closed"
+ *    The lock is saved on this device, so reloading the page or reopening the browser
+ *    cannot be used to skip it.
+ *
+ * NO DRAWER? Shops without a cash drawer leave the setting "This shop uses a cash drawer" OFF
+ * (the default). Then nothing opens, nothing locks, and the POS simply shows "Give change".
+ *
+ * Lock phases:  opening -> open | failed | manual
+ *   open    : pulse sent
+ *   failed  : pulse could not be sent / drawer did not pop (sensor only)
+ *   manual  : no drawer hardware connected - cashier opens it with the No-Sale key
+ *
+ * Events (CashDrawer.on(fn)): lock | phase | reading | overdue | unlock | connection
+ *
+ * Public API: see window.CashDrawer at the bottom.
  */
 (function (window) {
   'use strict';
 
-  const SETTINGS_KEY = 'pos.drawer.settings';
-  const PENDING_KEY = 'pos.drawer.pending';
-  const DEFAULTS = { transport: 'none', pin: 'both', sense: false, invert: false, baud: 9600, vid: null, pid: null };
-  const STATUS_REQ = Uint8Array.of(0x10, 0x04, 0x01); // DLE EOT 1: real-time status, drawer bit
-  const PULSE_2 = [0x1b, 0x70, 0x00, 0x19, 0xfa]; // ESC p 0 25 250  (drawer connector pin 2)
-  const PULSE_5 = [0x1b, 0x70, 0x01, 0x19, 0xfa]; // ESC p 1 25 250  (drawer connector pin 5)
+  const CFG_KEY = 'pos.drawer.cfg';
+  const LOCK_KEY = 'pos.drawer.lock';
+  const OVERDUE_MS = 60 * 1000;        // drawer open longer than this -> "overdue"
+  const POLL_MS = 500;                 // sensor polling while locked
+  const NO_POP_MS = 4000;              // pulse sent but sensor never saw "open" -> failed
+  const LOCK_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+  const STATUS_REQ = new Uint8Array([0x10, 0x04, 0x01]); // DLE EOT 1 (printer status)
 
+  const DEFAULT_CFG = { enabled: false, mode: 'none', pin: 0, baud: 9600, closedBit: null, usb: null };
+
+  const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
+
+  function readJson(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; } }
+  function writeJson(key, value) {
+    try { if (value == null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ }
+  }
+
+  let cfg = { ...DEFAULT_CFG, ...(readJson(CFG_KEY) || {}) };
+  let lock = null;
   const listeners = new Set();
-  let settings = loadSettings();
-  let link = null; // { kind, label, canQuery, send(bytes), query(bytes, ms), close(), device|port }
-  let linkError = '';
-  let pending = loadPending(); // { at, change, receipt } while the drawer is open
-  let sensor = freshSensor();
-  let watchTimer = null;
-  let polling = false;
-  let inited = false;
-  let reconnecting = null;
-  let ioQueue = Promise.resolve();
+
+  let link = null;          // { kind: 'serial' | 'usb', label }
+  let port = null;          // Web Serial port
+  let serialReader = null;
+  let serialLoop = null;
+  let usbDev = null;        // WebUSB device
+  let usbEp = null;         // { iface, out, in }
+  let senseOk = false;      // printer has answered a valid status request
+  let missStreak = 0;
+  let statusWaiter = null;
+  let writeQueue = Promise.resolve();
+  let pollTimer = null;
+  let overdueTimer = null;
+  let ticking = false;
 
   /* ------------------------------------------------------------------ *
-   * Small helpers
+   * Events
    * ------------------------------------------------------------------ */
-  function loadSettings() {
-    try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { return { ...DEFAULTS }; }
+  function emit(type, extra = {}) {
+    const detail = { type, lock: lock ? { ...lock } : null, ...extra };
+    listeners.forEach((fn) => { try { fn(detail); } catch (err) { console.error('CashDrawer listener failed', err); } });
   }
-  function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* private mode */ } }
-  function loadPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch { return null; } }
-  function savePending() {
-    try { if (pending) localStorage.setItem(PENDING_KEY, JSON.stringify(pending)); else localStorage.removeItem(PENDING_KEY); } catch { /* ignore */ }
-  }
-  function freshSensor() { return { seenOpen: false, closedReads: 0, last: null, unreadable: false }; }
-  function isActive() { return settings.transport !== 'none'; }
-  function isOpen() { return !!pending && isActive(); }
-  function withTimeout(p, ms) { return Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]); }
+  function on(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
-  /** Every write/query to the printer goes through one queue so they can never overlap. */
-  function io(fn) {
-    const run = ioQueue.then(fn);
-    ioQueue = run.catch(() => {});
-    return run;
-  }
+  /* ------------------------------------------------------------------ *
+   * Status
+   * ------------------------------------------------------------------ */
+  function isSupported() { return 'serial' in navigator || 'usb' in navigator; }
 
-  function supportInfo() {
-    return { usb: !!navigator.usb, serial: !!navigator.serial, secure: window.isSecureContext !== false };
-  }
-
-  function friendly(err) {
-    const name = err && err.name;
-    const msg = (err && err.message) || String(err || 'Unknown error');
-    if (name === 'SecurityError') return 'The browser blocked printer access (the page must be HTTPS or localhost)';
-    if (name === 'NetworkError' || /claim|access denied|busy/i.test(msg)) {
-      return 'The printer is busy or owned by its Windows driver. Close other apps using it, or pair it as a Serial port instead';
-    }
-    if (name === 'NotFoundError') return 'No printer was chosen';
-    return msg;
-  }
-
-  function pulseBytes(pin) {
-    const p = pin || settings.pin;
-    return Uint8Array.from(p === 'pin2' ? PULSE_2 : p === 'pin5' ? PULSE_5 : [...PULSE_2, ...PULSE_5]);
-  }
-
-  function info() {
-    const active = isActive();
-    const state = !active ? 'unconfigured' : pending ? 'open' : link ? 'ready' : 'disconnected';
+  function status() {
+    const connected = !!link;
     return {
-      state,
-      active,
-      connected: !!link,
+      enabled: !!cfg.enabled,
+      supported: isSupported(),
+      serialSupported: 'serial' in navigator,
+      usbSupported: 'usb' in navigator,
+      connected,
+      kind: link ? link.kind : null,
       label: link ? link.label : '',
-      error: linkError,
-      pending: pending ? { ...pending } : null,
-      sensor: {
-        active: !!(active && settings.sense && link && link.canQuery),
-        last: sensor.last,
-        seenOpen: sensor.seenOpen,
-        unreadable: sensor.unreadable,
-      },
-      settings: { ...settings },
-      support: supportInfo(),
+      calibrated: cfg.closedBit != null,
+      canSense: connected && senseOk && cfg.closedBit != null,
+      pin: cfg.pin,
+      baud: cfg.baud,
     };
   }
 
-  function emit() {
-    const snapshot = info();
-    listeners.forEach((cb) => { try { cb(snapshot); } catch (e) { console.error('CashDrawer listener', e); } });
-  }
+  function isLocked() { return !!lock; }
+  function isEnabled() { return !!cfg.enabled; }
 
-  function onChange(cb) {
-    listeners.add(cb);
-    return () => listeners.delete(cb);
+  /** Turn the whole drawer feature on/off for this device. Turning it off releases any lock and disconnects. */
+  async function setEnabled(value) {
+    cfg.enabled = !!value;
+    writeJson(CFG_KEY, cfg);
+    if (!cfg.enabled) {
+      if (lock) finish('disabled');
+      await dropLink();
+      cfg.mode = 'none';
+      writeJson(CFG_KEY, cfg);
+    }
+    emit('connection');
   }
+  function getLock() { return lock ? { ...lock } : null; }
 
   /* ------------------------------------------------------------------ *
-   * Transports
+   * Low-level I/O (serialised so writes never overlap)
    * ------------------------------------------------------------------ */
-  function pickInterface(device) {
-    const cands = [];
-    device.configuration.interfaces.forEach((iface) => iface.alternates.forEach((alt) => {
-      const out = alt.endpoints.find((e) => e.direction === 'out' && e.type === 'bulk');
-      if (out) cands.push({ iface, alt, out, inn: alt.endpoints.find((e) => e.direction === 'in' && e.type === 'bulk') });
-    }));
-    return cands.find((c) => c.alt.interfaceClass === 7) || cands[0] || null; // class 7 = printer
+  async function rawWrite(bytes) {
+    if (!link) throw new Error('Drawer not connected');
+    if (link.kind === 'serial') {
+      const writer = port.writable.getWriter();
+      try { await writer.write(bytes); } finally { writer.releaseLock(); }
+    } else {
+      const res = await usbDev.transferOut(usbEp.out, bytes);
+      if (res.status !== 'ok') throw new Error(`USB transfer failed (${res.status})`);
+    }
   }
 
-  async function openUsb(device) {
-    await device.open();
-    if (device.configuration === null) await device.selectConfiguration(1);
-    const c = pickInterface(device);
-    if (!c) throw new Error('No printable USB endpoint found on this device');
-    await device.claimInterface(c.iface.interfaceNumber);
-    if (c.alt.alternateSetting) await device.selectAlternateInterface(c.iface.interfaceNumber, c.alt.alternateSetting);
-    return {
-      kind: 'usb',
-      device,
-      label: device.productName || 'USB printer',
-      canQuery: !!c.inn,
-      async send(bytes) { await device.transferOut(c.out.endpointNumber, bytes); },
-      async query(bytes, ms) {
-        if (!c.inn) return null;
-        await device.transferOut(c.out.endpointNumber, bytes);
-        const r = await withTimeout(device.transferIn(c.inn.endpointNumber, 8), ms || 700);
-        return r && r.data && r.data.byteLength ? r.data.getUint8(0) : null;
-      },
-      async close() { try { await device.close(); } catch { /* already gone */ } },
-    };
+  function write(bytes) {
+    const p = writeQueue.then(() => rawWrite(bytes));
+    writeQueue = p.catch(() => {});
+    return p;
   }
 
-  async function openSerial(port) {
-    await port.open({ baudRate: settings.baud || 9600 });
-    const rx = [];
-    let waiter = null;
-    let alive = true;
-    const reader = port.readable.getReader();
+  function onStatusBytes(u8) {
+    if (statusWaiter && u8.length) statusWaiter(u8[u8.length - 1]);
+  }
+
+  function requestStatus(timeoutMs = 500) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { statusWaiter = null; resolve(null); }, timeoutMs);
+      statusWaiter = (b) => { clearTimeout(timer); statusWaiter = null; resolve(b); };
+      write(STATUS_REQ).catch(() => { clearTimeout(timer); statusWaiter = null; resolve(null); });
+    });
+  }
+
+  function startSerialLoop(p) {
+    serialLoop = (async () => {
+      try {
+        serialReader = p.readable.getReader();
+        while (true) {
+          const { value, done } = await serialReader.read();
+          if (done) break;
+          if (value && value.length) onStatusBytes(value);
+        }
+      } catch { /* port closed or unplugged */ }
+      finally {
+        try { serialReader && serialReader.releaseLock(); } catch { /* ignore */ }
+        serialReader = null;
+      }
+    })();
+  }
+
+  function startUsbLoop(dev, ep) {
+    if (ep.in == null) return;
     (async () => {
       try {
-        while (alive) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value && value.length) {
-            if (waiter) { const w = waiter; waiter = null; w(value[0]); } else rx.push(value[0]);
+        while (link && link.kind === 'usb' && usbDev === dev) {
+          const r = await dev.transferIn(ep.in, 64);
+          if (r.status === 'ok' && r.data && r.data.byteLength) {
+            onStatusBytes(new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength));
+          } else if (r.status === 'stall') {
+            await dev.clearHalt('in', ep.in);
           }
         }
-      } catch { /* port closed */ }
+      } catch { /* device closed or unplugged */ }
     })();
-    const send = async (bytes) => {
-      const w = port.writable.getWriter();
-      try { await w.write(bytes); } finally { w.releaseLock(); }
-    };
-    return {
-      kind: 'serial',
-      port,
-      label: 'Serial printer',
-      canQuery: true,
-      send,
-      async query(bytes, ms) {
-        rx.length = 0;
-        await send(bytes);
-        if (rx.length) return rx.shift();
-        return new Promise((res) => {
-          const t = setTimeout(() => { waiter = null; res(null); }, ms || 700);
-          waiter = (v) => { clearTimeout(t); res(v); };
-        });
-      },
-      async close() {
-        alive = false;
-        try { await reader.cancel(); } catch { /* ignore */ }
-        try { reader.releaseLock(); } catch { /* ignore */ }
-        try { await port.close(); } catch { /* ignore */ }
-      },
-    };
   }
 
   async function dropLink() {
-    const l = link;
+    const kind = link && link.kind;
     link = null;
-    stopWatch();
-    if (l) { try { await l.close(); } catch { /* ignore */ } }
-  }
-
-  /** Silent reconnect to a printer the browser already has permission for. */
-  function reconnect() {
-    if (link) return Promise.resolve(link);
-    if (reconnecting) return reconnecting;
-    reconnecting = (async () => {
-      try {
-        if (settings.transport === 'usb' && navigator.usb) {
-          const devs = await navigator.usb.getDevices();
-          const dev = devs.find((d) => (settings.vid == null || d.vendorId === settings.vid) && (settings.pid == null || d.productId === settings.pid));
-          if (dev) link = await openUsb(dev);
-        } else if (settings.transport === 'serial' && navigator.serial) {
-          const ports = await navigator.serial.getPorts();
-          const port = ports.find((p) => {
-            const i = p.getInfo();
-            return settings.vid == null || (i.usbVendorId === settings.vid && i.usbProductId === settings.pid);
-          });
-          if (port) link = await openSerial(port);
-        }
-        linkError = link ? '' : (isActive() ? 'No printer paired - tap the drawer button and choose one' : '');
-        if (link && pending) startWatch();
-      } catch (err) {
-        link = null;
-        linkError = friendly(err);
-      } finally {
-        reconnecting = null;
-        emit();
-      }
-      return link;
-    })();
-    return reconnecting;
-  }
-
-  /** Pairing (needs a user gesture because it shows the browser's device chooser). */
-  async function connectDevice(kind) {
+    senseOk = false;
+    missStreak = 0;
     try {
-      if (kind === 'usb') {
-        if (!navigator.usb) throw new Error('WebUSB is not available in this browser');
-        const dev = await navigator.usb.requestDevice({ filters: [{ classCode: 7 }, { classCode: 0xff }] });
-        await dropLink();
-        link = await openUsb(dev);
-        settings = { ...settings, transport: 'usb', vid: dev.vendorId, pid: dev.productId };
-      } else if (kind === 'serial') {
-        if (!navigator.serial) throw new Error('Web Serial is not available in this browser');
-        const port = await navigator.serial.requestPort();
-        await dropLink();
-        link = await openSerial(port);
-        const i = port.getInfo();
-        settings = { ...settings, transport: 'serial', vid: i.usbVendorId != null ? i.usbVendorId : null, pid: i.usbProductId != null ? i.usbProductId : null };
-      } else {
-        throw new Error('Choose USB or Serial first');
+      if (kind === 'serial' && port) {
+        try { if (serialReader) await serialReader.cancel(); } catch { /* ignore */ }
+        try { if (serialLoop) await serialLoop; } catch { /* ignore */ }
+        await port.close();
       }
-      linkError = '';
-      saveSettings();
-      if (pending) startWatch();
-      emit();
-      return { ok: true };
-    } catch (err) {
-      const cancelled = err && err.name === 'NotFoundError';
-      if (!cancelled) linkError = friendly(err);
-      emit();
-      return { ok: false, cancelled, error: friendly(err) };
-    }
-  }
-
-  async function forget() {
-    const raw = link && (link.device || link.port);
-    await dropLink();
-    if (raw && typeof raw.forget === 'function') { try { await raw.forget(); } catch { /* ignore */ } }
-    settings = { ...settings, vid: null, pid: null };
-    saveSettings();
-    linkError = isActive() ? 'No printer paired - tap the drawer button and choose one' : '';
-    emit();
+    } catch { /* ignore */ }
+    try {
+      if (kind === 'usb' && usbDev) {
+        try { await usbDev.releaseInterface(usbEp.iface); } catch { /* ignore */ }
+        await usbDev.close();
+      }
+    } catch { /* ignore */ }
+    port = null; usbDev = null; usbEp = null; serialReader = null; serialLoop = null;
   }
 
   /* ------------------------------------------------------------------ *
-   * Kick + sensor
+   * Connecting
    * ------------------------------------------------------------------ */
-  async function kick(pin) {
-    const bytes = pulseBytes(pin);
-    if (!link) await reconnect();
-    if (!link) throw new Error(linkError || 'The drawer printer is not connected');
+  async function adoptSerial(p, remember = true) {
+    await dropLink();
+    await p.open({ baudRate: Number(cfg.baud) || 9600 });
+    port = p;
+    link = { kind: 'serial', label: 'Serial / COM printer' };
+    startSerialLoop(p);
+    if (remember) { cfg.mode = 'serial'; writeJson(CFG_KEY, cfg); }
+    await readState(); // sets senseOk when the printer answers
+    emit('connection');
+  }
+
+  async function adoptUsb(dev, remember = true) {
+    await dropLink();
+    await dev.open();
+    if (!dev.configuration) await dev.selectConfiguration(1);
+
+    // Prefer a printer-class (7) interface, otherwise any interface with a bulk OUT endpoint.
+    let found = null;
+    for (const preferPrinter of [true, false]) {
+      for (const iface of dev.configuration.interfaces) {
+        for (const alt of iface.alternates) {
+          if (preferPrinter && alt.interfaceClass !== 7) continue;
+          const out = alt.endpoints.find((e) => e.direction === 'out' && e.type === 'bulk');
+          if (!out) continue;
+          const inn = alt.endpoints.find((e) => e.direction === 'in' && e.type === 'bulk');
+          found = { iface: iface.interfaceNumber, alt: alt.alternateSetting, out: out.endpointNumber, in: inn ? inn.endpointNumber : null };
+          break;
+        }
+        if (found) break;
+      }
+      if (found) break;
+    }
+    if (!found) { try { await dev.close(); } catch { /* ignore */ } throw new Error('No printer endpoint found on this USB device.'); }
+
     try {
-      await io(() => link.send(bytes));
-    } catch (e) {
-      // Stale connection (printer power-cycled / re-plugged): rebuild once and retry.
+      await dev.claimInterface(found.iface);
+      if (found.alt) await dev.selectAlternateInterface(found.iface, found.alt);
+    } catch (err) {
+      try { await dev.close(); } catch { /* ignore */ }
+      throw new Error('Could not take control of the printer. On Windows install the WinUSB driver for it (e.g. with Zadig), or use the Serial / COM option.');
+    }
+
+    usbDev = dev;
+    usbEp = found;
+    link = { kind: 'usb', label: dev.productName || 'USB receipt printer' };
+    startUsbLoop(dev, found);
+    if (remember) { cfg.mode = 'usb'; cfg.usb = { vendorId: dev.vendorId, productId: dev.productId }; writeJson(CFG_KEY, cfg); }
+    await readState();
+    emit('connection');
+  }
+
+  async function connectSerial() {
+    if (!('serial' in navigator)) throw new Error('This browser has no Web Serial support. Use Chrome or Edge.');
+    const p = await navigator.serial.requestPort();
+    await adoptSerial(p, true);
+  }
+
+  async function connectUsb() {
+    if (!('usb' in navigator)) throw new Error('This browser has no WebUSB support. Use Chrome or Edge.');
+    const dev = await navigator.usb.requestDevice({ filters: [{ classCode: 7 }, { classCode: 255 }] });
+    await adoptUsb(dev, true);
+  }
+
+  async function disconnect() {
+    await dropLink();
+    cfg.mode = 'none';
+    writeJson(CFG_KEY, cfg);
+    emit('connection');
+  }
+
+  function configure(partial = {}) {
+    if (partial.pin != null) cfg.pin = Number(partial.pin) === 1 ? 1 : 0;
+    if (partial.baud != null) cfg.baud = Number(partial.baud) || 9600;
+    writeJson(CFG_KEY, cfg);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Open / sense
+   * ------------------------------------------------------------------ */
+  async function open() {
+    if (!link) return { ok: false, reason: 'no-device' };
+    try {
+      // ESC p m t1 t2  - m = connector pin (0 = pin 2, 1 = pin 5), pulse 50ms on / 500ms off
+      await write(new Uint8Array([0x1B, 0x70, cfg.pin ? 1 : 0, 25, 250]));
+      return { ok: true };
+    } catch (err) {
       await dropLink();
-      await reconnect();
-      if (!link) throw e;
-      await io(() => link.send(bytes));
+      emit('connection');
+      return { ok: false, reason: 'error', error: err.message };
     }
   }
 
-  async function readSensor(invert) {
-    if (!link || !link.canQuery) return { ok: false, reason: 'unsupported' };
-    const raw = await link.query(STATUS_REQ, 600);
-    if (raw == null) return { ok: false, reason: 'noreply' };
-    const bit = (raw & 0x04) !== 0; // drawer kick-out connector status
-    const inv = invert == null ? settings.invert : invert;
-    return { ok: true, open: inv ? !bit : bit };
+  /** 'open' | 'closed' | 'unknown' - 'unknown' whenever the printer cannot tell us. */
+  async function readState() {
+    if (!link) return 'unknown';
+    const b = await requestStatus(600);
+    // Valid DLE EOT 1 reply: bits 0,1,4,7 are fixed (0,1,1,0).
+    if (b == null || (b & 0x93) !== 0x12) {
+      missStreak += 1;
+      if (missStreak >= 3) senseOk = false;
+      return 'unknown';
+    }
+    missStreak = 0;
+    senseOk = true;
+    if (cfg.closedBit == null) return 'unknown';
+    return ((b & 0x04) ? 1 : 0) === cfg.closedBit ? 'closed' : 'open';
   }
 
+  /** Learn what "closed" looks like for THIS drawer. The drawer must be shut when this runs. */
+  async function calibrate() {
+    if (!link) throw new Error('Connect the drawer first.');
+    const b = await requestStatus(800);
+    if (b == null || (b & 0x93) !== 0x12) {
+      throw new Error('This printer does not report the drawer state. The "Drawer is closed" button will be used instead.');
+    }
+    cfg.closedBit = (b & 0x04) ? 1 : 0;
+    writeJson(CFG_KEY, cfg);
+    senseOk = true;
+    missStreak = 0;
+    emit('connection');
+    return cfg.closedBit;
+  }
+
+  /** Setup-screen test: kick the drawer, then report what the sensor sees. */
+  async function test() {
+    const res = await open();
+    if (!res.ok) return { ...res, state: 'unknown' };
+    await new Promise((r) => setTimeout(r, 700));
+    return { ...res, state: await readState() };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * The lock: drawer opens for change, POS stays locked until it is closed
+   * ------------------------------------------------------------------ */
+  function persistLock() { writeJson(LOCK_KEY, lock); }
+
+  async function pulseForLock() {
+    const res = await open();
+    if (!lock) return res; // released while the pulse was in flight
+    lock.phase = res.ok ? 'open' : (res.reason === 'no-device' ? 'manual' : 'failed');
+    lock.sawOpen = false;
+    lock.reading = 'unknown';
+    if (res.ok) lock.openedAt = Date.now();
+    persistLock();
+    emit('phase');
+    return res;
+  }
+
+  /**
+   * Called right after a cash sale that has change. Locks the POS and kicks the drawer.
+   * info: { change, tendered, due, receiptNumber, saleId }   (KES)
+   */
+  async function beginChange(info = {}) {
+    if (!cfg.enabled) return null; // shop has no drawer: nothing to open, nothing to lock
+    if (lock) return getLock();
+    lock = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      createdAt: Date.now(),
+      openedAt: null,
+      change: Number(info.change) || 0,
+      tendered: Number(info.tendered) || 0,
+      due: Number(info.due) || 0,
+      receiptNumber: info.receiptNumber || '',
+      saleId: info.saleId || '',
+      phase: 'opening',
+      reading: 'unknown',
+      sawOpen: false,
+      overdue: false,
+      restored: false,
+    };
+    persistLock();
+    startWatch();
+    emit('lock');
+    await pulseForLock();
+    return getLock();
+  }
+
+  async function reopen() {
+    if (!lock) return { ok: false };
+    lock.phase = 'opening';
+    persistLock();
+    emit('phase');
+    return pulseForLock();
+  }
+
+  function finish(method, persist = true) {
+    if (!lock) return null;
+    const now = Date.now();
+    const done = {
+      ...lock,
+      method,
+      closedAt: now,
+      seconds: Math.max(0, Math.round((now - (lock.openedAt || lock.createdAt)) / 1000)),
+    };
+    lock = null;
+    stopWatch();
+    if (persist) persistLock();
+    emit('unlock', { done });
+    return done;
+  }
+
+  /** method: 'sensor' | 'manual' | 'override' | 'restore' */
+  function release({ method = 'manual' } = {}) { return finish(method, true); }
+
   function stopWatch() {
-    if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
-    polling = false;
+    clearInterval(pollTimer); pollTimer = null;
+    clearTimeout(overdueTimer); overdueTimer = null;
   }
 
   function startWatch() {
     stopWatch();
-    sensor = freshSensor();
-    if (!pending || !settings.sense || !link || !link.canQuery) return;
-    watchTimer = setInterval(async () => {
-      if (!pending || polling) return;
-      polling = true;
-      const before = `${sensor.last}|${sensor.seenOpen}|${sensor.unreadable}`;
-      try {
-        const r = await io(() => readSensor());
-        if (!pending) return;
-        if (!r.ok) {
-          sensor.unreadable = true;
-        } else {
-          sensor.unreadable = false;
-          sensor.last = r.open ? 'open' : 'closed';
-          if (r.open) {
-            sensor.seenOpen = true;
-            sensor.closedReads = 0;
-          } else if (sensor.seenOpen) {
-            sensor.closedReads += 1;
-            if (sensor.closedReads >= 2) { closeNow(); return; }
-          }
-        }
-      } catch {
-        sensor.unreadable = true;
-      } finally {
-        polling = false;
+    if (!lock) return;
+    pollTimer = setInterval(tick, POLL_MS);
+    if (!lock.overdue) {
+      const left = Math.max(0, OVERDUE_MS - (Date.now() - (lock.openedAt || lock.createdAt)));
+      overdueTimer = setTimeout(() => {
+        if (lock && !lock.overdue) { lock.overdue = true; persistLock(); emit('overdue'); }
+      }, left);
+    }
+  }
+
+  async function tick() {
+    if (!lock || ticking || lock.phase === 'opening') return;
+    if (!status().canSense) return;
+    ticking = true;
+    try {
+      const st = await readState();
+      if (!lock) return;
+      const changed = st !== lock.reading;
+      lock.reading = st;
+
+      if (st === 'open') {
+        lock.sawOpen = true;
+        if (lock.phase === 'failed') { lock.phase = 'open'; if (!lock.openedAt) lock.openedAt = Date.now(); }
       }
-      if (pending && before !== `${sensor.last}|${sensor.seenOpen}|${sensor.unreadable}`) emit();
-    }, 600);
-  }
+      if (changed || st === 'open') { persistLock(); }
+      if (changed) emit('reading');
 
-  function closeNow() {
-    pending = null;
-    savePending();
-    stopWatch();
-    emit();
-    return true;
-  }
-
-  /* ------------------------------------------------------------------ *
-   * Public actions
-   * ------------------------------------------------------------------ */
-  async function open(meta = {}) {
-    if (!isActive()) return { ok: false, skipped: true };
-    // Lock the till FIRST so the cashier sees it instantly, even if the printer is slow.
-    pending = { at: Date.now(), change: Number(meta.change) || 0, receipt: meta.receipt || '' };
-    savePending();
-    sensor = freshSensor();
-    emit();
-    try {
-      await kick();
-      startWatch();
-      return { ok: true };
-    } catch (err) {
-      linkError = friendly(err);
-      emit();
-      if (window.UI && window.UI.toast) window.UI.toast.error(`Drawer did not open automatically: ${linkError}. Use the manual release or key.`);
-      return { ok: false, error: linkError };
+      if (st === 'closed') {
+        if (lock.sawOpen) finish('sensor');
+        else if (lock.restored) finish('restore');
+        else if (lock.phase === 'open' && lock.openedAt && Date.now() - lock.openedAt > NO_POP_MS) {
+          lock.phase = 'failed';
+          persistLock();
+          emit('phase');
+        }
+      }
+    } finally {
+      ticking = false;
     }
   }
 
-  async function reopen() {
-    if (!pending) return { ok: false };
-    try {
-      await kick();
-      startWatch();
-      return { ok: true };
-    } catch (err) {
-      linkError = friendly(err);
-      emit();
-      return { ok: false, error: linkError };
-    }
-  }
-
-  function confirmClosed({ force = false } = {}) {
-    if (!pending) return true;
-    if (!force && settings.sense && link && link.canQuery && sensor.seenOpen && sensor.last === 'open') return false;
-    return closeNow();
-  }
-
-  function init() {
-    if (inited) return;
-    inited = true;
-    if (!isActive()) { pending = null; savePending(); }
-
-    const watchHardware = (target) => {
-      if (!target || !target.addEventListener) return;
-      target.addEventListener('connect', () => { if (isActive() && !link) reconnect(); });
-      target.addEventListener('disconnect', (e) => {
-        const mine = link && (link.device || link.port);
-        if (!mine || (e.device || e.port) !== mine) return;
-        dropLink().then(() => { linkError = 'Printer unplugged'; emit(); });
-      });
-    };
-    watchHardware(navigator.usb);
-    watchHardware(navigator.serial);
-
-    if (isActive()) reconnect(); else emit();
-  }
-
   /* ------------------------------------------------------------------ *
-   * Settings window (pairing, pin, sensor)
+   * Setup screen
    * ------------------------------------------------------------------ */
-  function openSettings({ canTest = false } = {}) {
-    const sup = supportInfo();
-    const esc = window.UI.escapeHtml;
+  function openSetup() {
     const modal = window.UI.openModal({
       title: 'Cash drawer',
       maxWidth: '540px',
-      bodyHtml: `
-        <div class="cd-status" id="cd-status"></div>
-        ${sup.secure ? '' : '<div class="pz-note warn">Direct printer access needs a secure page (HTTPS or localhost).</div>'}
-        <div class="field">
-          <label for="cd-transport">How is the drawer connected?</label>
-          <select class="select" id="cd-transport">
-            <option value="none">I do not use a cash drawer</option>
-            <option value="usb" ${sup.usb ? '' : 'disabled'}>USB receipt printer (WebUSB)${sup.usb ? '' : ' - not supported in this browser'}</option>
-            <option value="serial" ${sup.serial ? '' : 'disabled'}>Serial / COM printer (Web Serial)${sup.serial ? '' : ' - not supported in this browser'}</option>
-          </select>
-          <span class="field-hint">The drawer cable plugs into the receipt printer. The POS pops it only when a cash sale has change to give back.</span>
-        </div>
-        <div id="cd-more">
-          <div class="input-button-row" style="margin-bottom:var(--space-4)">
-            <button type="button" class="btn btn-primary" id="cd-connect"><i class="fa-solid fa-plug" aria-hidden="true"></i> Choose printer…</button>
-            <button type="button" class="btn btn-secondary" id="cd-forget">Forget</button>
+      bodyHtml: '<div id="cd-body"></div>',
+      footerHtml: '<button class="btn btn-primary" data-action="done">Done</button>',
+    });
+    const body = modal.querySelector('#cd-body');
+    let busy = false;
+
+    const run = async (fn) => {
+      if (busy) return;
+      busy = true;
+      try { await fn(); } catch (err) {
+        if (err && err.name === 'NotFoundError') return; // user closed the device chooser
+        window.UI.toast.error(err.message || 'Something went wrong');
+      } finally { busy = false; paint(); }
+    };
+
+    function paint() {
+      const st = status();
+      const senseText = !st.connected
+        ? 'Manual mode: the system opens nothing, but still makes the cashier confirm the drawer is closed before the next sale.'
+        : st.canSense
+          ? 'Close detection: automatic - the POS unlocks by itself when the drawer shuts.'
+          : st.calibrated
+            ? 'Close detection: the printer is not answering - the "Drawer is closed" button is used.'
+            : 'Close detection: not calibrated - the "Drawer is closed" button is used. Close the drawer and tap Calibrate to enable automatic detection.';
+
+      if (!st.enabled) {
+        body.innerHTML = `
+          <label class="checkbox-row" style="margin-bottom:var(--space-3)">
+            <input type="checkbox" id="cd-enabled" />
+            <span class="text-sm"><strong>This shop uses a cash drawer</strong></span>
+          </label>
+          <p class="text-sm text-secondary">Off: no drawer is opened and the POS is never locked - the cashier just sees the change to give. Turn this on only on tills that have a cash drawer.</p>`;
+        body.querySelector('#cd-enabled').addEventListener('change', () => run(() => setEnabled(true)));
+        return;
+      }
+
+      body.innerHTML = `
+        <label class="checkbox-row" style="margin-bottom:var(--space-3)">
+          <input type="checkbox" id="cd-enabled" checked />
+          <span class="text-sm"><strong>This shop uses a cash drawer</strong></span>
+        </label>
+        ${!st.supported ? '<div class="drawer-setup-note warn">This browser cannot talk to a cash drawer. Use Chrome or Edge on HTTPS (or localhost). Manual mode still works.</div>' : ''}
+        <div class="drawer-setup-state ${st.connected ? 'ok' : ''}">
+          <span class="drawer-setup-dot"></span>
+          <div>
+            <strong>${st.connected ? esc(st.label) : 'No drawer hardware connected'}</strong>
+            <small>${esc(senseText)}</small>
           </div>
+        </div>
+        <div class="drawer-setup-actions">
+          ${st.usbSupported ? '<button class="btn btn-secondary btn-sm" data-act="usb">Connect USB printer</button>' : ''}
+          ${st.serialSupported ? '<button class="btn btn-secondary btn-sm" data-act="serial">Connect Serial / COM</button>' : ''}
+          ${st.connected ? '<button class="btn btn-secondary btn-sm" data-act="test">Test open</button>' : ''}
+          ${st.connected ? '<button class="btn btn-secondary btn-sm" data-act="calibrate">Calibrate (drawer closed)</button>' : ''}
+          ${st.connected ? '<button class="btn btn-ghost btn-sm" data-act="disconnect">Disconnect</button>' : ''}
+        </div>
+        <div class="form-row" style="margin-top:var(--space-4)">
           <div class="field">
             <label for="cd-pin">Drawer connector</label>
             <select class="select" id="cd-pin">
-              <option value="both">Auto (try both pins)</option>
-              <option value="pin2">Pin 2 (most drawers)</option>
-              <option value="pin5">Pin 5</option>
+              <option value="0" ${st.pin === 0 ? 'selected' : ''}>Pin 2 (default)</option>
+              <option value="1" ${st.pin === 1 ? 'selected' : ''}>Pin 5</option>
             </select>
           </div>
-          <label class="checkbox-row" style="margin-bottom:var(--space-2)"><input type="checkbox" id="cd-sense" /> <span class="text-sm">Detect when the drawer is shut (needs the drawer sensor cable)</span></label>
-          <label class="checkbox-row"><input type="checkbox" id="cd-invert" /> <span class="text-sm">Sensor reads backwards (open shows as closed)</span></label>
-          <div class="cd-sensor-read" id="cd-sensor-read">Not sure about the sensor? Leave it off - the cashier then taps "Drawer is closed" after pushing the drawer shut.</div>
+          <div class="field">
+            <label for="cd-baud">Serial speed (baud)</label>
+            <select class="select" id="cd-baud">
+              ${[9600, 19200, 38400, 57600, 115200].map((b) => `<option value="${b}" ${st.baud === b ? 'selected' : ''}>${b}</option>`).join('')}
+            </select>
+            <span class="field-hint">Used the next time you connect a serial printer.</span>
+          </div>
         </div>
-      `,
-      footerHtml: `
-        <button class="btn btn-secondary" data-act="close">Close</button>
-        <button class="btn btn-secondary" data-act="sensor">Check sensor</button>
-        ${canTest ? '<button class="btn btn-secondary" data-act="test">Test open</button>' : ''}
-        <button class="btn btn-primary" data-act="save">Save</button>
-      `,
-    });
+        <p class="text-xs text-muted">The drawer cable must be plugged into the DK / drawer port of the receipt printer. The drawer opens only when a cash sale has change to give back.</p>
+      `;
 
-    const q = (sel) => modal.querySelector(sel);
-    q('#cd-transport').value = settings.transport;
-    q('#cd-pin').value = settings.pin;
-    q('#cd-sense').checked = !!settings.sense;
-    q('#cd-invert').checked = !!settings.invert;
-    const draft = () => ({ transport: q('#cd-transport').value, pin: q('#cd-pin').value, sense: q('#cd-sense').checked, invert: q('#cd-invert').checked });
-
-    function paint() {
-      if (!document.body.contains(modal)) return;
-      const i = info();
-      const text = {
-        unconfigured: 'Not set up - choose how the drawer is connected.',
-        disconnected: i.error || 'Printer not connected.',
-        ready: `Connected: ${i.label || 'printer'}. Drawer is closed.`,
-        open: 'Drawer is open - waiting for it to be closed.',
-      }[i.state];
-      const st = q('#cd-status');
-      st.className = `cd-status ${i.state}`;
-      st.innerHTML = `<span class="cd-dot"></span><span>${esc(text)}</span>`;
-      const on = q('#cd-transport').value !== 'none';
-      q('#cd-more').style.display = on ? '' : 'none';
-      q('[data-act="sensor"]').style.display = on ? '' : 'none';
-      const t = q('[data-act="test"]');
-      if (t) t.style.display = on ? '' : 'none';
+      body.querySelector('#cd-enabled')?.addEventListener('change', () => run(() => setEnabled(false)));
+      body.querySelector('[data-act="usb"]')?.addEventListener('click', () => run(async () => { await connectUsb(); window.UI.toast.success('Printer connected'); }));
+      body.querySelector('[data-act="serial"]')?.addEventListener('click', () => run(async () => { await connectSerial(); window.UI.toast.success('Printer connected'); }));
+      body.querySelector('[data-act="disconnect"]')?.addEventListener('click', () => run(disconnect));
+      body.querySelector('[data-act="test"]')?.addEventListener('click', () => run(async () => {
+        const r = await test();
+        if (!r.ok) throw new Error(r.error || 'The drawer did not respond.');
+        window.UI.toast.success(r.state === 'open' ? 'Drawer opened - sensor sees it OPEN' : r.state === 'closed' ? 'Pulse sent - sensor still reads CLOSED (recalibrate or check pin)' : 'Pulse sent');
+      }));
+      body.querySelector('[data-act="calibrate"]')?.addEventListener('click', () => run(async () => {
+        await calibrate();
+        window.UI.toast.success('Calibrated - make sure the drawer was closed. Use Test open to verify.');
+      }));
+      body.querySelector('#cd-pin')?.addEventListener('change', (e) => configure({ pin: e.target.value }));
+      body.querySelector('#cd-baud')?.addEventListener('change', (e) => configure({ baud: e.target.value }));
     }
-    const unsub = onChange(paint);
-    q('#cd-transport').addEventListener('change', paint);
+
+    const off = on((ev) => {
+      if (!document.body.contains(modal)) { off(); return; }
+      if (ev.type === 'connection') paint();
+    });
+    modal.querySelector('[data-action="done"]').addEventListener('click', () => { off(); window.UI.closeModal(); });
     paint();
+  }
 
-    q('#cd-connect').addEventListener('click', async () => {
-      const r = await connectDevice(q('#cd-transport').value);
-      if (r.ok) window.UI.toast.success('Printer connected');
-      else if (!r.cancelled) window.UI.toast.error(r.error);
-      paint();
-    });
-    q('#cd-forget').addEventListener('click', async () => { await forget(); window.UI.toast.success('Printer forgotten'); paint(); });
-
-    q('[data-act="sensor"]').addEventListener('click', async () => {
-      const out = q('#cd-sensor-read');
-      if (!link) { out.textContent = 'Connect the printer first.'; return; }
-      out.textContent = 'Reading…';
-      try {
-        const r = await io(() => readSensor(q('#cd-invert').checked));
-        out.textContent = !r.ok
-          ? 'No sensor reply. This printer/drawer may not report its state - leave detection off.'
-          : `Sensor says the drawer is ${r.open ? 'OPEN' : 'CLOSED'} right now. Open and shut it by hand and check again; if it is reversed, tick "Sensor reads backwards".`;
-      } catch (err) {
-        out.textContent = friendly(err);
+  /* ------------------------------------------------------------------ *
+   * Init: reconnect to the printer we already have permission for, restore any lock
+   * ------------------------------------------------------------------ */
+  async function init() {
+    if (!cfg.enabled) { if (readJson(LOCK_KEY)) writeJson(LOCK_KEY, null); return; }
+    try {
+      if (cfg.mode === 'serial' && 'serial' in navigator) {
+        const ports = await navigator.serial.getPorts();
+        if (ports[0]) await adoptSerial(ports[0], false);
+      } else if (cfg.mode === 'usb' && 'usb' in navigator) {
+        const devs = await navigator.usb.getDevices();
+        const dev = devs.find((d) => !cfg.usb || (d.vendorId === cfg.usb.vendorId && d.productId === cfg.usb.productId));
+        if (dev) await adoptUsb(dev, false);
       }
-    });
+    } catch (err) {
+      console.warn('CashDrawer: could not reconnect automatically', err);
+      await dropLink();
+    }
 
-    q('[data-act="test"]')?.addEventListener('click', async () => {
-      try { await kick(q('#cd-pin').value); window.UI.toast.success('Open signal sent to the drawer'); } catch (err) { window.UI.toast.error(friendly(err)); }
-    });
+    const saved = readJson(LOCK_KEY);
+    if (saved && saved.createdAt && Date.now() - saved.createdAt < LOCK_MAX_AGE_MS) {
+      lock = { ...saved, restored: true, phase: saved.phase === 'opening' ? 'failed' : saved.phase };
+      startWatch();
+      emit('lock');
+    } else if (saved) {
+      writeJson(LOCK_KEY, null);
+    }
+  }
 
-    q('[data-act="close"]').addEventListener('click', () => { unsub(); window.UI.closeModal(); });
-    q('[data-act="save"]').addEventListener('click', async () => {
-      const d = draft();
-      const changed = d.transport !== settings.transport;
-      settings = { ...settings, pin: d.pin, sense: d.sense, invert: d.invert, transport: d.transport };
-      if (d.transport === 'none') {
-        await dropLink();
-        settings.vid = null;
-        settings.pid = null;
-        pending = null;
-        savePending();
-      } else if (changed) {
-        await dropLink();
-        settings.vid = null;
-        settings.pid = null;
-      }
-      saveSettings();
-      if (isActive() && !link) await reconnect();
-      if (pending) startWatch();
-      emit();
-      unsub();
-      window.UI.closeModal();
-      window.UI.toast.success('Cash drawer settings saved');
+  // Unplugged printer
+  if ('serial' in navigator) {
+    navigator.serial.addEventListener('disconnect', () => {
+      if (link && link.kind === 'serial') dropLink().then(() => emit('connection'));
+    });
+  }
+  if ('usb' in navigator) {
+    navigator.usb.addEventListener('disconnect', (e) => {
+      if (link && link.kind === 'usb' && usbDev && e.device === usbDev) dropLink().then(() => emit('connection'));
     });
   }
 
-  window.CashDrawer = { init, info, isActive, isOpen, open, reopen, confirmClosed, onChange, openSettings, supportInfo };
+  // Another POS tab on this device opened / closed the drawer
+  window.addEventListener('storage', (e) => {
+    if (e.key !== LOCK_KEY) return;
+    const next = readJson(LOCK_KEY);
+    if (!next && lock) finish('other-tab', false);
+    else if (next && !lock) { lock = { ...next, restored: true }; startWatch(); emit('lock'); }
+    else if (next && lock) { lock = { ...lock, ...next }; emit('phase'); }
+  });
+
+  const ready = init().catch((err) => console.warn('CashDrawer init failed', err));
+
+  window.CashDrawer = {
+    ready,
+    on,
+    status,
+    isSupported,
+    isLocked,
+    isEnabled,
+    setEnabled,
+    getLock,
+    open,
+    reopen,
+    beginChange,
+    release,
+    readState,
+    connectSerial,
+    connectUsb,
+    disconnect,
+    calibrate,
+    test,
+    configure,
+    openSetup,
+  };
 })(window);

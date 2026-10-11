@@ -33,6 +33,18 @@
  *        CREDIT       -> pick the customer, then Complete sale
  *   5. Receipt opens after every sale (auto-print requested).
  *
+ * CASH DRAWER (see js/core/cash-drawer.js)
+ *   - The drawer is kept shut for every sale. It opens ONLY when a CASH sale has change
+ *     to give back, the moment the sale is saved.
+ *   - From then on the POS is LOCKED behind a "give change / close the drawer" screen
+ *     (UI.showDrawerLock). Scans, search, F9 and the payment window are all blocked.
+ *   - With a drawer sensor the lock lifts by itself when the drawer shuts; otherwise the
+ *     cashier taps "Drawer is closed" (F8). F7 re-opens the drawer if it did not pop.
+ *   - Shops without a drawer leave "This shop uses a cash drawer" OFF (default): no lock, just "Give change".
+ *   - Exact cash, M-PESA, bank, card and credit sales never touch the drawer.
+ *   - The lock survives a page reload. Leaving the drawer open > 60s, or overriding a
+ *     sensor that still says "open", raises a best-effort alert to management.
+ *
  * PRODUCT DISCOUNT (set on the Products page, Product.defaultDiscount, KES PER UNIT)
  *   - When a product is scanned/searched, its line discount is pre-filled with
  *     (discount per unit x quantity). The cart item is flagged `autoDiscount`.
@@ -62,6 +74,7 @@
  * reported (exact amount, never used before) - a made-up code is rejected.
  *
  * SHORTCUTS (new sale view): F2 search | Up/Down pick | Enter add | F9 payment
+ *   (drawer lock): F7 open drawer again | F8 drawer is closed
  */
 (function () {
   const MPESA_FAILURE_LABELS = {
@@ -91,6 +104,9 @@
 
   const DEFAULT_FLAGS = { mpesaEnabled: false, etimsEnabled: false, mpesaManualEnabled: false, tillNumber: null };
   const FOCUS_KEY = 'pos.fullView';
+
+  // Notification type used for drawer alerts to management (needs to be accepted by POST /notifications/alert).
+  const DRAWER_ALERT_TYPE = 'CASH_DRAWER';
 
   const state = {
     view: 'new-sale',
@@ -122,6 +138,12 @@
   let clockTimer = null;
   let lastScan = { code: '', at: 0 };
 
+  // cash drawer
+  let drawerUi = null;
+  let drawerUnsub = null;
+  let drawerKeyHandler = null;
+  let drawerTimer = null;
+
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
@@ -137,6 +159,10 @@
 
     await Promise.all([loadShift(), renderNewSaleView()]);
 
+    // The cash drawer module (and any unfinished "close the drawer" lock) is set up
+    // after the screen is on, so a slow or missing drawer never delays selling.
+    await initDrawer();
+
     // The branch name arrives after the branch list loads (and may never arrive for roles
     // without branches.view), so fill it in when it does and whenever the branch changes.
     unsubscribeBranchesLoaded = window.AppShell.onBranchesLoaded?.(refreshCashierLabel);
@@ -148,9 +174,17 @@
       if (state.view === 'new-sale') renderNewSaleView();
       else renderHistory();
     });
-    window.addEventListener('beforeunload', () => {
+
+    // Never walk away from an open cash drawer.
+    window.addEventListener('beforeunload', (e) => {
+      if (drawerLocked()) { e.preventDefault(); e.returnValue = ''; }
+    });
+    window.addEventListener('pagehide', () => {
       unsubscribeBranchChange?.();
       unsubscribeBranchesLoaded?.();
+      drawerUnsub?.();
+      if (drawerKeyHandler) document.removeEventListener('keydown', drawerKeyHandler, true);
+      clearInterval(drawerTimer);
       detachHardwareScanner();
       document.body.classList.remove('pz-focus-on');
     });
@@ -171,6 +205,7 @@
           <div class="pz-top-right">
             <span class="pz-user" id="pz-user" title="${esc(cashierLabel())}">${esc(cashierLabel())}</span>
             <span class="pz-clock" id="pz-clock"></span>
+            <button type="button" class="pz-iconbtn drawer-btn" id="pz-drawer-btn" style="display:none"></button>
             <button type="button" class="pz-iconbtn" id="pz-focus-btn"></button>
             <button type="button" class="pz-iconbtn" id="pz-fs-btn" style="${document.fullscreenEnabled ? '' : 'display:none'}"></button>
           </div>
@@ -213,6 +248,10 @@
 
     $('pz-focus-btn').addEventListener('click', () => applyFocus(!state.focus));
     $('pz-fs-btn').addEventListener('click', toggleBrowserFullscreen);
+    $('pz-drawer-btn').addEventListener('click', () => {
+      if (window.CashDrawer) window.CashDrawer.openSetup();
+      else window.UI.toast.error('The cash drawer module could not be loaded');
+    });
     document.addEventListener('fullscreenchange', renderViewButtons);
 
     tickClock();
@@ -269,16 +308,209 @@
   }
 
   /* ================================================================== *
+   * CASH DRAWER (UI side - hardware and lock state live in cash-drawer.js)
+   * ================================================================== */
+  function drawerLocked() {
+    return !!(window.CashDrawer && window.CashDrawer.isLocked());
+  }
+
+  async function initDrawer() {
+    try { await window.AppShell.whenCashDrawerReady?.(); } catch { /* the POS works without a drawer */ }
+    const drawer = window.CashDrawer;
+    if (!drawer) { renderDrawerButton(); return; }
+
+    drawerUnsub?.();
+    drawerUnsub = drawer.on(onDrawerEvent);
+
+    // F7 / F8 work from anywhere (even with a text box focused) while the lock is up.
+    if (drawerKeyHandler) document.removeEventListener('keydown', drawerKeyHandler, true);
+    drawerKeyHandler = (e) => {
+      if (!drawerLocked() || document.querySelector('.modal-backdrop')) return;
+      if (e.key === 'F7') { e.preventDefault(); reopenDrawer(); }
+      else if (e.key === 'F8') { e.preventDefault(); confirmDrawerClosed(); }
+    };
+    document.addEventListener('keydown', drawerKeyHandler, true);
+
+    renderDrawerButton();
+    showDrawerLock(); // restores the lock screen after a reload
+  }
+
+  function onDrawerEvent(ev) {
+    switch (ev.type) {
+      case 'lock':
+      case 'phase':
+      case 'reading':
+        showDrawerLock();
+        break;
+      case 'overdue':
+        showDrawerLock();
+        raiseDrawerAlert(
+          `Cash drawer has been open for over a minute${ev.lock?.receiptNumber ? ` (receipt ${ev.lock.receiptNumber})` : ''}.`,
+          { drawerEvent: 'left_open', receiptNumber: ev.lock?.receiptNumber, changeDue: toCents(ev.lock?.change), amountTendered: toCents(ev.lock?.tendered), drawerOpenSeconds: 60 }
+        );
+        break;
+      case 'unlock':
+        hideDrawerLock();
+        if (ev.done && ev.done.method !== 'other-tab') window.UI.toast.success('Drawer closed - ready for the next sale');
+        break;
+      default:
+    }
+    renderDrawerButton();
+  }
+
+  function toCents(n) { return Math.round((Number(n) || 0) * 100); }
+
+  function showDrawerLock() {
+    const drawer = window.CashDrawer;
+    const lock = drawer && drawer.getLock();
+    if (!lock) { hideDrawerLock(); return; }
+
+    window.BarcodeScanner?.setPaused(true);
+    if (!drawerUi) {
+      drawerUi = window.UI.showDrawerLock({
+        onReopen: reopenDrawer,
+        onConfirm: confirmDrawerClosed,
+        onSetup: () => drawer.openSetup(),
+      });
+      clearSearch();
+      clearInterval(drawerTimer);
+      drawerTimer = setInterval(paintDrawerLock, 1000);
+    }
+    paintDrawerLock();
+  }
+
+  function hideDrawerLock() {
+    clearInterval(drawerTimer);
+    drawerTimer = null;
+    if (drawerUi) { drawerUi.close(); drawerUi = null; }
+    window.BarcodeScanner?.setPaused(false);
+    // The lock screen made the page inert; give the keyboard back to the search box.
+    setTimeout(() => { if (state.view === 'new-sale' && !document.querySelector('.modal-backdrop')) $('pos-search')?.focus(); }, 0);
+  }
+
+  /** Works out what the lock screen should say from the drawer's current phase / sensor reading. */
+  function paintDrawerLock() {
+    const drawer = window.CashDrawer;
+    const lock = drawer && drawer.getLock();
+    if (!drawerUi || !lock) return;
+    const st = drawer.status();
+    const seconds = Math.max(0, Math.round((Date.now() - (lock.openedAt || lock.createdAt)) / 1000));
+
+    const view = {
+      change: lock.change, tendered: lock.tendered, due: lock.due, receiptNumber: lock.receiptNumber,
+      seconds, overdue: !!lock.overdue,
+      tone: 'info', message: '', confirmVisible: true, confirmLabel: 'Drawer is closed', canReopen: true,
+    };
+
+    if (lock.phase === 'opening') {
+      view.message = 'Opening the cash drawer…';
+      view.confirmVisible = false;
+      view.canReopen = false;
+    } else if (lock.phase === 'manual') {
+      view.tone = 'warn';
+      view.message = 'No cash drawer is connected. Open it with the No-Sale key, give the change, close it, then confirm.';
+      view.canReopen = false;
+    } else if (lock.phase === 'failed') {
+      view.tone = 'error';
+      view.message = 'The drawer did not open. Press "Open drawer again", or open it manually.';
+    } else if (st.canSense) {
+      view.message = lock.reading === 'open'
+        ? 'Drawer is open. Give the change, then push it shut - this screen unlocks by itself.'
+        : 'Waiting for the drawer…';
+      // The sensor decides. A manual override only appears once the drawer has been open too long.
+      view.confirmVisible = !!lock.overdue;
+      view.confirmLabel = 'Sensor stuck? Confirm closed';
+    } else {
+      view.message = 'Drawer opened. Give the change, close the drawer, then confirm.';
+    }
+
+    if (lock.overdue) {
+      view.tone = 'error';
+      view.message += ' The drawer has been open too long.';
+    }
+    drawerUi.update(view);
+  }
+
+  async function reopenDrawer() {
+    const drawer = window.CashDrawer;
+    if (!drawer || !drawer.isLocked()) return;
+    const res = await drawer.reopen();
+    if (res && !res.ok && res.reason !== 'no-device') window.UI.toast.error(res.error || 'The drawer did not respond');
+  }
+
+  async function confirmDrawerClosed() {
+    const drawer = window.CashDrawer;
+    const lock = drawer && drawer.getLock();
+    if (!lock) return;
+
+    if (drawer.status().canSense && lock.reading === 'open') {
+      const ok = await window.UI.confirmDialog({
+        title: 'The sensor says the drawer is still open',
+        message: 'Only confirm if the drawer is physically closed. Management will be told that the sensor was overridden.',
+        confirmText: 'Yes, it is closed',
+        danger: true,
+      });
+      if (!ok) return;
+      const done = drawer.release({ method: 'override' });
+      if (done) {
+        raiseDrawerAlert(
+          `Cash drawer closed by manual override${done.receiptNumber ? ` (receipt ${done.receiptNumber})` : ''} while the sensor still read open.`,
+          { drawerEvent: 'override', closeMethod: 'override', receiptNumber: done.receiptNumber, changeDue: toCents(done.change), amountTendered: toCents(done.tendered), drawerOpenSeconds: done.seconds }
+        );
+      }
+      return;
+    }
+    drawer.release({ method: 'manual' });
+  }
+
+  function renderDrawerButton() {
+    const b = $('pz-drawer-btn');
+    if (!b) return;
+    const drawer = window.CashDrawer;
+    if (!drawer) { b.style.display = 'none'; return; }
+    const st = drawer.status();
+    const locked = drawer.isLocked();
+    const tone = locked ? 'open' : st.connected ? 'ok' : 'off';
+    b.style.display = '';
+    b.className = `pz-iconbtn drawer-btn drawer-${tone}`;
+    b.innerHTML = `<i class="fa-solid fa-box-open" aria-hidden="true"></i><i class="drawer-dot" aria-hidden="true"></i>`;
+    b.title = locked ? 'Cash drawer is open - close it to continue'
+      : !st.enabled ? 'No cash drawer in use - tap to set up'
+        : st.connected ? `Cash drawer ready (${st.label}) - settings`
+          : 'Cash drawer: manual mode - tap to connect';
+    b.setAttribute('aria-label', b.title);
+  }
+
+  /** Best effort: tell management about drawer problems. Never blocks or breaks the sale. */
+  function raiseDrawerAlert(message, data) {
+    window.Api.post('/notifications/alert', {
+      type: DRAWER_ALERT_TYPE,
+      message,
+      branchId: window.AppShell.getActiveBranchId(),
+      data,
+    }).then(() => window.NotificationCenter?.refresh?.()).catch(() => { /* optional feature */ });
+  }
+
+  /** With a drawer sensor, true when the drawer is physically open right now. */
+  async function drawerIsOpen() {
+    const drawer = window.CashDrawer;
+    if (!drawer || !drawer.status().canSense) return false;
+    return (await drawer.readState()) === 'open';
+  }
+
+  /* ================================================================== *
    * Barcode scanning + keyboard shortcuts
    * ================================================================== */
   function attachHardwareScanner() {
     hardwareScannerUnsub?.();
     if (window.BarcodeScanner) {
-      hardwareScannerUnsub = window.BarcodeScanner.listenHardwareScanner(handleScannedCode);
+      hardwareScannerUnsub = window.BarcodeScanner.listenHardwareScanner(handleScannedCode, {
+        onBlocked: () => window.UI.toast.error('Close the cash drawer before scanning the next sale'),
+      });
     }
     if (keyHandler) document.removeEventListener('keydown', keyHandler);
     keyHandler = (e) => {
-      if (state.view !== 'new-sale' || document.querySelector('.modal-backdrop')) return;
+      if (state.view !== 'new-sale' || document.querySelector('.modal-backdrop') || drawerLocked()) return;
       if (e.key === 'F9') { e.preventDefault(); openPaymentModal(); }
       if (e.key === 'F2') { e.preventDefault(); $('pos-search')?.focus(); $('pos-search')?.select(); }
     };
@@ -298,6 +530,8 @@
     if (!code) return;
     // Don't hijack a scan while a modal (payment, discount, customer...) is open.
     if (document.querySelector('.modal-backdrop')) return;
+    // A drawer that is still open means the previous sale is not finished.
+    if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before scanning the next sale'); return; }
     // The same code arriving twice within a blink (scanner + focused search box) is one scan.
     const now = Date.now();
     if (code === lastScan.code && now - lastScan.at < 350) return;
@@ -516,16 +750,15 @@
     return Math.min(round2(per * item.quantity), gross);
   }
 
-  /** Re-scales the discount of a line that is still on its preset (quantity or price changed). */
   /** Keeps a line's discount valid after a quantity or price change. */
-function syncAutoDiscount(item) {
-  if (item.autoDiscount) {
-    item.discount = autoDiscountFor(item);
-  } else {
-    const gross = round2(unitPriceOf(item) * item.quantity);
-    if ((item.discount || 0) > gross) item.discount = gross;
+  function syncAutoDiscount(item) {
+    if (item.autoDiscount) {
+      item.discount = autoDiscountFor(item);
+    } else {
+      const gross = round2(unitPriceOf(item) * item.quantity);
+      if ((item.discount || 0) > gross) item.discount = gross;
+    }
   }
-}
 
   function renderNewSaleView() {
     const body = $('view-body');
@@ -605,7 +838,7 @@ function syncAutoDiscount(item) {
 
     attachHardwareScanner();
     fitRoot();
-    $('pos-search')?.focus();
+    if (!drawerLocked()) $('pos-search')?.focus();
   }
 
   function renderCustomerButton() {
@@ -617,6 +850,7 @@ function syncAutoDiscount(item) {
 
   function bindScanButton() {
     $('pos-scan-btn')?.addEventListener('click', () => {
+      if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before scanning the next sale'); return; }
       window.BarcodeScanner.openCameraModal({
         title: 'Scan product barcode',
         onDetect: (code) => handleScannedCode(code),
@@ -724,6 +958,7 @@ function syncAutoDiscount(item) {
   function keyOf(item) { return item.variant ? item.variant._id : item.product._id; }
 
   function addToCart(product, variant) {
+    if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before starting the next sale'); return; }
     const key = variant ? variant._id : product._id;
     const existing = state.cart.find((i) => keyOf(i) === key);
     if (existing) {
@@ -1010,6 +1245,7 @@ function syncAutoDiscount(item) {
   }
 
   function openPaymentModal(initialMethod) {
+    if (drawerLocked()) return window.UI.toast.error('Close the cash drawer before taking the next payment');
     if (!state.cart.length) return window.UI.toast.error('Cart is empty');
     const { total } = computeTotals();
     const resumeMpesa = !!state.pendingMpesa;
@@ -1114,8 +1350,14 @@ function syncAutoDiscount(item) {
 
       onComplete = async () => {
         const tendered = Number(input.value);
+        // Every cash sale starts with the drawer shut. (Only checkable when the drawer has a sensor;
+        // otherwise the lock screen after the previous change-giving sale already guarantees it.)
+        if (await drawerIsOpen()) {
+          window.UI.toast.error('The cash drawer is open. Close it before taking cash.');
+          return;
+        }
         state.payments = [{ method: 'CASH', amount: dueAmount, amountTendered: tendered }];
-        await checkout({ btn: completeBtn, change: round2(tendered - dueAmount) });
+        await checkout({ btn: completeBtn, change: round2(tendered - dueAmount), tendered, due: dueAmount });
       };
     }
 
@@ -1501,8 +1743,12 @@ function syncAutoDiscount(item) {
     renderCart();
   }
 
-  /** Returns true when the sale was saved. */
-  async function checkout({ btn, change } = {}) {
+  /**
+   * Returns true when the sale was saved.
+   * change / tendered / due are only passed for CASH sales; when change > 0 the cash drawer
+   * is opened (and the POS locked) the moment the sale is saved.
+   */
+  async function checkout({ btn, change, tendered, due } = {}) {
     if (checkingOut) return false;
     if (!state.cart.length) { window.UI.toast.error('Cart is empty'); return false; }
 
@@ -1528,9 +1774,21 @@ function syncAutoDiscount(item) {
     if (btn) window.UI.setButtonLoading(btn, true, 'Completing sale…');
     try {
       const { data } = await window.Api.post('/sales', payload, { idempotencyKey: checkoutKey });
+
+      // CASH DRAWER: only when the customer is owed change. Fire first so the drawer pops
+      // immediately; it also locks the POS until the drawer has been closed again.
+      const drawerDriven = change > 0 && !!window.CashDrawer && window.CashDrawer.isEnabled();
+      if (drawerDriven) {
+        window.CashDrawer.beginChange({
+          change, tendered, due,
+          receiptNumber: data.sale.receiptNumber,
+          saleId: data.sale._id,
+        });
+      }
+
       if (document.querySelector('.modal-backdrop')) window.UI.closeModal();
       window.UI.toast.success(`Sale ${data.sale.receiptNumber} completed`);
-      if (change > 0) window.UI.toast.success(`Give change: ${fm(change)}`);
+      if (change > 0 && !drawerDriven) window.UI.toast.success(`Give change: ${fm(change)}`);
       // Open the receipt and ask it to print straight away.
       window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: true });
       resetCart();

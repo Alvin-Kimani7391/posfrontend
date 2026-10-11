@@ -8,6 +8,12 @@
  * Clicking an item marks it read and OPENS THAT NOTIFICATION on
  * notifications.html (?open=<id>). If you're already on that page it opens
  * the detail window directly via a 'notification:open' event.
+ *
+ * LIVE UPDATES
+ *   - NotificationCenter.refresh() (or the 'notifications:refresh' window event) reloads
+ *     the badge immediately - used right after the POS raises a cash-drawer alert.
+ *   - Coming back to the tab refreshes straight away instead of waiting for the next poll.
+ *   - A critical notification that arrives while the app is open pops up once as a toast.
  */
 (function (window) {
   const POLL_MS = 30000;
@@ -16,16 +22,39 @@
   let unreadCount = 0;
   let recent = [];
   let user = null;
+  let enabled = false;
+  let inflight = null;
+  let firstLoadDone = false;
+  const seenIds = new Set();
 
   async function fetchUnread() {
-    try {
-      const { data } = await window.Api.get('/notifications', { limit: 8, page: 1 });
-      unreadCount = data.unreadCount || 0;
-      recent = data.items || [];
-      renderBell();
-    } catch {
-      // Background poll - just leave the badge at its last known state.
-    }
+    if (!enabled) return;
+    if (inflight) return inflight; // never run two requests at once
+    inflight = (async () => {
+      try {
+        const { data } = await window.Api.get('/notifications', { limit: 8, page: 1 });
+        unreadCount = data.unreadCount || 0;
+        recent = data.items || [];
+        announceNew();
+        renderBell();
+      } catch {
+        // Background poll - just leave the badge at its last known state.
+      } finally {
+        inflight = null;
+      }
+    })();
+    return inflight;
+  }
+
+  /** Toast critical notifications that appeared since the last poll (never on the first load). */
+  function announceNew() {
+    const fresh = recent.filter((n) => !seenIds.has(n._id));
+    recent.forEach((n) => seenIds.add(n._id));
+    if (!firstLoadDone) { firstLoadDone = true; return; }
+    fresh
+      .filter((n) => !n.readAt && (n.severity || window.NotificationTypes.meta(n.type).severity) === 'critical')
+      .slice(0, 2)
+      .forEach((n) => window.UI.toast.warning(n.title));
   }
 
   function renderBell() {
@@ -125,7 +154,8 @@
   function mount(wrap, currentUser) {
     wrapEl = wrap;
     user = currentUser;
-    if (!wrapEl || !window.Permissions.can(user, 'notifications.view')) {
+    enabled = !!(wrapEl && window.Permissions.can(user, 'notifications.view'));
+    if (!enabled) {
       if (wrapEl) wrapEl.innerHTML = '';
       return;
     }
@@ -135,5 +165,11 @@
     pollTimer = setInterval(() => { if (!document.hidden) fetchUnread(); }, POLL_MS);
   }
 
-  window.NotificationCenter = { mount };
+  /** Reload the badge + list right now (e.g. after raising an alert). */
+  function refresh() { return fetchUnread(); }
+
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) fetchUnread(); });
+  window.addEventListener('notifications:refresh', () => fetchUnread());
+
+  window.NotificationCenter = { mount, refresh };
 })(window);
