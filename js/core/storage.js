@@ -1,7 +1,10 @@
 /**
  * storage.js
- * Every read/write of localStorage in the app goes through here, so the
- * storage keys and shape only need to change in one place.
+ * Every read/write of localStorage in the app goes through here.
+ *
+ * OFFLINE: an "offline session" lets a cashier unlock a till with an offline PIN when there is no
+ * internet (see offline-auth.js). It has NO tokens, so the server cannot be called until the person
+ * signs in online; sales made meanwhile wait safely in the IndexedDB outbox.
  */
 (function (window) {
   const KEYS = {
@@ -9,6 +12,7 @@
     REFRESH_TOKEN: 'pos.refreshToken',
     USER: 'pos.user',
     ACTIVE_BRANCH_ID: 'pos.activeBranchId',
+    OFFLINE_SESSION: 'pos.offlineSession',
   };
 
   const Storage = {
@@ -18,6 +22,7 @@
     setTokens({ accessToken, refreshToken }) {
       if (accessToken) localStorage.setItem(KEYS.ACCESS_TOKEN, accessToken);
       if (refreshToken) localStorage.setItem(KEYS.REFRESH_TOKEN, refreshToken);
+      if (accessToken || refreshToken) localStorage.removeItem(KEYS.OFFLINE_SESSION); // a real sign-in replaces any offline session
     },
 
     getUser() {
@@ -33,15 +38,19 @@
       if (branchId) localStorage.setItem(KEYS.ACTIVE_BRANCH_ID, branchId);
     },
 
+    getOfflineSession() {
+      try { return JSON.parse(localStorage.getItem(KEYS.OFFLINE_SESSION) || 'null'); } catch { return null; }
+    },
+    setOfflineSession(session) {
+      localStorage.setItem(KEYS.OFFLINE_SESSION, JSON.stringify(session));
+    },
+
     clearSession() {
-      localStorage.removeItem(KEYS.ACCESS_TOKEN);
-      localStorage.removeItem(KEYS.REFRESH_TOKEN);
-      localStorage.removeItem(KEYS.USER);
-      localStorage.removeItem(KEYS.ACTIVE_BRANCH_ID);
+      Object.values(KEYS).forEach((k) => localStorage.removeItem(k));
     },
 
     isAuthenticated() {
-      return !!Storage.getAccessToken();
+      return !!Storage.getAccessToken() || !!Storage.getOfflineSession();
     },
   };
 

@@ -15,6 +15,7 @@
   }
 
   function open({ onSelect } = {}) {
+    if (window.Connectivity && !window.Connectivity.isOnline()) { window.UI.toast.error('Customers are not available offline.'); return; }
     const user = window.AppShell.getUser();
     const canCreate = window.Permissions.can(user, 'customers.create');
 

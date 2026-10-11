@@ -363,6 +363,7 @@
    * ------------------------------------------------------------------ */
   function updateConnectionUi() {
     if (!document.body) return;
+    if (window.OfflineUI) { if (offlineEl) { offlineEl.remove(); offlineEl = null; } return; } // the till status chip handles this
     if (!window.navigator.onLine) {
       wasOffline = true;
       if (!offlineEl) {

@@ -21,6 +21,7 @@
       'notifications.view', 'notifications.send',
       'tickets.view', 'tickets.create',
       'shortages.view', 'shortages.manage',
+      'devices.manage', 'offline.review',
     ],
     MANAGER: [
       'categories.view', 'categories.create', 'categories.update',
@@ -35,15 +36,15 @@
       'customers.view', 'customers.create', 'customers.update',
       'suppliers.view', 'suppliers.create', 'suppliers.update',
       'purchases.view', 'purchases.create', 'purchases.receive', 'purchases.pay',
-      'registers.manage',
+      'registers.view', 'registers.manage',
       'shifts.open', 'shifts.close', 'shifts.view',
       'shortages.view', 'shortages.manage',
       'branches.view',
       'audit.view',
       'notifications.view', 'notifications.send',
       'tickets.view', 'tickets.create',
+      'billing.view', 'billing.pay',
       'devices.manage', 'offline.review',
-
     ],
     CASHIER: [
       'categories.view',
@@ -53,6 +54,7 @@
       'refunds.view', 'refunds.create',
       'payments.view',
       'customers.view', 'customers.create',
+      'registers.view',
       'shifts.open', 'shifts.close', 'shifts.view',
       'shortages.view', // own records only (backend self-scopes)
       'notifications.view', 'notifications.send',

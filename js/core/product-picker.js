@@ -37,11 +37,13 @@
   }
 
   async function search(term) {
+    if (window.Offline && window.Offline.lookup) return window.Offline.lookup.search(term);
     const { data } = await window.Api.get('/products', { search: term, limit: 20, status: 'active' });
     return data.items;
   }
 
   async function lookupBarcode(code) {
+    if (window.Offline && window.Offline.lookup) return window.Offline.lookup.barcode(code);
     const { data } = await window.Api.get(`/products/barcode/${encodeURIComponent(code.trim())}`);
     return data; // { type, product, variant }
   }

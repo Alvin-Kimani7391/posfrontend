@@ -6,56 +6,142 @@
   <meta name="theme-color" content="#0f766e" />
   <title>Offline · Six Star POS</title>
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
   <style>
     :root { color-scheme: light dark; --bg:#f8fafc; --card:#ffffff; --text:#0f172a; --muted:#475569; --line:#e2e8f0; --brand:#0f766e; }
     @media (prefers-color-scheme: dark) {
       :root { --bg:#0b1220; --card:#111a2e; --text:#e5edf9; --muted:#9fb0c8; --line:#22304a; --brand:#14b8a6; }
     }
     * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; }
+    html, body { min-height: 100%; margin: 0; }
     body {
       display: grid; place-items: center; padding: 24px;
       padding-top: max(24px, env(safe-area-inset-top)); padding-bottom: max(24px, env(safe-area-inset-bottom));
       background: var(--bg); color: var(--text);
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.5;
     }
-    main { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px 24px; text-align: center; }
-    img { width: 64px; height: 64px; border-radius: 14px; }
+    main { width: 100%; max-width: 440px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px 24px; text-align: center; }
+    img.logo { width: 64px; height: 64px; border-radius: 14px; }
     h1 { font-size: 1.35rem; margin: 16px 0 8px; }
-    p { margin: 0 0 20px; color: var(--muted); }
+    p { margin: 0 0 16px; color: var(--muted); }
     .actions { display: flex; flex-direction: column; gap: 10px; }
-    button, a.btn {
+    button, a.btn2 {
       min-height: 46px; padding: 0 18px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
     }
     button.primary { background: var(--brand); color: #fff; border: 0; }
-    a.btn { background: transparent; color: var(--text); border: 1px solid var(--line); }
-    button:focus-visible, a.btn:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
-    #status { margin-top: 16px; min-height: 1.4em; font-size: .9rem; color: var(--muted); }
+    button.ghost, a.btn2 { background: transparent; color: var(--text); border: 1px solid var(--line); }
+    button:focus-visible, a.btn2:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+    #status { margin-top: 14px; min-height: 1.4em; font-size: .9rem; color: var(--muted); }
+    #unlock { display: none; text-align: left; margin: 0 0 16px; padding: 14px; border: 2px solid #b45309; border-radius: 12px; gap: 10px; }
+    #unlock strong { display: block; margin-bottom: 4px; }
+    #unlock select, #unlock input { width: 100%; min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--text); padding: 0 12px; font: inherit; margin-bottom: 10px; }
+    #err { color: #b91c1c; font-size: .85rem; min-height: 1.2em; }
+    #pending { font-size: .85rem; color: var(--muted); margin-bottom: 14px; }
   </style>
 </head>
 <body>
   <main>
-    <img src="icons/icon-192.png" alt="" width="64" height="64" />
-    <h1>You're offline</h1>
-    <p>Six Star POS needs a connection to load this page. Check your Wi-Fi or mobile data, then try again.</p>
+    <img class="logo" src="icons/icon-192.png" alt="" width="64" height="64" />
+    <h1 id="title">You're offline</h1>
+    <p id="msg">Six Star POS cannot reach the server. If this till is set up for offline selling you can keep working.</p>
+    <div id="pending"></div>
+
+    <form id="unlock" autocomplete="off">
+      <strong>Unlock this till offline</strong>
+      <select name="u" id="u"></select>
+      <input name="pin" id="pin" type="password" inputmode="numeric" maxlength="8" placeholder="Offline PIN" />
+      <div id="err"></div>
+      <button class="primary" type="submit" style="width:100%">Unlock and start selling</button>
+    </form>
+
     <div class="actions">
+      <a class="btn2" id="go-sales" href="sales.html" style="display:none">Open Sales (till is unlocked)</a>
+      <button class="ghost" id="centre" type="button" style="display:none">Till offline centre</button>
       <button class="primary" id="retry" type="button">Try again</button>
-      <a class="btn" href="dashboard.html">Open dashboard</a>
+      <a class="btn2" href="login.html?online=1">Sign in online</a>
     </div>
     <div id="status" role="status" aria-live="polite"></div>
   </main>
+
+  <script src="js/core/config.js"></script>
+  <script src="js/core/icons.js"></script>
+  <script src="js/core/storage.js"></script>
+  <script src="js/core/api.js"></script>
+  <script src="js/core/connectivity.js"></script>
+  <script src="js/core/offline-db.js"></script>
+  <script src="js/core/offline-sync.js"></script>
+  <script src="js/core/offline-shifts.js"></script>
+  <script src="js/core/offline-auth.js"></script>
+  <script src="js/core/offline-sale.js"></script>
+  <script src="js/core/permissions.js"></script>
+  <script src="js/core/ui.js"></script>
+  <script src="js/core/offline-ui.js"></script>
   <script>
     (function () {
-      var status = document.getElementById('status');
-      function retry() {
-        status.textContent = 'Checking connection…';
-        fetch(location.href, { cache: 'no-store' })
-          .then(function (r) { if (r.ok) location.reload(); else status.textContent = 'Still offline.'; })
-          .catch(function () { status.textContent = 'Still offline.'; });
+      var $ = function (id) { return document.getElementById(id); };
+      var status = $('status');
+      var started = false;
+
+      function show() {
+        if (!window.Offline || !window.Offline.isReady || !window.Offline.isReady()) return;
+        var online = window.Connectivity.isOnline();
+        var auth = window.Offline.auth;
+        var st = window.Offline.status();
+
+        $('title').textContent = online ? 'You are back online' : "You're offline";
+        $('msg').textContent = online
+          ? 'The connection is back. Open the app to continue and send saved sales.'
+          : 'Six Star POS cannot reach the server. If this till is set up for offline selling you can keep working.';
+        $('pending').textContent = st.pending ? st.pending + ' sale/event(s) saved on this till are waiting to sync.' : '';
+        $('centre').style.display = '';
+
+        var unlocked = !!(window.Storage.isAuthenticated() && auth && !auth.requiresUnlock());
+        $('go-sales').style.display = unlocked ? '' : 'none';
+
+        var canPin = !online && auth && auth.canOfflineLogin && auth.canOfflineLogin() && !unlocked;
+        $('unlock').style.display = canPin ? 'block' : 'none';
+        if (canPin) {
+          var users = auth.listLoginUsers();
+          $('u').innerHTML = users.map(function (x) {
+            return '<option value="' + window.UI.escapeHtml(x.userId) + '">' + window.UI.escapeHtml(x.name) + ' (' + window.UI.escapeHtml(x.role) + ')</option>';
+          }).join('');
+        }
+        if (!online && !canPin && !unlocked && !st.enrolled) {
+          $('msg').textContent = 'This till has not been set up for offline selling. Connect to the internet, sign in as a manager, and set it up.';
+        }
       }
-      document.getElementById('retry').addEventListener('click', retry);
-      window.addEventListener('online', function () { location.reload(); });
+
+      $('unlock').addEventListener('submit', function (e) {
+        e.preventDefault();
+        $('err').textContent = '';
+        window.Offline.auth.offlineLogin($('u').value, $('pin').value).then(function () {
+          window.location.href = 'sales.html';
+        }).catch(function (ex) { $('err').textContent = ex.message || 'Could not unlock'; $('pin').value = ''; });
+      });
+
+      $('centre').addEventListener('click', function () { if (window.OfflineUI) window.OfflineUI.openCenter(); });
+
+      $('retry').addEventListener('click', function () {
+        status.textContent = 'Checking connection…';
+        window.Connectivity.check().then(function (on) {
+          if (on) window.location.href = window.Storage.isAuthenticated() ? 'dashboard.html' : 'login.html';
+          else status.textContent = 'Still offline.';
+        });
+      });
+
+      function boot() {
+        if (started) return; started = true;
+        window.Offline.init().then(show);
+        ['pending', 'sync', 'readiness', 'mode', 'shift'].forEach(function (e) { window.Offline.on(e, show); });
+        window.Connectivity.onChange(function (on) {
+          if (on) status.textContent = 'Back online.'; show();
+        });
+        setInterval(show, 5000);
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
     })();
   </script>
 </body>

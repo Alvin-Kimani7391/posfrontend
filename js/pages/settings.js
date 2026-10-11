@@ -72,6 +72,7 @@
     bindTillCard();
     bindEtims();
     bindMpesaCredTypeToggle();
+    window.OfflineSettings?.mount(document.getElementById('settings-body'));
   }
 
   /* ------------------------------------------------------------------ *

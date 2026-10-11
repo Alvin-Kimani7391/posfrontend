@@ -16,12 +16,14 @@
   document.addEventListener('DOMContentLoaded', init);
 
   function init() {
+    if (new URLSearchParams(window.location.search).get('online')) { try { localStorage.removeItem('pos.offlineSession'); } catch { /* ignore */ } }
     // If already logged in, skip straight to the dashboard.
     if (window.Storage.isAuthenticated()) {
       window.location.replace('dashboard.html');
       return;
     }
 
+    loadPasswordToggle();
     document.getElementById('logo-mark').innerHTML = window.Icons.get('store');
     document.getElementById('app-name').textContent = window.APP_CONFIG.APP_NAME;
 
@@ -30,6 +32,57 @@
     setupPinForm();
     applyDeepLink();
     showSessionExpiredNoticeIfAny();
+    setupOfflineLogin();
+  }
+
+
+  /** Show/hide eye button on every password / PIN field (file loads itself once, then watches for fields added later). */
+  function loadPasswordToggle() {
+    if (window.PasswordToggle) { window.PasswordToggle.init(); return; }
+    if (document.getElementById('pw-toggle-script')) return;
+    const s = document.createElement('script');
+    s.id = 'pw-toggle-script';
+    s.src = 'js/core/password-toggle.js';
+    s.async = true;
+    s.onerror = () => console.warn('Password toggle: js/core/password-toggle.js could not be loaded');
+    document.head.appendChild(s);
+  }
+
+  /** No internet: unlock the till with the offline PIN (no tokens; sales are saved and sync after an online sign-in). */
+  async function setupOfflineLogin() {
+    if (!window.Offline) return;
+    await window.Offline.init();
+    const show = () => {
+      const old = document.getElementById('offline-login'); if (old) old.remove();
+      if (window.Connectivity.isOnline()) return;
+      if (!window.Offline.auth.canOfflineLogin()) {
+        // Nobody can unlock offline on this till: say why instead of showing nothing.
+        const note = document.createElement('div');
+        note.id = 'offline-login';
+        note.style.cssText = 'margin-bottom:16px;padding:14px;border:2px solid #b45309;border-radius:12px';
+        note.innerHTML = '<strong>You are offline</strong><span class="text-sm" style="display:block;margin-top:4px">Nobody can unlock this till offline yet. Connect to the internet, sign in, tap <b>Offline</b> and set your offline PIN. A manager must also set up this till and issue the cashier roster.</span>';
+        const s = document.getElementById('form-alert-slot');
+        s.parentNode.insertBefore(note, s);
+        return;
+      }
+      const users = window.Offline.auth.listLoginUsers();
+      const box = document.createElement('form');
+      box.id = 'offline-login'; box.autocomplete = 'off';
+      box.style.cssText = 'display:grid;gap:10px;margin-bottom:16px;padding:14px;border:2px solid #b45309;border-radius:12px';
+      box.innerHTML = `<strong>You are offline</strong><span class="text-sm">Unlock this till with your offline PIN. Sales are saved on the till and sent when you sign in online.</span>
+        <select class="select" name="u">${users.map((u) => `<option value="${window.UI.escapeHtml(u.userId)}">${window.UI.escapeHtml(u.name)} (${window.UI.escapeHtml(u.role)})</option>`).join('')}</select>
+        <input class="input" name="pin" type="password" inputmode="numeric" maxlength="8" placeholder="Offline PIN" />
+        <button class="btn btn-primary" type="submit">Unlock till</button>`;
+      const slot = document.getElementById('form-alert-slot');
+      slot.parentNode.insertBefore(box, slot);
+      box.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try { await window.Offline.auth.offlineLogin(box.u.value, box.pin.value); window.location.href = 'sales.html'; }
+        catch (err) { showAlert(err.message); box.pin.value = ''; }
+      });
+    };
+    show();
+    window.Connectivity.onChange(show);
   }
 
   /* ---- Tabs: password vs PIN login ---- */

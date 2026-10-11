@@ -126,7 +126,7 @@
     unit: p.unit, productType: p.productType, trackInventory: !!p.trackInventory, trackSerialNumber: !!p.trackSerialNumber, trackBatch: !!p.trackBatch,
     hasVariants: !!p.hasVariants, status: 'active', variants: [], _offline: true,
   });
-  const FEEDS = ['categories', 'registers', 'products', 'variants'];
+  const FEEDS = ['categories', 'products', 'variants'];
   const DROP_WHEN_INACTIVE = new Set(['products', 'variants', 'registers']);
 
   const Cat = (Offline.catalog = {
@@ -223,7 +223,7 @@
       await Cat.load();
     },
     version: async () => (await DB.kvGet('catalogVersion')) || 'none',
-    registers: async () => (await DB.getAll('registers')).map((r) => ({ _id: r.id, name: r.name, code: r.code })),
+    registers: async () => ((C.get() || {}).registers || []).map((r) => ({ _id: r.id, name: r.name, code: r.code })),
   });
 
   /* ------------------------------ outbox ------------------------------ */
@@ -324,7 +324,7 @@
       let data;
       try {
         ({ data } = await window.Api.post('/sync/push', {
-          deviceId: D.id(), deviceTime: new Date().toISOString(), pendingCount: rows.length - i, appVersion: APP_VERSION, events,
+          deviceId: D.id(), deviceTime: new Date().toISOString(), pendingCount: rows.length - i, appVersion: APP_VERSION, items: events,
         }, { headers: D.headers(), background: true, timeoutMs: 60000 }));
       } catch (err) {
         if (err.status === 413 && size > 1) { size = Math.max(1, Math.floor(size / 2)); continue; }

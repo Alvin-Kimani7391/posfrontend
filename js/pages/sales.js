@@ -126,6 +126,20 @@
   const fm = (n) => window.UI.formatMoney(n);
   const $ = (id) => document.getElementById(id);
 
+  const lookupSearch = (t) => (window.Offline && window.Offline.lookup
+    ? window.Offline.lookup.search(t)
+    : window.Api.get('/products', { search: t, limit: 15, status: 'active' }).then((r) => r.data.items || []));
+  const lookupBarcode = (c) => (window.Offline && window.Offline.lookup
+    ? window.Offline.lookup.barcode(c)
+    : window.Api.get(`/products/barcode/${encodeURIComponent(c.trim())}`).then((r) => r.data));
+  const OFFLINE_METHODS = [
+    { id: 'CASH', label: 'Cash', ico: 'fa-solid fa-money-bill-wave' },
+    { id: 'MPESA_OFFLINE', label: 'M-PESA Till', ico: 'fa-solid fa-store' },
+    { id: 'BANK', label: 'Bank', ico: 'fa-solid fa-building-columns' },
+    { id: 'CARD', label: 'Card', ico: 'fa-solid fa-credit-card' },
+  ];
+  const isOfflineNow = () => !!window.Offline && !window.Connectivity.isOnline();
+
   let contentEl;
   let checkoutKey = window.Api.newIdempotencyKey();
   let unsubscribeBranchChange = null;
@@ -162,6 +176,8 @@
     // The cash drawer module (and any unfinished "close the drawer" lock) is set up
     // after the screen is on, so a slow or missing drawer never delays selling.
     await initDrawer();
+    window.Offline?.on('mode', () => { loadShift(); if (state.view === 'history') renderHistory(); });
+    window.Offline?.on('shift', renderShiftBanner);
 
     // The branch name arrives after the branch list loads (and may never arrive for roles
     // without branches.view), so fill it in when it does and whenever the branch changes.
@@ -538,7 +554,7 @@
     lastScan = { code, at: now };
 
     try {
-      const { data } = await window.Api.get(`/products/barcode/${encodeURIComponent(code.trim())}`);
+      const data = await lookupBarcode(code);
       addToCart(data.product, data.variant);
     } catch (err) {
       window.UI.toast.error(err.code === 'BARCODE_NOT_FOUND' ? `No product found for barcode "${code}"` : err.message);
@@ -553,15 +569,31 @@
   async function loadShift() {
     const branchId = window.AppShell.getActiveBranchId();
     if (!branchId) return;
+    const off = window.Offline;
+
+    if (off && !window.Connectivity.isOnline()) {
+      await off.init();
+      state.currentShift = off.shifts.current();
+      const ctx = off.context.get();
+      state.flags = { ...DEFAULT_FLAGS, tillNumber: (ctx && ctx.mpesaTill) || null };
+      renderShiftBanner();
+      return;
+    }
 
     const [shiftResult, flagsResult] = await Promise.allSettled([
       window.Api.get('/shifts/current', { branchId }),
       window.Api.get('/settings/integrations/flags'),
     ]);
-
     state.currentShift = shiftResult.status === 'fulfilled' ? shiftResult.value.data.shift : null;
     state.flags = flagsResult.status === 'fulfilled' ? { ...DEFAULT_FLAGS, ...flagsResult.value.data } : { ...DEFAULT_FLAGS };
 
+    if (off && shiftResult.status === 'fulfilled') {
+      await off.init();
+      const local = off.shifts.current();
+      // A shift opened offline is the truth until the server has it (and while its close is still waiting).
+      if (local && local.offline) state.currentShift = local;
+      else await off.shifts.syncServer(state.currentShift);
+    }
     renderShiftBanner();
   }
 
@@ -593,9 +625,10 @@
   async function openOpenShiftModal() {
     const branchId = window.AppShell.getActiveBranchId();
     let registers = [];
+    const offlineMode = isOfflineNow();
     try {
-      const { data } = await window.Api.get('/registers', { branchId });
-      registers = data.registers;
+      if (offlineMode) registers = await window.Offline.catalog.registers();
+      else registers = (await window.Api.get('/registers', { branchId })).data.registers;
     } catch (err) {
       window.UI.toast.error(err.message);
       return;
@@ -643,8 +676,14 @@
       const btn = $('open-shift-save');
       window.UI.setButtonLoading(btn, true, 'Opening…');
       try {
-        await window.Api.post('/shifts/open', { branchId, registerId: raw.registerId, openingCash: raw.openingCash });
-        window.UI.toast.success('Shift opened');
+        if (offlineMode) {
+          const reg = registers.find((r) => r._id === raw.registerId) || {};
+          await window.Offline.shifts.open({ registerId: raw.registerId, registerName: reg.name, registerCode: reg.code, openingCash: Number(raw.openingCash) || 0 });
+          window.UI.toast.success('Shift opened on this till (it will sync when online)');
+        } else {
+          await window.Api.post('/shifts/open', { branchId, registerId: raw.registerId, openingCash: raw.openingCash });
+          window.UI.toast.success('Shift opened');
+        }
         window.UI.closeModal();
         loadShift();
       } catch (err) {
@@ -684,12 +723,28 @@
   }
 
   function openCloseShiftModal() {
+    const shift = state.currentShift;
+    // A shift opened offline, or any close while offline, travels through the ordered outbox.
+    const viaOutbox = !!window.Offline && (shift.offline || !window.Connectivity.isOnline());
     window.CashCount.openCountModal({
       title: 'Close shift',
       intro: 'Count the cash in the drawer and enter how many of each note and coin you have. The total is added up for you, and the system compares it with what the drawer should hold.',
       confirmText: 'Close shift',
       confirmClass: 'btn-danger',
       onSubmit: async ({ denominations, notes }) => {
+        if (viaOutbox) {
+          const r = await window.Offline.shifts.close({ denominations, notes });
+          window.UI.closeModal();
+          const modal = window.UI.openModal({
+            title: 'Shift closed on this till', maxWidth: '460px',
+            bodyHtml: `<div class="pos-totals-row grand"><span>Cash counted</span><span>${fm(r.totalCents / 100)}</span></div>
+              <p class="text-sm text-secondary" style="margin-top:var(--space-3)">Saved on this till. The over/short result is worked out when it syncs, and your manager is told if the drawer is short.</p>`,
+            footerHtml: '<button class="btn btn-primary" data-action="close">Done</button>',
+          });
+          modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
+          loadShift();
+          return;
+        }
         const { data } = await window.Api.post(`/shifts/${state.currentShift._id}/close`, { denominations, notes });
         window.UI.closeModal();
         showShiftSummary(data.shift);
@@ -833,6 +888,7 @@
       renderTotals();
     });
     $('pick-customer-btn').addEventListener('click', () => {
+      if (isOfflineNow()) return window.UI.toast.error('Customers are not available offline. Sell to a walk-in customer.');
       window.CustomerPicker.open({ onSelect: (customer) => { state.customer = customer; renderCustomerButton(); } });
     });
 
@@ -909,10 +965,10 @@
       const my = ++seq;
       render(term, true);
       try {
-        const { data } = await window.Api.get('/products', { search: term, limit: 15, status: 'active' });
+        const found = await lookupSearch(term);
         if (my !== seq) return rows;
         rows = [];
-        (data.items || []).forEach((product) => {
+        found.forEach((product) => {
           if (product.variants?.length) product.variants.forEach((v) => rows.push({ product, variant: v }));
           else rows.push({ product, variant: null });
         });
@@ -1247,13 +1303,27 @@
   function openPaymentModal(initialMethod) {
     if (drawerLocked()) return window.UI.toast.error('Close the cash drawer before taking the next payment');
     if (!state.cart.length) return window.UI.toast.error('Cart is empty');
+    const offlineNow = isOfflineNow();
+    if (offlineNow && state.pendingMpesa) return window.UI.toast.error('An M-PESA payment was received online. Reconnect to save that sale.');
+    let offCaps = {}; let offTill = null;
+    if (offlineNow) {
+      const chk = window.Offline.sales.check();
+      if (!chk.ok) return window.UI.toast.error(chk.reason);
+      offCaps = chk.grant.caps || {};
+      offTill = (window.Offline.context.get() || {}).mpesaTill;
+    }
     const { total } = computeTotals();
     const resumeMpesa = !!state.pendingMpesa;
     if (total <= 0 && !resumeMpesa) return window.UI.toast.error('Total must be greater than zero');
 
     const dueAmount = resumeMpesa ? state.pendingMpesa.amount : total;
     const resumeId = resumeMpesa ? mpesaMethodIdFor(state.pendingMpesa) : null;
-    const methods = METHODS.filter((m) => {
+    const methods = (offlineNow ? OFFLINE_METHODS : METHODS).filter((m) => {
+      if (offlineNow) {
+        if (m.id === 'MPESA_OFFLINE') return !!(offCaps.allowManualMpesa && offTill);
+        if (m.id === 'BANK' || m.id === 'CARD') return !!offCaps.allowCard;
+        return true;
+      }
       if (m.id === resumeId) return true; // always show the tab that holds already-received money
       if (m.id === 'MPESA') return state.flags.mpesaEnabled;
       if (m.id === 'MPESA_TILL') return state.flags.mpesaManualEnabled;
@@ -1302,7 +1372,7 @@
 
       method = next;
       modal.querySelectorAll('.pz-method').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
-      const renderers = { CASH: renderCash, MPESA: renderMpesa, MPESA_TILL: renderMpesaTill, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
+      const renderers = { CASH: renderCash, MPESA: renderMpesa, MPESA_TILL: renderMpesaTill, MPESA_OFFLINE: renderMpesaOffline, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
       renderers[method]();
     }
 
@@ -1461,6 +1531,35 @@
     }
 
     /* ---- M-PESA TILL (Buy Goods, customer pays by themselves) ---- */
+    /* ---- M-PESA Till, OFFLINE: cashier records the code + phone, manager/server verifies later ---- */
+    function renderMpesaOffline() {
+      const maxCents = (window.Offline.auth.activeGrant()?.limits || {}).maxManualMpesaCents;
+      panel.innerHTML = `
+        <div class="pz-till">
+          <ol class="pz-till-steps">
+            <li>Customer pays <strong>Lipa na M-PESA → Buy Goods</strong> to Till <strong>${esc(offTill)}</strong></li>
+            <li>Amount: <strong>${fm(dueAmount)}</strong> (exactly)</li>
+            <li>Read the <strong>M-PESA SMS on the customer's phone</strong> and type it below</li>
+          </ol>
+        </div>
+        <div class="pz-note warn">No internet: this payment is checked when the till reconnects. ${maxCents && dueAmount * 100 > maxCents ? '<strong>This amount needs a manager\u2019s approval.</strong> ' : ''}Type the code exactly as it appears in the SMS.</div>
+        <div class="field"><label for="po-code">M-PESA code (10 characters)</label><input class="input pz-code-input" id="po-code" maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. UJK1A2B3C4" /></div>
+        <div class="form-row">
+          <div class="field"><label for="po-phone">Customer phone</label><input class="input" id="po-phone" inputmode="tel" placeholder="07XXXXXXXX" /></div>
+          <div class="field"><label for="po-name">Customer name <span class="text-muted">(optional)</span></label><input class="input" id="po-name" maxlength="80" /></div>
+        </div>`;
+      const code = panel.querySelector('#po-code'); const phone = panel.querySelector('#po-phone'); const name = panel.querySelector('#po-name');
+      const ok = () => /^[A-Z][A-Z0-9]{9}$/.test(code.value) && phone.value.replace(/\D/g, '').length >= 9;
+      const upd = () => { code.value = code.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); setComplete({ enabled: ok(), label: 'Save sale offline & print receipt' }); };
+      [code, phone].forEach((el) => el.addEventListener('input', upd));
+      upd();
+      setTimeout(() => code.focus(), 50);
+      onComplete = async () => {
+        state.payments = [{ method: 'MPESA', amount: dueAmount, mpesa: { code: code.value, payerPhone: phone.value.trim(), payerName: name.value.trim() || undefined } }];
+        await checkout({ btn: completeBtn });
+      };
+    }
+
     function renderMpesaTill() {
       const already = state.pendingMpesa && state.pendingMpesa.mode === 'MANUAL' ? state.pendingMpesa : null;
       const hasCents = Math.round(dueAmount * 100) % 100 !== 0;
@@ -1748,9 +1847,21 @@
    * change / tendered / due are only passed for CASH sales; when change > 0 the cash drawer
    * is opened (and the POS locked) the moment the sale is saved.
    */
+  async function saveOffline(ctid) {
+    const r = await window.Offline.sales.create({
+      cart: state.cart, cartDiscount: state.cartDiscount || 0, payments: state.payments, clientTransactionId: ctid,
+    });
+    return { sale: { receiptNumber: r.receiptNumber, _id: null }, receipt: r.receipt, offline: true };
+  }
+
   async function checkout({ btn, change, tendered, due } = {}) {
     if (checkingOut) return false;
     if (!state.cart.length) { window.UI.toast.error('Cart is empty'); return false; }
+
+    const off = window.Offline;
+    const offlineNow = isOfflineNow();
+    const canOffline = !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
+    const ctid = checkoutKey.replace(/-/g, ''); // same id online and offline, so a retry can never become a second sale
 
     const branchId = window.AppShell.getActiveBranchId();
     const payload = {
@@ -1758,38 +1869,42 @@
       customerId: state.customer?._id,
       cartDiscount: state.cartDiscount || 0,
       items: state.cart.map((item) => ({
-        productId: item.product._id,
-        variantId: item.variant?._id,
-        quantity: item.quantity,
-        discount: item.discount || 0,
-        overridePrice: item.overridePriceEnabled ? item.overridePrice : undefined,
+        productId: item.product._id, variantId: item.variant?._id, quantity: item.quantity,
+        discount: item.discount || 0, overridePrice: item.overridePriceEnabled ? item.overridePrice : undefined,
       })),
       payments: state.payments.map((p) => ({
         method: p.method, amount: p.amount, reference: p.reference,
         amountTendered: p.method === 'CASH' ? p.amountTendered : undefined,
       })),
+      ...(canOffline ? { deviceId: off.device.id(), clientTransactionId: ctid } : {}),
     };
 
     checkingOut = true;
     if (btn) window.UI.setButtonLoading(btn, true, 'Completing sale…');
     try {
-      const { data } = await window.Api.post('/sales', payload, { idempotencyKey: checkoutKey });
-
-      // CASH DRAWER: only when the customer is owed change. Fire first so the drawer pops
-      // immediately; it also locks the POS until the drawer has been closed again.
-      const drawerDriven = change > 0 && !!window.CashDrawer && window.CashDrawer.isEnabled();
-      if (drawerDriven) {
-        window.CashDrawer.beginChange({
-          change, tendered, due,
-          receiptNumber: data.sale.receiptNumber,
-          saleId: data.sale._id,
-        });
+      let data;
+      if (offlineNow) {
+        if (!canOffline) throw new Error('You are offline and offline selling is not set up on this till.');
+        data = await saveOffline(ctid);
+      } else {
+        try {
+          ({ data } = await window.Api.post('/sales', payload, { idempotencyKey: checkoutKey }));
+        } catch (err) {
+          const cashOnly = state.payments.length === 1 && state.payments[0].method === 'CASH' && !state.pendingMpesa;
+          if (err.code === 'NETWORK_ERROR' && canOffline && cashOnly) {
+            window.UI.toast.warning('Connection lost - saving this sale on the till');
+            data = await saveOffline(ctid);
+          } else throw err;
+        }
       }
 
+      const drawerDriven = change > 0 && !!window.CashDrawer && window.CashDrawer.isEnabled();
+      if (drawerDriven) {
+        window.CashDrawer.beginChange({ change, tendered, due, receiptNumber: data.sale.receiptNumber, saleId: data.sale._id || '' });
+      }
       if (document.querySelector('.modal-backdrop')) window.UI.closeModal();
-      window.UI.toast.success(`Sale ${data.sale.receiptNumber} completed`);
+      window.UI.toast.success(data.offline ? `Sale ${data.sale.receiptNumber} saved on this till` : `Sale ${data.sale.receiptNumber} completed`);
       if (change > 0 && !drawerDriven) window.UI.toast.success(`Give change: ${fm(change)}`);
-      // Open the receipt and ask it to print straight away.
       window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: true });
       resetCart();
       loadShift();
@@ -1806,7 +1921,23 @@
   /* ================================================================== *
    * SALES HISTORY VIEW
    * ================================================================== */
+  const OFFLINE_STATUS = { pending: ['badge-warning', 'Waiting to sync'], synced: ['badge-success', 'Synced'], issue: ['badge-danger', 'Needs manager'] };
+  async function renderOfflineHistory() {
+    const body = $('view-body');
+    body.className = 'pz-view pz-view-history';
+    const rows = await window.Offline.receipts.recent();
+    body.innerHTML = `<div class="card"><div class="toolbar"><strong>Sales saved on this till</strong><span class="text-xs text-muted">You are offline. Full history returns when you reconnect.</span></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Receipt</th><th>Time</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
+      ${rows.length ? rows.map((r) => { const [c, l] = OFFLINE_STATUS[r.status] || ['badge-neutral', r.status]; return `<tr data-rn="${esc(r.receiptNumber)}"><td class="cell-primary">${esc(r.receiptNumber)}</td><td class="text-sm">${window.UI.formatDateTime(r.soldAt)}</td><td class="font-semibold">${fm(r.totalCents / 100)}</td><td><span class="badge ${c}">${l}</span></td><td class="actions"><button class="btn btn-secondary btn-sm" data-a="view">View / reprint</button></td></tr>`; }).join('') : `<tr><td colspan="5">${window.UI.emptyStateHtml({ icon: 'sales', title: 'No sales saved on this till yet' })}</td></tr>`}
+      </tbody></table></div></div>`;
+    body.querySelectorAll('[data-a="view"]').forEach((b) => b.addEventListener('click', async () => {
+      const rec = await window.Offline.receipts.get(b.closest('tr').dataset.rn);
+      if (rec) window.ReceiptView.showReceiptModal(rec);
+    }));
+  }
+
   function renderHistory() {
+    if (isOfflineNow()) return renderOfflineHistory();
     const body = $('view-body');
     body.className = 'pz-view pz-view-history';
     body.innerHTML = `

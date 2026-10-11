@@ -13,10 +13,23 @@
       return;
     }
 
+    loadPasswordToggle();
     document.getElementById('logo-mark').innerHTML = window.Icons.get('store');
     document.getElementById('app-name').textContent = window.APP_CONFIG.APP_NAME;
 
     setupForm();
+  }
+
+  /** Show/hide eye button on every password / PIN field (file loads itself once, then watches for fields added later). */
+  function loadPasswordToggle() {
+    if (window.PasswordToggle) { window.PasswordToggle.init(); return; }
+    if (document.getElementById('pw-toggle-script')) return;
+    const s = document.createElement('script');
+    s.id = 'pw-toggle-script';
+    s.src = 'js/core/password-toggle.js';
+    s.async = true;
+    s.onerror = () => console.warn('Password toggle: js/core/password-toggle.js could not be loaded');
+    document.head.appendChild(s);
   }
 
   function setupForm() {

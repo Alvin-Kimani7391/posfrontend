@@ -94,6 +94,7 @@
     #receipt-print-area .rcpt-owed { color: #b91c1c; font-weight: 600; }
     #receipt-print-area .rcpt-custom { text-align: center; margin-top: 4px; color: #666; font-size: 12px; }
     #receipt-print-area .rcpt-footer-msg { text-align: center; margin-top: 10px; color: #666; }
+    #receipt-print-area .rcpt-prov { text-align: center; font-weight: 700; border: 2px solid #111; padding: 4px 6px; margin-bottom: 8px; }
   `;
 
   /* ------------------------------------------------------------------ *
@@ -169,6 +170,7 @@
     return `
       <style>${RECEIPT_CSS}</style>
       <div id="receipt-print-area" class="${is58 ? 'rcpt-58' : 'rcpt-80'}" style="max-width: ${width}px">
+        ${receipt.offline && receipt.status !== 'synced' ? '<div class="rcpt-prov">PROVISIONAL RECEIPT<br><span style="font-weight:400">Fiscal tax invoice follows after sync</span></div>' : ''}
         ${b.headerMessage ? `<div class="rcpt-header-msg">${esc(b.headerMessage)}</div>` : ''}
         <div class="rcpt-biz">
           ${b.logo ? `<img src="${b.logo}" alt="" />` : ''}
@@ -236,10 +238,8 @@
 
   /** Counts the print server-side (non-fatal), then prints the receipt through a hidden iframe. */
   async function printReceipt(receipt) {
-    try {
-      await window.Api.post(`/sales/${receipt.saleId}/receipt/print`);
-    } catch {
-      // non-fatal - printing locally still works even if the print-count update fails
+    if (receipt.saleId && !receipt.offline && window.Connectivity?.isOnline() !== false) {
+      try { await window.Api.post(`/sales/${receipt.saleId}/receipt/print`); } catch { /* non-fatal - printing locally still works even if the print-count update fails */ }
     }
 
     return new Promise((resolve) => {
