@@ -72,12 +72,41 @@
   }
 
   /* ------------------------------ chip ------------------------------ */
+  // The calm messages - BLUE ("Set up offline", "Downloading products…", "Syncing…") and GREEN ("Offline-ready") - show for a few seconds once an hour,
+  // then hide. Anything that needs attention (OFFLINE, waiting to sync, sign in, issues, offline selling off) stays visible.
+  // The top-bar "Offline" button always opens the till offline centre.
+  const CHIP_KEY = 'pos.offline.chipShownAt';
+  const CHIP_SHOW_MS = 8000;           // how long the blue chip stays
+  const CHIP_EVERY_MS = 60 * 60 * 1000; // how often it comes back
+  let chipMemShownAt = 0; let chipTimer = null;
+  function calmChipVisible() {
+    const now = Date.now();
+    let last = chipMemShownAt;
+    try { last = Number(localStorage.getItem(CHIP_KEY)) || last; } catch { /* storage blocked: in-memory only */ }
+    if (!last || last > now || now - last >= CHIP_EVERY_MS) {
+      last = now; chipMemShownAt = now;
+      try { localStorage.setItem(CHIP_KEY, String(now)); } catch { /* ignore */ }
+    }
+    const left = CHIP_SHOW_MS - (now - last);
+    if (left > 0) {
+      clearTimeout(chipTimer);
+      chipTimer = setTimeout(paintChip, left + 50); // hide right when the window ends
+      return true;
+    }
+    return false;
+  }
+
   function paintChip() {
     ensureTopButton();
     if (!chip || !Offline.isReady()) return;
     const s = Offline.status();
     let tone = 'ok'; let text = '';
-    if (!s.online) { tone = s.pending ? 'warn' : 'off'; text = `OFFLINE${s.pending ? ` · ${s.pendingSales || s.pending} pending` : ''}`; }
+    if (!s.online) {
+      tone = s.pending ? 'warn' : 'off';
+      // Wi-fi lost: always visible, and say whether this till is ready to keep selling.
+      const ready = s.enrolled && s.policyOn && s.catalogReady;
+      text = `OFFLINE${s.pending ? ` · ${s.pendingSales || s.pending} pending` : ''}${ready ? ' · Offline-ready' : ''}`;
+    }
     else if (s.syncState === 'syncing') { tone = 'info'; text = `Syncing ${s.pending}…`; }
     else if (s.pending && s.syncState === 'auth') { tone = 'warn'; text = 'Sign in to sync'; }
     else if (s.pending) { tone = 'warn'; text = `${s.pending} waiting to sync`; }
@@ -86,7 +115,7 @@
     else if (!s.policyOn) { tone = 'warn'; text = 'Offline selling is off'; }
     else { text = s.catalogReady ? 'Offline-ready' : 'Downloading products…'; if (!s.catalogReady) tone = 'info'; }
     if (s.online && s.pending && s.issues) text += ` · ${s.issues} issue(s)`;
-    chip.hidden = !text;
+    chip.hidden = !text || ((tone === 'info' || tone === 'ok') && !calmChipVisible());
     chip.className = `ofl-chip ofl-${tone}`;
     chip.innerHTML = `<i class="ofl-dot"></i><span>${esc(text)}</span>`;
     chip.title = 'Till offline centre';
