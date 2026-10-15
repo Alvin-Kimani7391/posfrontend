@@ -58,6 +58,12 @@
  *     preset part is trusted from the Product record, only the extra the
  *     cashier added by hand is checked against their discount limit.
  *
+ * WHOLESALE (Product.wholesaleEnabled + moq + wholesalePrice, business feature wholesalePricing)
+ *   - Wholesale.forItem() (js/core/wholesale.js) picks the price: once the cart holds >= MOQ of a product
+ *     (all its variants / lines together) every line of it switches to the wholesale unit price, and back to
+ *     retail if the quantity drops below the MOQ. A permitted price override always wins.
+ *   - Online the server recomputes the same rule on "Complete sale"; offline the till charges what is shown here.
+ *
  * PRICING NOTE: everything shown while building the cart is a CLIENT-SIDE
  * PREVIEW (tax-inclusive assumption, cashier lacks settings.view). On
  * "Complete sale" the backend recomputes everything from Product/Variant
@@ -784,9 +790,13 @@
     const attrs = variant ? Object.values(variant.attributes || {}).join(', ') : '';
     return attrs ? `${product.name} (${attrs})` : product.name;
   }
+  /** Retail / wholesale price info for a cart line (ignores any manual override). */
+  function priceInfoOf(item) {
+    return window.Wholesale ? window.Wholesale.forItem(state.cart, item) : { unit: item.variant ? item.variant.sellingPrice : item.product.sellingPrice, priceType: 'RETAIL', retail: item.variant ? item.variant.sellingPrice : item.product.sellingPrice, wholesale: null, moq: null };
+  }
   function unitPriceOf(item) {
     if (item.overridePriceEnabled && item.overridePrice != null) return item.overridePrice;
-    return item.variant ? item.variant.sellingPrice : item.product.sellingPrice;
+    return priceInfoOf(item).unit;
   }
 
   /* ---- Product discount (per unit, set on the Products page) ---- */
@@ -813,6 +823,14 @@
       const gross = round2(unitPriceOf(item) * item.quantity);
       if ((item.discount || 0) > gross) item.discount = gross;
     }
+  }
+
+  /** Small "wholesale X from N" line under a search result's price. */
+  function wholesaleSearchHint(r) {
+    const W = window.Wholesale;
+    if (!W || !W.featureOn() || !r.product.wholesaleEnabled || !(Number(r.product.moq) > 0)) return '';
+    const wp = W.priceOf(r.product, r.variant);
+    return wp === null ? '' : `<small>${fm(wp)} from ${r.product.moq}</small>`;
   }
 
   function renderNewSaleView() {
@@ -943,7 +961,7 @@
           <div class="pz-dd-row ${i === active ? 'active' : ''}" data-idx="${i}" role="option">
             <span class="pz-mono">${esc(barcodeOf(r.product, r.variant)) || '-'}</span>
             <span class="pz-name">${esc(nameOf(r.product, r.variant))}<small>SKU ${esc(r.variant ? r.variant.sku : r.product.sku)}</small></span>
-            <span class="pz-price">${fm(r.variant ? r.variant.sellingPrice : r.product.sellingPrice)}${off ? `<small>${fm(off)} off</small>` : ''}</span>
+            <span class="pz-price">${fm(r.variant ? r.variant.sellingPrice : r.product.sellingPrice)}${off ? `<small>${fm(off)} off</small>` : ''}${wholesaleSearchHint(r)}</span>
           </div>`;
         }).join('')}
       `;
@@ -1055,6 +1073,8 @@
   }
 
   function renderCart(flashKey) {
+    // A quantity change can cross a MOQ and so change the unit price of several lines: re-clamp every discount first.
+    state.cart.forEach(syncAutoDiscount);
     renderTicket(flashKey);
     renderCustomerButton();
     renderTotals();
@@ -1083,7 +1103,11 @@
       const preview = previewLine(unit, item.quantity, item.discount, item.product.taxRate);
       const bc = barcodeOf(item.product, item.variant);
       const d = item.discount || 0;
-      const priceHint = item.overridePriceEnabled ? 'price changed' : (item.autoDiscount ? 'product discount' : '');
+      const info = priceInfoOf(item);
+      const wholesaleHint = info.priceType === 'WHOLESALE'
+        ? 'wholesale price'
+        : (info.wholesale !== null && info.moq ? `wholesale ${fm(info.wholesale)} from ${info.moq}` : '');
+      const priceHint = item.overridePriceEnabled ? 'price changed' : (info.priceType === 'WHOLESALE' ? 'wholesale price' : (item.autoDiscount ? 'product discount' : wholesaleHint));
       const discTitle = item.autoDiscount
         ? `Product discount (${fm(unitDiscountOf(item.product))} per unit) - tap to change`
         : `Tap to set a discount${canOverride ? ' or change the price' : ''}`;
@@ -1259,7 +1283,7 @@
       }
       const nextUnit = overrideEnabled && overridePrice != null
         ? overridePrice
-        : (item.variant ? item.variant.sellingPrice : item.product.sellingPrice);
+        : priceInfoOf(item).unit;
       const gross = round2(nextUnit * item.quantity);
       if (newDiscount > gross) {
         window.UI.toast.error('Discount cannot be more than the line total');
@@ -2038,7 +2062,7 @@
           <table class="table">
             <thead><tr><th>Item</th><th>Qty</th><th>Total</th></tr></thead>
             <tbody>
-              ${sale.items.map((i) => `<tr><td class="text-sm">${esc(i.nameSnapshot)}${i.refundedQuantity ? ` <span class="text-xs text-muted">(${i.refundedQuantity} refunded)</span>` : ''}</td><td>${i.quantity}</td><td>${fm(i.total)}</td></tr>`).join('')}
+              ${sale.items.map((i) => `<tr><td class="text-sm">${esc(i.nameSnapshot)}${i.priceType === 'WHOLESALE' ? ' <span class="badge badge-info">Wholesale</span>' : ''}${i.refundedQuantity ? ` <span class="text-xs text-muted">(${i.refundedQuantity} refunded)</span>` : ''}</td><td>${i.quantity}</td><td>${fm(i.total)}</td></tr>`).join('')}
             </tbody>
           </table>
         </div>

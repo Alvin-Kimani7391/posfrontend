@@ -40,7 +40,7 @@
     jobCards:              { label: 'Job cards',                group: 'Garage',     ready: true,  desc: 'Run workshop jobs: labour, parts, approval and payment. Needs the vehicle register.', requires: ['vehicleManagement'] },
     quotationManagement:   { label: 'Quotations',               group: 'Selling',    ready: false, desc: 'Send quotations and turn them into sales.' },
     deliveryManagement:    { label: 'Deliveries',               group: 'Selling',    ready: false, desc: 'Plan and track deliveries.' },
-    wholesalePricing:      { label: 'Wholesale pricing',        group: 'Selling',    ready: false, desc: 'Separate wholesale price lists.' },
+    wholesalePricing:      { label: 'Wholesale pricing',        group: 'Selling',    ready: true,  desc: 'Set a minimum order quantity and a wholesale price per product. The till switches to it automatically.' },
     customerCredit:        { label: 'Customer credit',          group: 'Selling',    ready: true,  desc: 'Let trusted customers buy on credit.' },
     loyaltyProgram:        { label: 'Loyalty programme',        group: 'Selling',    ready: false, desc: 'Reward repeat customers with points.' },
     tableManagement:       { label: 'Tables',                   group: 'Restaurant', ready: false, desc: 'Open orders against tables.' },

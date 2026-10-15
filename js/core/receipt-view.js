@@ -122,6 +122,7 @@
 
     return {
       name: item.name || item.nameSnapshot || '',
+      priceType: item.priceType || 'RETAIL',
       quantity: item.quantity,
       units: quantity,
       discount,
@@ -148,7 +149,7 @@
             <tr>
               <td class="rcpt-c-item">
                 <div class="rcpt-name">${esc(l.name)}</div>
-                <div class="rcpt-unit">@ ${money(l.unit)}</div>
+                <div class="rcpt-unit">@ ${money(l.unit)}${l.priceType === 'WHOLESALE' ? ' (wholesale)' : ''}</div>
                 ${l.discount ? `<div class="rcpt-disc">Discount -${money(l.discount)}</div>` : ''}
               </td>
               <td class="rcpt-c-qty">${qty(l.quantity)}</td>

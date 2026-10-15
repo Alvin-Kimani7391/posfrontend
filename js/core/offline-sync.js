@@ -119,10 +119,10 @@
 
   /* ------------------------------ catalog ------------------------------ */
   const mem = { ready: false, products: [], byId: new Map(), variants: new Map(), barcodes: new Map() };
-  const toVariant = (v) => ({ _id: v.id, productId: v.productId, sku: v.sku, barcode: v.barcode, attributes: v.attributes || {}, sellingPrice: v.sellingPriceCents / 100 });
+  const toVariant = (v) => ({ _id: v.id, productId: v.productId, sku: v.sku, barcode: v.barcode, attributes: v.attributes || {}, sellingPrice: v.sellingPriceCents / 100, wholesalePrice: v.wholesalePriceCents ? v.wholesalePriceCents / 100 : null });
   const toProduct = (p) => ({
     _id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, categoryId: p.categoryId,
-    sellingPrice: p.sellingPriceCents / 100, defaultDiscount: (p.defaultDiscountCents || 0) / 100, taxRate: p.taxRate || 0, taxCategory: p.taxCategory,
+    sellingPrice: p.sellingPriceCents / 100, wholesaleEnabled: !!p.wholesaleEnabled, moq: p.moq || null, wholesalePrice: p.wholesalePriceCents ? p.wholesalePriceCents / 100 : null, defaultDiscount: (p.defaultDiscountCents || 0) / 100, taxRate: p.taxRate || 0, taxCategory: p.taxCategory,
     unit: p.unit, productType: p.productType, trackInventory: !!p.trackInventory, trackSerialNumber: !!p.trackSerialNumber, trackBatch: !!p.trackBatch,
     hasVariants: !!p.hasVariants, status: 'active', variants: [], _offline: true,
   });

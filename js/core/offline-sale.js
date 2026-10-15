@@ -49,12 +49,15 @@
       const inclusive = !!ctx.business.taxInclusive;
       const maxPct = caps.maxDiscountPercent == null ? 0 : caps.maxDiscountPercent;
 
+      const qtyMap = window.Wholesale ? window.Wholesale.qtyByProduct(cart) : new Map();
       const items = []; let subtotal = 0; let itemDisc = 0; let tax = 0; let linesTotal = 0; let afterItem = 0;
       for (const it of cart) {
         const p = it.product; const v = it.variant;
         if (it.overridePriceEnabled) fail('Price changes are not allowed offline. Remove the changed price on ' + p.name + '.');
         if (p.trackSerialNumber) fail(`${p.name} needs a serial number. Sell it when the till is online.`);
-        const unit = cents(v ? v.sellingPrice : p.sellingPrice);
+        // Retail, or the wholesale price once this sale holds >= MOQ of the product (same rule as the server).
+        const priced = window.Wholesale ? window.Wholesale.resolve(p, v, qtyMap.get(String(p._id))) : { unit: v ? v.sellingPrice : p.sellingPrice, priceType: 'RETAIL' };
+        const unit = cents(priced.unit);
         const qty = Number(it.quantity);
         const disc = cents(it.discount);
         const rate = p.taxRate || 0;
@@ -63,7 +66,7 @@
         const preset = Math.min(Math.round(cents(p.defaultDiscount) * qty), c.gross);
         const manual = disc - preset;
         if (manual > 1 && maxPct < 100 && manual > Math.round((c.gross * maxPct) / 100)) fail(`Discount on ${p.name} is above the ${maxPct}% limit for offline sales.`);
-        items.push({ productId: p._id, variantId: v ? v._id : undefined, name: nameOf(p, v), quantity: qty, unitPriceCents: unit, discountCents: disc, taxRate: rate, taxAmountCents: c.tax, totalCents: c.total });
+        items.push({ productId: p._id, variantId: v ? v._id : undefined, name: nameOf(p, v), quantity: qty, unitPriceCents: unit, priceType: priced.priceType, discountCents: disc, taxRate: rate, taxAmountCents: c.tax, totalCents: c.total });
         subtotal += c.gross; itemDisc += disc; tax += c.tax; linesTotal += c.total; afterItem += c.gross - disc;
       }
       const cartDiscCents = cents(cartDiscount);
@@ -142,7 +145,7 @@
             showMpesaReceiptCode: rs.showMpesaReceiptCode, customLines: rs.customLines || [], paperWidth: rs.paperWidth || '80mm',
           },
           branch: { name: view.branchName || (ctx.branch || {}).name }, cashier: { name: view.cashierName }, customer: null,
-          items: body.items.map((i) => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPriceCents / 100, discount: i.discountCents / 100, taxRate: i.taxRate, taxAmount: i.taxAmountCents / 100, total: i.totalCents / 100 })),
+          items: body.items.map((i) => ({ name: i.name, quantity: i.quantity, unitPrice: i.unitPriceCents / 100, priceType: i.priceType, discount: i.discountCents / 100, taxRate: i.taxRate, taxAmount: i.taxAmountCents / 100, total: i.totalCents / 100 })),
           subtotal: body.subtotalCents / 100, itemDiscount: body.itemDiscountCents / 100, cartDiscount: body.cartDiscountCents / 100,
           tax: body.taxCents / 100, total: body.totalCents / 100, payments,
           amountTendered: tendered / 100, changeGiven: Math.max(0, tendered - cashDue) / 100, balance: 0,

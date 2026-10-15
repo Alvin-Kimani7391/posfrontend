@@ -31,7 +31,7 @@
           <div class="text-sm font-semibold">${label}</div>
           <div class="text-xs text-muted">${window.UI.escapeHtml(sku)}</div>
         </span>
-        <span class="text-sm font-semibold">${window.UI.formatMoney(price)}</span>
+        <span class="text-sm font-semibold">${window.UI.formatMoney(price)}${product.wholesaleEnabled && product.moq && window.Wholesale && window.Wholesale.priceOf(product, variant) !== null && window.Wholesale.featureOn() ? `<div class="text-xs text-muted">${window.UI.formatMoney(window.Wholesale.priceOf(product, variant))} from ${product.moq}</div>` : ''}</span>
       </button>
     `;
   }

@@ -6,6 +6,11 @@
  * getting their own nav entries, since they're both small, closely
  * related surfaces rather than destinations on their own.
  *
+ * WHOLESALE: when the business has the "wholesalePricing" feature (Settings -> Business type) a product can be sold
+ * wholesale too: fields wholesaleEnabled, moq (minimum order quantity, in the product's unit) and wholesalePrice
+ * (KES per unit once the sale holds >= moq). Variants may carry their own wholesalePrice. The sales screen switches
+ * price automatically; the backend enforces the rules (FEATURE_DISABLED / INVALID_WHOLESALE_CONFIG).
+ *
  * DISCOUNT PER UNIT: each product can carry a standing per-unit discount
  * (field "defaultDiscount", KES). The sales screen pre-fills it on the
  * cart line whenever the product is scanned or searched (x quantity).
@@ -203,6 +208,7 @@
         <td>
           <div class="cell-primary">${p.hasVariants ? 'Varies' : window.UI.formatMoney(p.sellingPrice)}</div>
           ${discount > 0 ? `<div class="text-xs text-muted">${window.UI.formatMoney(discount)} off / unit</div>` : ''}
+          ${p.wholesaleEnabled && p.moq ? `<div class="text-xs text-muted">${p.wholesalePrice ? window.UI.formatMoney(p.wholesalePrice) : 'Per variant'} wholesale from ${p.moq} ${window.UI.escapeHtml(p.unit || '')}</div>` : ''}
         </td>
         <td><span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-neutral'}">${p.status}</span></td>
         <td class="actions">
@@ -339,6 +345,31 @@
    * ------------------------------------------------------------------ */
   let variantRowCount = 0;
 
+  /** Wholesale section is offered only when the business has the feature, or the product already uses it. */
+  function wholesaleAllowed(product) {
+    return window.AppShell.hasFeature('wholesalePricing') || !!(product && product.wholesaleEnabled);
+  }
+
+  function wholesaleSectionHtml(product) {
+    const on = !!(product && product.wholesaleEnabled);
+    const hasVariants = !!(product && product.hasVariants);
+    return `
+        <div class="field" id="wholesale-section" style="border:1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3)">
+          <label class="checkbox-row"><input type="checkbox" name="wholesaleEnabled" id="p-wholesale-on" ${on ? 'checked' : ''} /> <span class="text-sm font-semibold">Also sell wholesale</span></label>
+          <span class="field-hint">Once a sale holds at least the minimum order quantity (MOQ) of this product, the till charges the wholesale price automatically. Below it, the normal selling price applies.</span>
+          <div class="form-row" style="margin-top: var(--space-2)">
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label for="p-moq">Minimum order quantity (MOQ)</label>
+              <input class="input" id="p-moq" name="moq" type="number" step="any" min="0" inputmode="decimal" value="${product && product.moq ? product.moq : ''}" placeholder="e.g. 12" ${on ? '' : 'disabled'} />
+            </div>
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label for="p-wprice">Wholesale price per unit (KES)${hasVariants ? ' <span class="text-muted">(default for variants)</span>' : ''}</label>
+              <input class="input" id="p-wprice" name="wholesalePrice" type="number" step="0.01" min="0" inputmode="decimal" value="${product && product.wholesalePrice ? product.wholesalePrice : ''}" placeholder="Lower than the selling price" ${on ? '' : 'disabled'} />
+            </div>
+          </div>
+        </div>`;
+  }
+
   function variantRowHtml(idx) {
     return `
       <div class="variant-row" data-idx="${idx}" style="border:1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-2)">
@@ -365,6 +396,11 @@
             <input class="input" name="v-price-${idx}" type="number" step="0.01" min="0" required />
           </div>
         </div>
+        ${window.AppShell.hasFeature('wholesalePricing') ? `
+        <div class="field" style="margin-bottom: var(--space-2)">
+          <label>Wholesale price (KES) <span class="text-muted">(optional - uses the product's wholesale price when empty)</span></label>
+          <input class="input" name="v-wprice-${idx}" type="number" step="0.01" min="0" style="max-width: 200px" />
+        </div>` : ''}
         <button type="button" class="btn btn-ghost btn-sm" data-action="remove-variant-row">${window.Icons.get('trash')} Remove</button>
       </div>
     `;
@@ -447,6 +483,8 @@
           <span class="field-hint">Applied automatically on the sales screen when this product is scanned or searched (multiplied by the quantity). Leave empty for no discount.</span>
         </div>
 
+        ${wholesaleAllowed(isEdit ? product : null) ? wholesaleSectionHtml(isEdit ? product : null) : ''}
+
         <div class="form-row">
           <div class="field">
             <label for="p-taxrate">Tax rate (%)</label>
@@ -504,6 +542,15 @@
 
     bindBarcodeScanButton(modal.querySelector('#p-barcode-scan-btn'), modal.querySelector('#p-barcode'));
 
+    const wsToggle = modal.querySelector('#p-wholesale-on');
+    if (wsToggle) {
+      wsToggle.addEventListener('change', () => {
+        modal.querySelector('#p-moq').disabled = !wsToggle.checked;
+        modal.querySelector('#p-wprice').disabled = !wsToggle.checked;
+        if (wsToggle.checked) modal.querySelector('#p-moq').focus();
+      });
+    }
+
     if (!isEdit) {
       modal.querySelector('#add-variant-row-btn').addEventListener('click', () => {
         const container = modal.querySelector('#variants-container');
@@ -535,6 +582,19 @@
         return;
       }
 
+      // Wholesale (only when the section is shown). Mirrors the backend rules so the cashier gets a clear message.
+      const wholesaleOn = !!(wsToggle && wsToggle.checked);
+      const moqValue = Number(raw.moq) || 0;
+      const wholesalePriceValue = Number(raw.wholesalePrice) || 0;
+      if (wholesaleOn) {
+        const variantsHere = hasVariantRows || (isEdit && product.hasVariants);
+        if (!(moqValue > 0)) { window.UI.toast.error('Enter the minimum order quantity (MOQ) for wholesale'); modal.querySelector('#p-moq').focus(); return; }
+        if (!variantsHere) {
+          if (!(wholesalePriceValue > 0)) { window.UI.toast.error('Enter the wholesale price per unit'); modal.querySelector('#p-wprice').focus(); return; }
+          if (Number.isFinite(priceValue) && wholesalePriceValue >= priceValue) { window.UI.toast.error('Wholesale price must be lower than the selling price'); modal.querySelector('#p-wprice').focus(); return; }
+        }
+      }
+
       const payload = {
         name: raw.name, sku: raw.sku, barcode: raw.barcode, categoryId: raw.categoryId || undefined,
         brand: raw.brand, costPrice: raw.costPrice, sellingPrice: raw.sellingPrice,
@@ -545,6 +605,11 @@
         trackInventory: !!raw.trackInventory, trackSerialNumber: !!raw.trackSerialNumber,
         trackBatch: !!raw.trackBatch, trackExpiry: !!raw.trackExpiry,
       };
+      if (wsToggle) {
+        payload.wholesaleEnabled = wholesaleOn;
+        // When on: null clears an emptied price (e.g. variants carry their own). When off the saved values are left untouched.
+        if (wholesaleOn) { payload.moq = moqValue; payload.wholesalePrice = wholesalePriceValue > 0 ? wholesalePriceValue : null; }
+      }
 
       if (!isEdit) {
         const variantEls = modal.querySelectorAll('.variant-row');
@@ -556,6 +621,7 @@
               barcode: row.querySelector(`[name="v-barcode-${idx}"]`).value || undefined,
               attributes: parseAttributes(row.querySelector(`[name="v-attrs-${idx}"]`).value),
               sellingPrice: row.querySelector(`[name="v-price-${idx}"]`).value,
+              wholesalePrice: row.querySelector(`[name="v-wprice-${idx}"]`)?.value || undefined,
               costPrice: raw.costPrice,
             };
           });
@@ -608,7 +674,7 @@
     listEl.innerHTML = `
       <div class="table-wrap" style="margin-bottom: var(--space-4)">
         <table class="table">
-          <thead><tr><th>SKU</th><th>Attributes</th><th>Price</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>SKU</th><th>Attributes</th><th>Price</th>${wholesaleAllowed(product) ? '<th>Wholesale</th>' : ''}<th>Status</th><th></th></tr></thead>
           <tbody>
             ${product.variants.map((v) => `
               <tr data-id="${v._id}">
@@ -617,6 +683,9 @@
                 <td>
                   <input class="input" style="width:110px; height:34px" data-variant-price="${v._id}" type="number" step="0.01" min="0" value="${v.sellingPrice}" />
                 </td>
+                ${wholesaleAllowed(product) ? `<td>
+                  <input class="input" style="width:110px; height:34px" data-variant-wprice="${v._id}" type="number" step="0.01" min="0" value="${v.wholesalePrice || ''}" placeholder="${product.wholesalePrice || '-'}" title="Empty = use the product's wholesale price" />
+                </td>` : ''}
                 <td><span class="badge ${v.status === 'active' ? 'badge-success' : 'badge-neutral'}">${v.status}</span></td>
                 <td class="actions">
                   <button class="btn btn-ghost btn-sm btn-icon" data-action="save-variant" title="Save price">${window.Icons.get('check')}</button>
@@ -642,6 +711,7 @@
           </div>
           <div class="field"><label>Selling price (KES)</label><input class="input" name="sellingPrice" type="number" step="0.01" min="0" required /></div>
         </div>
+        ${wholesaleAllowed(product) ? `<div class="field"><label>Wholesale price (KES) <span class="text-muted">(optional)</span></label><input class="input" name="wholesalePrice" type="number" step="0.01" min="0" style="max-width:200px" /></div>` : ''}
         <button type="submit" class="btn btn-primary btn-sm">${window.Icons.get('plus')} Add variant</button>
       </form>
     `;
@@ -652,8 +722,11 @@
       btn.addEventListener('click', async () => {
         const id = btn.closest('tr').dataset.id;
         const price = listEl.querySelector(`[data-variant-price="${id}"]`).value;
+        const wEl = listEl.querySelector(`[data-variant-wprice="${id}"]`);
+        const body = { sellingPrice: price };
+        if (wEl) body.wholesalePrice = wEl.value === '' ? null : wEl.value; // null clears it (falls back to the product's)
         try {
-          await window.Api.put(`/products/${product._id}/variants/${id}`, { sellingPrice: price });
+          await window.Api.put(`/products/${product._id}/variants/${id}`, body);
           window.UI.toast.success('Variant updated');
         } catch (err) {
           window.UI.toast.error(err.message);
@@ -686,6 +759,7 @@
           barcode: raw.barcode || undefined,
           attributes: parseAttributes(raw.attrsText),
           sellingPrice: raw.sellingPrice,
+          wholesalePrice: raw.wholesalePrice || undefined,
         });
         window.UI.toast.success('Variant added');
         const { data } = await window.Api.get(`/products/${product._id}`);
