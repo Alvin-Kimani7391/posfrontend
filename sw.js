@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v2.3.4';
+const VERSION = 'v2.4.0';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -24,7 +24,7 @@ const PRECACHE = [
   'js/core/offline-db.js', 'js/core/offline-sync.js', 'js/core/offline-shifts.js', 'js/core/offline-auth.js',
   'js/core/offline-sale.js', 'js/core/wholesale.js', 'js/core/password-toggle.js', 'js/core/offline-ui.js', 'js/core/offline-settings.js',
   'js/core/permissions.js', 'js/core/ui.js', 'js/core/ui-polish.js', 'js/core/notification-types.js', 'js/core/notifications.js',
-  'js/core/app-shell.js', 'js/core/business-types.js', 'js/core/business-setup.js', 'js/core/barcode.js', 'css/onboarding.css', 'css/shelf-labels.css', 'js/pages/onboarding.js', 'js/pages/shelf-labels.js', 'js/core/module-kit.js', 'js/core/job-workflow.js', 'js/pages/batches.js', 'js/pages/stocktakes.js', 'js/pages/serials.js', 'js/pages/warranty.js', 'js/pages/repairs.js', 'js/pages/vehicles.js', 'js/pages/job-cards.js', 'js/core/sidebar-rail.js', 'js/core/charts.js', 'js/core/report-tools.js', 'js/core/product-picker.js',
+  'js/core/app-shell.js', 'js/core/business-types.js', 'js/core/business-setup.js', 'js/core/barcode.js', 'js/core/barcode-labels.js', 'css/barcode-labels.css', 'css/onboarding.css', 'css/shelf-labels.css', 'js/pages/onboarding.js', 'js/pages/shelf-labels.js', 'js/core/module-kit.js', 'js/core/job-workflow.js', 'js/pages/batches.js', 'js/pages/stocktakes.js', 'js/pages/serials.js', 'js/pages/warranty.js', 'js/pages/repairs.js', 'js/pages/vehicles.js', 'js/pages/job-cards.js', 'js/core/sidebar-rail.js', 'js/core/charts.js', 'js/core/report-tools.js', 'js/core/product-picker.js',
   'js/core/customer-picker.js', 'js/core/receipt-view.js', 'js/core/barcode-scanner.js', 'js/core/cash-count.js',
   'js/core/cash-drawer.js', 'js/core/tour.js', 'js/core/announcements.js', 'js/core/billing-banner.js', 'js/core/pwa.js',
 

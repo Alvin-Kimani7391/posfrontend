@@ -45,6 +45,14 @@
       localStorage.setItem(KEYS.OFFLINE_SESSION, JSON.stringify(session));
     },
 
+    // Small per-device preferences (e.g. barcode sticker paper size). Survive sign-out on purpose.
+    getPref(key, fallback = null) {
+      try { const raw = localStorage.getItem('pos.pref.' + key); return raw == null ? fallback : JSON.parse(raw); } catch { return fallback; }
+    },
+    setPref(key, value) {
+      try { localStorage.setItem('pos.pref.' + key, JSON.stringify(value)); } catch { /* storage full/blocked: ignore */ }
+    },
+
     clearSession() {
       Object.values(KEYS).forEach((k) => localStorage.removeItem(k));
     },

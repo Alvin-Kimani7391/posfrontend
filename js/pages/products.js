@@ -17,6 +17,8 @@
  */
 (function () {
   const state = { page: 1, limit: 10, search: '', categoryId: '', status: '' };
+  const selected = new Map(); // product id -> name, kept across pages for "print selected stickers"
+  let usedBarcodes = null;    // Set of every barcode already in the catalog (lazy, for auto-generation)
   let contentEl;
   let categoriesCache = null;
 
@@ -44,6 +46,9 @@
           <button class="btn btn-secondary" id="manage-categories-btn" data-requires-permission="categories.view">
             ${window.Icons.get('box')} Categories
           </button>
+          <button class="btn btn-secondary" id="barcode-stickers-btn" data-requires-permission="products.view" title="Print barcode stickers on the receipt printer">
+            ${window.Icons.get('printer')} Barcode stickers
+          </button>
           <a class="btn btn-secondary" id="shelf-labels-link" href="shelf-labels.html" data-requires-permission="products.view">
             ${window.Icons.get('printer')} Shelf labels
           </a>
@@ -63,10 +68,16 @@
             <option value="">All categories</option>
           </select>
         </div>
+        <div class="bl-sel-bar" id="bl-sel-bar" hidden>
+          <span id="bl-sel-count"></span>
+          <button class="btn btn-primary btn-sm" id="bl-print-selected">${window.Icons.get('printer')} Print stickers for selected</button>
+          <button class="btn btn-ghost btn-sm" id="bl-clear-selected">Clear</button>
+        </div>
         <div class="table-wrap">
           <table class="table">
             <thead>
               <tr>
+                <th class="bl-sel-col"><input type="checkbox" id="bl-page-all" title="Select all on this page" /></th>
                 <th>Product</th>
                 <th>SKU / Barcode</th>
                 <th>Category</th>
@@ -75,7 +86,7 @@
                 <th></th>
               </tr>
             </thead>
-            <tbody id="products-tbody">${window.UI.skeletonRows(6, 4)}</tbody>
+            <tbody id="products-tbody">${window.UI.skeletonRows(7, 4)}</tbody>
           </table>
         </div>
         <div class="pagination" id="pagination"></div>
@@ -143,7 +154,64 @@
       categoriesCache.map((c) => `<option value="${c._id}" ${c._id === selectedId ? 'selected' : ''}>${window.UI.escapeHtml(c.name)}</option>`).join('');
   }
 
+  function updateSelectionBar(pageItems) {
+    const bar = document.getElementById('bl-sel-bar');
+    if (!bar) return;
+    bar.hidden = selected.size === 0;
+    document.getElementById('bl-sel-count').textContent = `${selected.size} product${selected.size === 1 ? '' : 's'} selected`;
+    const all = document.getElementById('bl-page-all');
+    if (all && pageItems) all.checked = pageItems.length > 0 && pageItems.every((p) => selected.has(p._id));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Barcode generation (products that have no barcode get a store EAN-13)
+   * ------------------------------------------------------------------ */
+  async function getUsedBarcodes(force = false) {
+    if (usedBarcodes && !force) return usedBarcodes;
+    try { usedBarcodes = (await window.BarcodeLabels.loadCatalog()).used; }
+    catch { usedBarcodes = new Set(); }
+    return usedBarcodes;
+  }
+
+  /** Puts a freshly generated barcode into a form field. */
+  async function fillGeneratedBarcode(input) {
+    const used = await getUsedBarcodes();
+    // anything typed in the other barcode boxes of the open form counts as used too
+    document.querySelectorAll('#product-form input[name^="v-barcode-"], #product-form input[name="barcode"], #add-variant-form input[name="barcode"]')
+      .forEach((el) => { if (el !== input && el.value.trim()) used.add(el.value.trim()); });
+    input.value = window.BarcodeLabels.generateCode(used);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function generateButtonHtml(id) {
+    return `<button type="button" class="btn btn-secondary" id="${id}" title="Generate a barcode for this product">Generate</button>`;
+  }
+  function bindGenerateButton(button, input) {
+    if (!button || !input) return;
+    button.addEventListener('click', () => fillGeneratedBarcode(input));
+  }
+
   function bindToolbar() {
+    document.getElementById('barcode-stickers-btn').addEventListener('click', () => {
+      window.BarcodeLabels.openPrintDialog({ selectedIds: [] }); // everything ticked: untick what you do not need
+    });
+    document.getElementById('bl-print-selected').addEventListener('click', () => {
+      window.BarcodeLabels.openPrintDialog({ selectedIds: Array.from(selected.keys()) });
+    });
+    document.getElementById('bl-clear-selected').addEventListener('click', () => {
+      selected.clear();
+      document.querySelectorAll('#products-tbody [data-select]').forEach((cb) => { cb.checked = false; });
+      updateSelectionBar([]);
+    });
+    document.getElementById('bl-page-all').addEventListener('change', (e) => {
+      document.querySelectorAll('#products-tbody [data-select]').forEach((cb) => {
+        cb.checked = e.target.checked;
+        const name = cb.closest('tr').querySelector('.cell-primary')?.textContent || '';
+        if (e.target.checked) selected.set(cb.dataset.select, name); else selected.delete(cb.dataset.select);
+      });
+      updateSelectionBar();
+    });
+
     document.getElementById('add-product-btn').addEventListener('click', () => openProductModal());
     window.AppShell.runUrlAction?.('add-product-btn'); // opened from the setup guide
     document.getElementById('manage-categories-btn').addEventListener('click', openCategoriesModal);
@@ -166,7 +234,7 @@
    * ------------------------------------------------------------------ */
   async function fetchAndRender() {
     const tbody = document.getElementById('products-tbody');
-    tbody.innerHTML = window.UI.skeletonRows(6, 4);
+    tbody.innerHTML = window.UI.skeletonRows(7, 4);
 
     try {
       const { data } = await window.Api.get('/products', {
@@ -176,7 +244,7 @@
       window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; fetchAndRender(); });
       window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="6">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
     }
   }
 
@@ -184,7 +252,7 @@
     const tbody = document.getElementById('products-tbody');
 
     if (!items.length) {
-      tbody.innerHTML = `<tr><td colspan="6">${window.UI.emptyStateHtml({
+      tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({
         icon: 'products',
         title: state.search || state.categoryId ? 'No products match your filters' : 'No products yet',
         message: state.search || state.categoryId ? '' : 'Add your first product to start building your catalog.',
@@ -196,13 +264,14 @@
       const discount = Number(p.defaultDiscount) || 0;
       return `
       <tr data-id="${p._id}">
+        <td class="bl-sel-col"><input type="checkbox" data-select="${p._id}" ${selected.has(p._id) ? 'checked' : ''} /></td>
         <td>
           <div class="cell-primary">${window.UI.escapeHtml(p.name)}</div>
           ${p.hasVariants ? `<div class="text-xs text-muted">${p.variants.length} variant${p.variants.length === 1 ? '' : 's'}</div>` : ''}
         </td>
         <td>
           <div class="text-sm">${window.UI.escapeHtml(p.sku)}</div>
-          ${p.barcode ? `<div class="text-xs text-muted">${window.UI.escapeHtml(p.barcode)}</div>` : ''}
+          ${p.barcode ? `<div class="text-xs text-muted">${window.UI.escapeHtml(p.barcode)}</div>` : (p.hasVariants ? '' : '<div class="text-xs"><span class="badge badge-warning">No barcode</span></div>')}
         </td>
         <td class="text-sm">${p.categoryId ? window.UI.escapeHtml(p.categoryId.name) : '<span class="text-muted">Uncategorized</span>'}</td>
         <td>
@@ -213,12 +282,25 @@
         <td><span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-neutral'}">${p.status}</span></td>
         <td class="actions">
           ${p.hasVariants ? `<button class="btn btn-ghost btn-sm btn-icon" data-action="variants" data-requires-permission="products.update" title="Manage variants">${window.Icons.get('box')}</button>` : ''}
+          <button class="btn btn-ghost btn-sm btn-icon" data-action="sticker" data-requires-permission="products.view" title="Print barcode sticker">${window.Icons.get('printer')}</button>
           <button class="btn btn-ghost btn-sm btn-icon" data-action="edit" data-requires-permission="products.update" title="Edit">${window.Icons.get('edit')}</button>
           <button class="btn btn-ghost btn-sm btn-icon" data-action="archive" data-requires-permission="products.delete" title="Archive">${window.Icons.get('trash')}</button>
         </td>
       </tr>
     `;
     }).join('');
+
+    tbody.querySelectorAll('[data-select]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const prod = items.find((p) => p._id === cb.dataset.select);
+        if (cb.checked) selected.set(cb.dataset.select, prod ? prod.name : ''); else selected.delete(cb.dataset.select);
+        updateSelectionBar(items);
+      });
+    });
+    tbody.querySelectorAll('[data-action="sticker"]').forEach((btn) => {
+      btn.addEventListener('click', () => window.BarcodeLabels.openPrintDialog({ selectedIds: [btn.closest('tr').dataset.id] }));
+    });
+    updateSelectionBar(items);
 
     tbody.querySelectorAll('[data-action="edit"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -381,8 +463,9 @@
           <div class="field" style="margin-bottom: var(--space-2)">
             <label>Barcode <span class="text-muted">(optional)</span></label>
             <div class="input-button-row">
-              <input class="input" name="v-barcode-${idx}" placeholder="Scan or type" />
+              <input class="input" name="v-barcode-${idx}" placeholder="Scan, type or Generate" />
               ${scanButtonHtml(`v-barcode-scan-${idx}`)}
+              ${generateButtonHtml(`v-barcode-gen-${idx}`)}
             </div>
           </div>
         </div>
@@ -436,11 +519,18 @@
           <div class="field">
             <label for="p-barcode">Barcode <span class="text-muted">(optional)</span></label>
             <div class="input-button-row">
-              <input class="input" id="p-barcode" name="barcode" value="${isEdit ? window.UI.escapeHtml(product.barcode || '') : ''}" placeholder="Scan or type a barcode" />
+              <input class="input" id="p-barcode" name="barcode" value="${isEdit ? window.UI.escapeHtml(product.barcode || '') : ''}" placeholder="Scan, type or Generate" />
               ${scanButtonHtml('p-barcode-scan-btn')}
+              ${generateButtonHtml('p-barcode-gen-btn')}
             </div>
+            <span class="field-hint">No barcode on the product? Leave empty or press Generate - the system creates a scannable one.</span>
           </div>
         </div>
+        ${!isEdit ? `
+        <div class="field bl-print-opt">
+          <label class="checkbox-row"><input type="checkbox" id="p-print-sticker" ${window.Storage.getPref('printStickerOnAdd', true) ? 'checked' : ''} /> <span class="text-sm">Print barcode sticker after saving</span></label>
+          <label class="text-sm">Stickers <input class="input" id="p-print-copies" type="number" min="1" max="500" value="1" /></label>
+        </div>` : ''}
         <div class="form-row">
           <div class="field">
             <label for="p-category">Category</label>
@@ -541,6 +631,7 @@
     modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
 
     bindBarcodeScanButton(modal.querySelector('#p-barcode-scan-btn'), modal.querySelector('#p-barcode'));
+    bindGenerateButton(modal.querySelector('#p-barcode-gen-btn'), modal.querySelector('#p-barcode'));
 
     const wsToggle = modal.querySelector('#p-wholesale-on');
     if (wsToggle) {
@@ -561,6 +652,7 @@
           e.target.closest('.variant-row').remove();
         });
         bindBarcodeScanButton(row.querySelector(`#v-barcode-scan-${idx}`), row.querySelector(`[name="v-barcode-${idx}"]`));
+        bindGenerateButton(row.querySelector(`#v-barcode-gen-${idx}`), row.querySelector(`[name="v-barcode-${idx}"]`));
       });
     }
 
@@ -633,12 +725,41 @@
       window.UI.setButtonLoading(btn, true, 'Saving…');
 
       try {
+        // New product with no barcode: the system creates one (also for variants without a barcode).
+        const generated = { main: false, variants: new Set() };
+        if (!isEdit) {
+          const used = await getUsedBarcodes();
+          (payload.variants || []).forEach((v) => { if (v.barcode) used.add(String(v.barcode).trim()); });
+          if (payload.barcode) used.add(String(payload.barcode).trim());
+          if (payload.variants) {
+            payload.variants.forEach((v, i) => { if (!v.barcode) { v.barcode = window.BarcodeLabels.generateCode(used); generated.variants.add(i); } });
+            if (!payload.barcode) delete payload.barcode;
+          } else if (!payload.barcode) {
+            payload.barcode = window.BarcodeLabels.generateCode(used);
+            generated.main = true;
+          }
+        }
         if (isEdit) {
           await window.Api.put(`/products/${product._id}`, payload);
           window.UI.toast.success('Product updated');
         } else {
-          await window.Api.post('/products', payload);
+          await createProductWithRetry(payload, generated);
           window.UI.toast.success('Product added');
+          const printBox = modal.querySelector('#p-print-sticker');
+          window.Storage.setPref('printStickerOnAdd', !!(printBox && printBox.checked));
+          if (printBox && printBox.checked) {
+            const copies = Math.min(500, Math.max(1, parseInt(modal.querySelector('#p-print-copies').value, 10) || 1));
+            const stickerItems = payload.variants
+              ? payload.variants.map((v) => {
+                  const attrs = Object.values(v.attributes || {}).join(' / ');
+                  return { name: attrs ? `${payload.name} (${attrs})` : payload.name, barcode: v.barcode, price: Number(v.sellingPrice) || 0, copies };
+                })
+              : [{ name: payload.name, barcode: payload.barcode, price: Number(payload.sellingPrice) || 0, copies }];
+            window.UI.closeModal();
+            fetchAndRender();
+            window.BarcodeLabels.printItems(stickerItems);
+            return;
+          }
         }
         window.UI.closeModal();
         fetchAndRender();
@@ -652,6 +773,21 @@
         window.UI.setButtonLoading(btn, false);
       }
     });
+  }
+
+  /** Create a product; if a generated barcode was taken meanwhile (another till), generate a new one and retry. */
+  async function createProductWithRetry(payload, generated) {
+    for (let attempt = 0; ; attempt++) {
+      try { return await window.Api.post('/products', payload); }
+      catch (err) {
+        const taken = /barcode/i.test(err.message || '') && /(exist|duplicate|already|taken|unique)/i.test(err.message || '');
+        const anyGenerated = generated && (generated.main || generated.variants.size);
+        if (!taken || attempt >= 2 || !anyGenerated) throw err;
+        const used = await getUsedBarcodes(true);
+        if (payload.variants) payload.variants.forEach((v, i) => { if (generated.variants.has(i)) v.barcode = window.BarcodeLabels.generateCode(used); });
+        else if (generated.main) payload.barcode = window.BarcodeLabels.generateCode(used);
+      }
+    }
   }
 
   /* ------------------------------------------------------------------ *
@@ -705,8 +841,9 @@
           <div class="field">
             <label>Barcode <span class="text-muted">(optional)</span></label>
             <div class="input-button-row">
-              <input class="input" name="barcode" placeholder="Scan or type" />
+              <input class="input" name="barcode" placeholder="Scan, type or Generate" />
               ${scanButtonHtml('add-variant-barcode-scan-btn')}
+              ${generateButtonHtml('add-variant-barcode-gen-btn')}
             </div>
           </div>
           <div class="field"><label>Selling price (KES)</label><input class="input" name="sellingPrice" type="number" step="0.01" min="0" required /></div>
@@ -717,6 +854,7 @@
     `;
 
     bindBarcodeScanButton(listEl.querySelector('#add-variant-barcode-scan-btn'), listEl.querySelector('#add-variant-form [name="barcode"]'));
+    bindGenerateButton(listEl.querySelector('#add-variant-barcode-gen-btn'), listEl.querySelector('#add-variant-form [name="barcode"]'));
 
     listEl.querySelectorAll('[data-action="save-variant"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -754,6 +892,7 @@
       const form = e.target;
       const raw = window.UI.serializeForm(form);
       try {
+        if (!raw.barcode) raw.barcode = window.BarcodeLabels.generateCode(await getUsedBarcodes()); // no barcode typed: create one
         await window.Api.post(`/products/${product._id}/variants`, {
           sku: raw.sku,
           barcode: raw.barcode || undefined,

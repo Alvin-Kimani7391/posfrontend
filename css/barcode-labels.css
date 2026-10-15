@@ -1,0 +1,55 @@
+/* barcode-labels.css - barcode STICKERS for the receipt roll printer + the print dialog on the Products page */
+
+#bl-print-area { display: none; }
+
+/* ---- dialog (screen) ---- */
+.bl-dlg-top { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.bl-dlg-top #bl-search { flex: 1 1 200px; min-width: 0; }
+.bl-dlg-inline { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); }
+.bl-dlg-opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); margin-top: var(--space-2); }
+.bl-dlg-opts label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); }
+.bl-dlg-checks { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin-top: var(--space-3); }
+@media (max-width: 640px) {
+  .bl-dlg-opts { grid-template-columns: 1fr; }
+  .bl-dlg-top > .btn, .bl-dlg-inline { flex: 1 1 auto; }
+}
+
+/* products page: selection checkbox column + toolbar */
+.bl-sel-col { width: 36px; }
+.bl-sel-bar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border); background: var(--color-bg); font-size: var(--text-sm); }
+.bl-sel-bar[hidden] { display: none; }
+.bl-print-opt { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; padding: var(--space-3); border: 1px dashed var(--color-border); border-radius: var(--radius-md); }
+.bl-print-opt .input { width: 80px; }
+
+/* ---- print ---- */
+@media print {
+  body[data-print-mode="barcode-stickers"] .app-shell,
+  body[data-print-mode="barcode-stickers"] .toast-container,
+  body[data-print-mode="barcode-stickers"] .modal-backdrop { display: none !important; }
+  body[data-print-mode="barcode-stickers"] { background: #fff !important; margin: 0 !important; }
+  body[data-print-mode="barcode-stickers"] #bl-print-area { display: block; color: #000; font-family: Arial, Helvetica, sans-serif; }
+
+  .bl-sheet { display: grid; grid-template-columns: repeat(var(--bl-cols), var(--bl-w)); margin: 0 auto; }
+  .bl-sticker {
+    box-sizing: border-box; width: var(--bl-w); height: var(--bl-h);
+    padding: 1mm 1.2mm; display: flex; flex-direction: column; justify-content: space-between; align-items: stretch;
+    overflow: hidden; break-inside: avoid; page-break-inside: avoid; text-align: center;
+  }
+  .bl-guides .bl-sticker { border-right: 0.25mm dashed #666; border-bottom: 0.25mm dashed #666; }
+  .bl-guides.bl-c1 .bl-sticker { border-right: 0; }
+  .bl-guides.bl-c2 .bl-sticker:nth-child(2n) { border-right: 0; }
+  .bl-guides.bl-c3 .bl-sticker:nth-child(3n) { border-right: 0; }
+
+  .bl-shop { font-size: 5.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bl-name { font-size: 7pt; font-weight: 700; line-height: 1.1; max-height: 2.2em; overflow: hidden; }
+  .bl-bc { flex: 1 1 auto; min-height: 7mm; margin: 0.6mm 0; }
+  .bl-bc svg { width: 100%; height: 100%; display: block; }
+  .bl-code { font-size: 6.5pt; letter-spacing: 1px; line-height: 1; font-family: "Courier New", monospace; }
+  .bl-price { font-size: 9pt; font-weight: 800; line-height: 1.1; margin-top: 0.4mm; }
+
+  .bl-c1 .bl-name { font-size: 8pt; }
+  .bl-c1 .bl-price { font-size: 11pt; }
+  .bl-c3 .bl-name { font-size: 6pt; }
+  .bl-c3 .bl-code { font-size: 5.5pt; letter-spacing: .5px; }
+  .bl-c3 .bl-price { font-size: 8pt; }
+}
