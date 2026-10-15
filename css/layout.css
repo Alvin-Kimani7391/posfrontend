@@ -323,3 +323,38 @@
 @media (max-width: 959px) {
   .app-shell { display: block; }
 }
+/* Setup guide badge + return bar (used on every page) */
+.nav-badge { margin-left: auto; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--color-primary); color: #fff; }
+.setup-return-bar { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); margin-bottom: var(--space-4); background: var(--color-primary-bg, #ecfdf5); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--text-sm); }
+.setup-return-bar svg { width: 16px; height: 16px; vertical-align: -3px; }
+
+
+/* Business-type picker (used from any page via the pop-up / Settings) */
+/* Business-type picker, setup guide, shelf labels bar, sidebar badge */
+.bt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--space-3); }
+.bt-card { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: var(--space-4); background: var(--color-surface); border: 2px solid var(--color-border); border-radius: var(--radius-lg); cursor: pointer; font: inherit; color: inherit; transition: border-color .15s, box-shadow .15s; }
+.bt-card:hover { border-color: var(--color-primary); }
+.bt-card.selected { border-color: var(--color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent); }
+.bt-card-icon svg { width: 26px; height: 26px; color: var(--color-primary); }
+.bt-card-title { font-weight: 600; }
+.bt-card-blurb { font-size: var(--text-sm); color: var(--color-text-secondary); }
+.bt-card-inc { font-size: var(--text-xs); color: var(--color-text-muted); margin-top: auto; }
+.bt-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-top: var(--space-5); }
+.bt-custom-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+.bt-group { margin-bottom: var(--space-4); }
+.bt-group-title { font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--color-text-muted); margin-bottom: var(--space-2); }
+.bt-feature { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); margin-bottom: 6px; cursor: pointer; }
+.bt-feature.locked { opacity: .75; cursor: not-allowed; }
+.bt-feature input { margin-top: 4px; width: 18px; height: 18px; flex: none; }
+.bt-feature-name { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-weight: 600; font-size: var(--text-sm); }
+.bt-feature-desc { display: block; font-size: var(--text-xs); color: var(--color-text-secondary); }
+.bt-existing p { margin-bottom: var(--space-4); }
+.bt-existing-actions { display: flex; flex-direction: column; gap: var(--space-2); }
+
+
+/* Specialised module pages (module-kit.js) */
+.mk-kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-3); margin: 0 0 var(--space-4); }
+.mk-kv dt { font-size: var(--text-xs); color: var(--color-text-muted); }
+.mk-kv dd { margin: 0; font-weight: 600; font-size: var(--text-sm); }
+.mk-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.mk-section { font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--color-text-muted); margin: var(--space-4) 0 var(--space-2); }

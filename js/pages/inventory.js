@@ -72,6 +72,7 @@
   function bindHeaderActions() {
     document.getElementById('adjust-stock-btn').addEventListener('click', openAdjustModal);
     document.getElementById('receive-stock-btn').addEventListener('click', openReceiveModal);
+    window.AppShell.runUrlAction?.('receive-stock-btn'); // opened from the setup guide
     document.getElementById('new-transfer-btn').addEventListener('click', openTransferModal);
   }
 

@@ -51,6 +51,7 @@
 
     body.innerHTML = `
       ${business ? businessCard(business) : ''}
+      ${business ? businessTypeCard(business) : ''}
       ${business ? salesSettingsCard(business) : ''}
 
             ${window.Permissions.can(window.AppShell.getUser(), 'billing.view') ? `
@@ -67,12 +68,38 @@
       ${etimsCard(status)}
     `;
 
-    if (business) { bindBusinessCard(); bindSalesSettingsCard(); }
+    if (business) { bindBusinessCard(); bindSalesSettingsCard(); bindBusinessTypeCard(); }
     bindMpesaStk();
     bindTillCard();
     bindEtims();
     bindMpesaCredTypeToggle();
     window.OfflineSettings?.mount(document.getElementById('settings-body'));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Business type & features (personalises menu and forms)
+   * ------------------------------------------------------------------ */
+  function businessTypeCard(business) {
+    const BT = window.BusinessTypes;
+    if (!BT) return '';
+    const type = business.businessType || 'general_shop';
+    const on = BT.featureKeys().filter((k) => business.featureSettings && business.featureSettings[k] === true).map((k) => BT.FEATURES[k].label);
+    const isOwner = window.AppShell.getUser()?.role === 'OWNER';
+    return `
+      <div class="card" style="margin-bottom: var(--space-6)">
+        <div class="card-header"><div><h2>Business type &amp; features</h2><p class="text-sm text-muted">Your menu and forms show only what fits your business.</p></div>
+          ${isOwner ? '<button class="btn btn-secondary btn-sm" id="change-type-btn">Change type / customise</button>' : ''}</div>
+        <div class="card-body">
+          <div class="font-semibold">${esc(BT.typeInfo(type).label)}</div>
+          <div class="text-sm text-secondary" style="margin-top:6px">${on.length ? on.map((l) => `<span class="badge badge-neutral" style="margin:2px">${esc(l)}</span>`).join(' ') : 'Standard features only'}</div>
+        </div>
+      </div>`;
+  }
+
+  function bindBusinessTypeCard() {
+    document.getElementById('change-type-btn')?.addEventListener('click', () => {
+      window.BusinessSetup.openTypePickerModal({ title: 'Business type & features', onSaved: () => render() });
+    });
   }
 
   /* ------------------------------------------------------------------ *

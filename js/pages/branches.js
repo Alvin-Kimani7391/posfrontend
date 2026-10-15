@@ -62,6 +62,7 @@
 
   function bindToolbar() {
     document.getElementById('add-branch-btn').addEventListener('click', () => openBranchModal());
+    window.AppShell.runUrlAction?.('add-branch-btn'); // opened from the setup guide
     document.getElementById('search-input').addEventListener('input', window.UI.debounce((e) => {
       state.search = e.target.value.trim();
       state.page = 1;

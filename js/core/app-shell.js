@@ -30,9 +30,20 @@
 
   const NAV_ITEMS = [
     { key: 'dashboard',     label: 'Dashboard',          icon: 'dashboard', href: 'dashboard.html' },
+    // Setup guide: owner only (it edits business settings). Always reachable so the owner can resume it any time.
+    { key: 'onboarding',    label: 'Setup guide',        icon: 'rocket',    href: 'onboarding.html',    permission: 'settings.update', ownerOnly: true, badge: 'setup' },
     { key: 'sales',         label: 'Sales',              icon: 'sales',     href: 'sales.html',         permission: 'sales.view' },
     { key: 'products',      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
     { key: 'inventory',     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view' },
+    // Specialised screens: shown only when the business has the matching feature switched on
+    // (feature = ANY of the listed flags) AND the user holds the permission.
+    { key: 'batches',       label: 'Batches & expiry',   icon: 'layers',    href: 'batches.html',       permission: 'batches.view',   feature: ['batchTracking', 'expiryTracking'] },
+    { key: 'stocktakes',    label: 'Stocktake',          icon: 'clipboard', href: 'stocktakes.html',    permission: 'stocktake.view' },
+    { key: 'serials',       label: 'Serial numbers',     icon: 'hash',      href: 'serials.html',       permission: 'serials.view',   feature: ['serialNumberTracking'] },
+    { key: 'warranty',      label: 'Warranty claims',    icon: 'shield',    href: 'warranty.html',      permission: 'warranty.view',  feature: ['warrantyManagement'] },
+    { key: 'repairs',       label: 'Repairs',            icon: 'wrench',    href: 'repairs.html',       permission: 'repairs.view',   feature: ['repairManagement'] },
+    { key: 'vehicles',      label: 'Vehicles',           icon: 'car',       href: 'vehicles.html',      permission: 'vehicles.view',  feature: ['vehicleManagement'] },
+    { key: 'jobcards',      label: 'Job cards',          icon: 'clipboard', href: 'job-cards.html',     permission: 'jobcards.view',  feature: ['jobCards'] },
 
     { key: 'suppliers',     label: 'Suppliers',          icon: 'truck',     href: 'suppliers.html',     permission: 'suppliers.view' },
     { key: 'purchases',     label: 'Purchases',          icon: 'bag',       href: 'purchases.html',     permission: 'purchases.view' },
@@ -232,18 +243,109 @@
     return () => window.removeEventListener('branchesloaded', handler);
   }
 
+  /* ------------------------------------------------------------------ *
+   * BUSINESS PROFILE (type + feature flags) - drives menu personalisation.
+   * Every role may read GET /business/profile (a cashier cannot read /business).
+   * The last answer is cached in localStorage so the menu is right on first paint; a fresh copy is
+   * fetched on every page and, if it differs, the menu is redrawn.
+   * Until a profile has ever loaded (e.g. first offline start) NO specialised item is hidden by
+   * mistake: items without a feature flag always show, feature-gated ones stay hidden.
+   * ------------------------------------------------------------------ */
+  const PROFILE_KEY = 'pos.businessProfile';
+  const SETUP_KEY = 'pos.setupProgress';
+  let profile = readCachedProfile();
+  let profilePromise = null;
+
+  function readCachedProfile() {
+    try {
+      const p = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null');
+      const u = window.Storage.getUser();
+      return p && u && String(p.userId) === String(u._id || u.id) ? p : null;
+    } catch { return null; }
+  }
+
+  function getBusinessProfile() { return profile; }
+  function hasFeature(...keys) {
+    if (!profile || !profile.featureSettings) return false;
+    return keys.some((k) => profile.featureSettings[k] === true);
+  }
+
+  function loadBusinessProfile({ force = false } = {}) {
+    if (profilePromise && !force) return profilePromise;
+    profilePromise = (async () => {
+      try {
+        const { data } = await window.Api.get('/business/profile');
+        const u = window.Storage.getUser();
+        const next = { ...data.profile, userId: u && (u._id || u.id) };
+        const changed = JSON.stringify(profile && { ...profile, fetchedAt: 0 }) !== JSON.stringify({ ...next, fetchedAt: 0 });
+        profile = next;
+        try { localStorage.setItem(PROFILE_KEY, JSON.stringify(next)); } catch { /* storage blocked */ }
+        if (changed) { rebuildSidebarNav(); window.dispatchEvent(new CustomEvent('businessprofilechange', { detail: next })); }
+      } catch { /* offline or no access: keep the cached copy */ }
+      return profile;
+    })();
+    return profilePromise;
+  }
+
+  function whenProfileReady() { return loadBusinessProfile(); }
+
+  /** Re-fetch after the owner changes type/features (settings, picker). */
+  function refreshBusinessProfile() { return loadBusinessProfile({ force: true }); }
+
+  function onProfileChange(cb) {
+    const h = (e) => cb(e.detail);
+    window.addEventListener('businessprofilechange', h);
+    return () => window.removeEventListener('businessprofilechange', h);
+  }
+
+  function itemVisibleForBusiness(item) {
+    if (!item.feature) return true;
+    return hasFeature(...item.feature);
+  }
+
+  function setupBadgeHtml() {
+    try {
+      const p = JSON.parse(localStorage.getItem(SETUP_KEY) || 'null');
+      if (!p || !p.total || p.done >= p.total) return '';
+      return `<span class="nav-badge" title="Setup guide progress">${p.done}/${p.total}</span>`;
+    } catch { return ''; }
+  }
+
+  /** Called by the setup guide / dashboard so the sidebar can show "3/9". */
+  function setSetupProgress(done, total) {
+    try { localStorage.setItem(SETUP_KEY, JSON.stringify({ done, total })); } catch { /* ignore */ }
+    const link = document.querySelector('.sidebar-link[data-nav-key="onboarding"]');
+    if (link) { link.querySelector('.nav-badge')?.remove(); link.insertAdjacentHTML('beforeend', setupBadgeHtml()); }
+  }
+
+  function rebuildSidebarNav() {
+    const nav = document.querySelector('#sidebar .sidebar-nav');
+    if (!nav) return;
+    const active = document.body.dataset.page || '';
+    nav.innerHTML = `<div class="sidebar-section-label">Menu</div>${buildSidebarNav(active)}`;
+    window.Permissions.applyPermissionGates(nav, getUser());
+    nav.querySelectorAll('.sidebar-link').forEach((a) => {
+      if (!a.title) a.title = a.textContent.replace(/\s+/g, ' ').trim();
+      a.addEventListener('click', () => {
+        document.getElementById('sidebar')?.classList.remove('open');
+        document.getElementById('sidebar-overlay')?.classList.remove('visible');
+      });
+    });
+  }
+
   function buildSidebarNav(activePage) {
-    return NAV_ITEMS.map((item) => {
+    return NAV_ITEMS.filter((i) => itemVisibleForBusiness(i) && !(i.ownerOnly && getUser()?.role !== 'OWNER')).map((item) => {
       const gated = item.permission ? `data-requires-permission="${item.permission}"` : '';
       const activeClass = item.key === activePage ? 'active' : '';
       const disabled = item.disabled;
       return `
-        <a class="sidebar-link ${activeClass}" ${gated}
+        <a class="sidebar-link ${activeClass}" ${gated} data-nav-key="${item.key}"
            href="${disabled ? '#' : item.href}"
            title="${disabled ? 'Coming soon' : item.label}"
            ${disabled ? 'style="opacity:.45;pointer-events:none"' : ''}>
           <span class="icon">${window.Icons.get(item.icon)}</span>
           <span>${item.label}</span>
+          ${item.badge === 'setup' ? setupBadgeHtml() : ''}
         </a>`;
     }).join('');
   }
@@ -462,6 +564,62 @@
   }
 
   /**
+   * Pages opened from the Setup guide carry ?action=add (and ?from=onboarding&step=...).
+   * runUrlAction('add-product-btn') clicks that page's own "Add" button once, so the owner lands
+   * straight in the form. It respects permissions (hidden/disabled buttons are never clicked) and
+   * removes the parameter so a refresh does not reopen the form.
+   */
+  function runUrlAction(buttonId) {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get('action') !== 'add') return false;
+      const btn = document.getElementById(buttonId);
+      q.delete('action');
+      const qs = q.toString();
+      window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
+      if (!btn || btn.disabled || btn.classList.contains('hidden')) return false;
+      setTimeout(() => btn.click(), 150);
+      return true;
+    } catch { return false; }
+  }
+
+  /** "Back to setup guide" bar for pages opened from the guide. */
+  function mountSetupReturnBar(contentEl) {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get('from') !== 'onboarding' || !contentEl || document.getElementById('setup-return-bar')) return;
+      const bar = document.createElement('div');
+      bar.id = 'setup-return-bar';
+      bar.className = 'setup-return-bar';
+      bar.innerHTML = `<span>${window.Icons.get('rocket')} You are following the setup guide.</span><a class="btn btn-secondary btn-sm" href="onboarding.html">Back to setup guide</a>`;
+      contentEl.prepend(bar);
+    } catch { /* cosmetic only */ }
+  }
+
+  /** Owner-only business-type pop-up for existing businesses (js/core/business-setup.js). */
+  function loadBusinessSetup(user) {
+    try {
+      if (document.body.dataset.page === 'onboarding') return; // the guide handles this itself
+      if (!window.Permissions.can(user, 'settings.update') || user.role === 'ADMIN') return;
+      const run = () => window.BusinessSetup && window.BusinessSetup.maybePromptExisting();
+      if (window.BusinessSetup) { run(); return; }
+      if (document.getElementById('business-setup-script')) return;
+      const s = document.createElement('script');
+      s.id = 'business-setup-script';
+      s.src = 'js/core/business-setup.js';
+      s.async = true;
+      s.onload = run;
+      s.onerror = () => console.warn('Business setup: js/core/business-setup.js could not be loaded');
+      const t = document.createElement('script');
+      t.src = 'js/core/business-types.js';
+      t.async = false;
+      t.onload = () => document.head.appendChild(s);
+      t.onerror = () => console.warn('Business types: js/core/business-types.js could not be loaded');
+      if (window.BusinessTypes) document.head.appendChild(s); else document.head.appendChild(t);
+    } catch (err) { console.warn('Business setup: not loaded', err); }
+  }
+
+  /**
    * AppShell.mount({ title })
    * Renders the shell into #app-shell, gates nav items by permission, sets the
    * browser tab title ("<page> · Six Star Pos"), and returns the #page-content
@@ -483,15 +641,19 @@
     root.innerHTML = shellTemplate(user, title, activePage);
     bindShellEvents();
     window.Permissions.applyPermissionGates(root, user);
+    loadBusinessProfile();
     loadBranchSwitcher(); // async, fills in the dropdown once branches load - doesn't block the page. getActiveBranchId() itself does NOT depend on this.
     window.NotificationCenter?.mount(document.getElementById('notif-bell-wrap'), user);
     loadTour();
     loadAnnouncements();
     loadBillingBanner();
+    loadBusinessSetup(user);
     if (window.Permissions.can(user, 'sales.view')) {
       loadCashDrawer().then((drawer) => { if (drawer) mountDrawerChip(drawer); });
     }
-    return document.getElementById('page-content');
+    const contentEl = document.getElementById('page-content');
+    mountSetupReturnBar(contentEl);
+    return contentEl;
   }
 
   window.AppShell = {
@@ -504,5 +666,12 @@
     onBranchChange,
     onBranchesLoaded,
     whenCashDrawerReady,
+    getBusinessProfile,
+    hasFeature,
+    whenProfileReady,
+    refreshBusinessProfile,
+    onProfileChange,
+    setSetupProgress,
+    runUrlAction,
   };
 })(window);

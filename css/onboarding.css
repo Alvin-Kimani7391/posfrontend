@@ -1,0 +1,19 @@
+/* Setup guide page + dashboard progress card. Picker (.bt-*) styles live in layout.css so any page can open the picker. */
+.ob-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-4); align-items: center; margin-bottom: var(--space-5); }
+.ob-progress { flex: 1; min-width: 240px; }
+.ob-bar { height: 10px; border-radius: 999px; background: var(--color-border); overflow: hidden; margin-top: 6px; }
+.ob-bar > span { display: block; height: 100%; background: var(--color-primary); transition: width .3s; }
+.ob-steps { display: flex; flex-direction: column; gap: var(--space-3); }
+.ob-step { display: flex; gap: var(--space-4); padding: var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+.ob-step.done { background: color-mix(in srgb, var(--color-success, #16a34a) 6%, var(--color-surface)); }
+.ob-step.locked { opacity: .65; }
+.ob-dot { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: var(--text-sm); border: 2px solid var(--color-border); color: var(--color-text-secondary); }
+.ob-step.done .ob-dot { background: var(--color-success, #16a34a); border-color: var(--color-success, #16a34a); color: #fff; }
+.ob-step.done .ob-dot svg { width: 16px; height: 16px; }
+.ob-body { flex: 1; min-width: 0; }
+.ob-title { font-weight: 600; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ob-desc { font-size: var(--text-sm); color: var(--color-text-secondary); margin: 4px 0 var(--space-3); }
+.ob-note { font-size: var(--text-xs); color: var(--color-text-muted); }
+.ob-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ob-footer { display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: space-between; align-items: center; margin-top: var(--space-5); }
+.ob-card-mini { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }

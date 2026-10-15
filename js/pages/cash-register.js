@@ -41,6 +41,9 @@
     canViewShortages = window.Permissions.can(user, 'shortages.view');
     canClearShortages = window.Permissions.can(user, 'shortages.manage');
     state.tab = canViewShifts ? 'shifts' : 'registers';
+    // Opened from the setup guide (?tab=registers): land on the tab the step is about.
+    const wantedTab = new URLSearchParams(window.location.search).get('tab');
+    if (wantedTab === 'registers' || (wantedTab === 'shifts' && canViewShifts) || (wantedTab === 'shortages' && canViewShortages)) state.tab = wantedTab;
 
     contentEl.innerHTML = `
       <div class="page-header">
@@ -491,6 +494,7 @@
       </div>
     `;
     $('reg-new')?.addEventListener('click', () => openRegisterModal());
+    window.AppShell.runUrlAction?.('reg-new'); // opened from the setup guide
 
     const branchId = window.AppShell.getActiveBranchId();
     const [regRes, shiftRes] = await Promise.allSettled([

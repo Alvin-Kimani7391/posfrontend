@@ -280,6 +280,7 @@
       const branches = await getBranches();
       openEmployeeModal(null, branches);
     });
+    window.AppShell.runUrlAction?.('add-employee-btn'); // opened from the setup guide
     document.getElementById('copy-business-id').addEventListener('click', () => copyText(businessId, 'Business ID copied'));
     document.getElementById('copy-login-link').addEventListener('click', () => copyText(loginLink(), 'Login link copied'));
     document.getElementById('search-input').addEventListener('input', window.UI.debounce((e) => {

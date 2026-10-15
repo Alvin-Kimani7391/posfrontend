@@ -39,6 +39,9 @@
           <button class="btn btn-secondary" id="manage-categories-btn" data-requires-permission="categories.view">
             ${window.Icons.get('box')} Categories
           </button>
+          <a class="btn btn-secondary" id="shelf-labels-link" href="shelf-labels.html" data-requires-permission="products.view">
+            ${window.Icons.get('printer')} Shelf labels
+          </a>
           <button class="btn btn-primary" id="add-product-btn" data-requires-permission="products.create">
             ${window.Icons.get('plus')} Add product
           </button>
@@ -119,6 +122,17 @@
       categoriesCache.map((c) => `<option value="${c._id}">${window.UI.escapeHtml(c.name)}</option>`).join('');
   }
 
+  /**
+   * Personalised tracking options: an option shows only when the business has that feature on
+   * (Settings -> Business type), or when this product already uses it (so nothing is ever lost on edit).
+   */
+  function trackingOption(name, label, feature, checked) {
+    const profile = window.AppShell.getBusinessProfile?.();
+    const known = !!(profile && profile.featureSettings);
+    if (known && !window.AppShell.hasFeature(feature) && !checked) return '';
+    return `<label class="checkbox-row"><input type="checkbox" name="${name}" ${checked ? 'checked' : ''} /> <span class="text-sm">${label}</span></label>`;
+  }
+
   function categoryOptionsHtml(selectedId) {
     return '<option value="">No category</option>' +
       categoriesCache.map((c) => `<option value="${c._id}" ${c._id === selectedId ? 'selected' : ''}>${window.UI.escapeHtml(c.name)}</option>`).join('');
@@ -126,6 +140,7 @@
 
   function bindToolbar() {
     document.getElementById('add-product-btn').addEventListener('click', () => openProductModal());
+    window.AppShell.runUrlAction?.('add-product-btn'); // opened from the setup guide
     document.getElementById('manage-categories-btn').addEventListener('click', openCategoriesModal);
 
     document.getElementById('search-input').addEventListener('input', window.UI.debounce((e) => {
@@ -454,9 +469,9 @@
           <label>Tracking</label>
           <div class="flex gap-4" style="flex-wrap: wrap">
             <label class="checkbox-row"><input type="checkbox" name="trackInventory" ${!isEdit || product.trackInventory ? 'checked' : ''} /> <span class="text-sm">Track inventory</span></label>
-            <label class="checkbox-row"><input type="checkbox" name="trackSerialNumber" ${isEdit && product.trackSerialNumber ? 'checked' : ''} /> <span class="text-sm">Serial numbers</span></label>
-            <label class="checkbox-row"><input type="checkbox" name="trackBatch" ${isEdit && product.trackBatch ? 'checked' : ''} /> <span class="text-sm">Batch tracking</span></label>
-            <label class="checkbox-row"><input type="checkbox" name="trackExpiry" ${isEdit && product.trackExpiry ? 'checked' : ''} /> <span class="text-sm">Expiry dates</span></label>
+            ${trackingOption('trackSerialNumber', 'Serial numbers', 'serialNumberTracking', isEdit && product.trackSerialNumber)}
+            ${trackingOption('trackBatch', 'Batch tracking', 'batchTracking', isEdit && product.trackBatch)}
+            ${trackingOption('trackExpiry', 'Expiry dates', 'expiryTracking', isEdit && product.trackExpiry)}
           </div>
         </div>
 

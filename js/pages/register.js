@@ -74,7 +74,7 @@
         window.Storage.setUser(loginRes.data.user);
 
         window.UI.toast.success(`Welcome, ${registerRes.data.user.name.split(' ')[0]}! Your shop is ready.`);
-        window.location.href = 'dashboard.html';
+        window.location.href = 'onboarding.html?welcome=1'; // new owners start with the setup guide
       } catch (err) {
         if (err.code === 'VALIDATION_ERROR' && err.errors?.length) {
           window.UI.applyFormErrors(form, err.errors);

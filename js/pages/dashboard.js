@@ -459,6 +459,10 @@
    * ------------------------------------------------------------------ */
   async function loadSetupChecklist() {
     if (!window.Permissions.can(user, 'employees.create')) return;
+    // Owners get the full Setup guide progress card; admins keep the small first-run list below.
+    if (user.role === 'OWNER' && window.BusinessSetup) {
+      try { if (await loadSetupGuideCard()) return; } catch { /* fall back to the small list */ }
+    }
     const [b, e] = await Promise.allSettled([
       window.Api.get('/branches', { page: 1, limit: 1 }),
       window.Api.get('/employees', { page: 1, limit: 1 }),
@@ -486,6 +490,27 @@
           </ul>
         </div>
       </div>`;
+  }
+
+  /** Returns true when it handled the slot (card shown, or nothing to show because setup is finished). */
+  async function loadSetupGuideCard() {
+    const p = await window.BusinessSetup.loadProgress();
+    const finished = p.doneCount >= p.total;
+    if (finished || p.state.completedAt) return true;
+    const next = p.steps.find((s) => !(s.done || s.skipped) && !s.locked);
+    const pct = Math.round((p.doneCount / p.total) * 100);
+    document.getElementById('setup-slot').innerHTML = `
+      <div class="card" style="margin-bottom: var(--space-6)">
+        <div class="card-body ob-card-mini">
+          <div style="flex:1;min-width:220px">
+            <div class="font-semibold">Setup guide: ${p.doneCount} of ${p.total} steps done</div>
+            <div class="ob-bar"><span style="width:${pct}%"></span></div>
+            <div class="text-xs text-muted" style="margin-top:4px">${next ? `Next: ${esc(next.title)}` : 'Open the guide to continue'}</div>
+          </div>
+          <a class="btn btn-primary" href="onboarding.html">${p.state.dismissedAt ? 'Resume setup' : 'Continue setup'}</a>
+        </div>
+      </div>`;
+    return true;
   }
 
   /* ------------------------------------------------------------------ *
