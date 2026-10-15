@@ -470,3 +470,80 @@ body.pz-focus-on { overflow: hidden; }
 @media (max-width: 380px) {
   .pz-pay-btn { min-width: 0; padding-left: var(--space-2); padding-right: var(--space-2); }
 }
+
+/* ==========================================================================
+   PHONE FIXES (added): cart rows, totals bar, pay button, offline chip
+   ========================================================================== */
+
+/* Cart row on phones: name + price on top, qty | discount | subtotal underneath */
+@media (max-width: 560px) {
+  .pz-tr {
+    grid-template-columns: auto minmax(52px, 0.7fr) minmax(0, 1.3fr) 34px;
+    grid-template-areas: "name name price x" "qty disc sub sub";
+    padding: 8px var(--space-2);
+    gap: 6px var(--space-2);
+  }
+  .pz-tr .pz-name { font-size: var(--text-sm); }
+  .pz-price { font-size: var(--text-sm); }
+  .pz-sub { font-size: var(--text-base); }
+  .pz-stepper button { width: 32px; }
+  .pz-stepper input { width: 36px; }
+  .pz-tfoot { padding: 6px var(--space-3); }
+  .pz-tfoot-stats { gap: var(--space-3); }
+}
+
+/* Totals bar: total on its own line, full-width pay button under it */
+@media (max-width: 480px) {
+  .pz-cart-foot { flex-wrap: wrap; gap: var(--space-2); }
+  .pz-total { flex: 1 1 100%; flex-direction: row; align-items: center; justify-content: space-between; text-align: right; }
+  .pz-total-label { align-self: auto; flex: 0 0 auto; gap: var(--space-2); }
+  .pz-total-amount { font-size: clamp(1.4rem, 7vw, 1.9rem); overflow-wrap: normal; white-space: nowrap; }
+  .pz-pay-btn { flex: 1 1 100%; min-height: 52px; }
+}
+@media (max-width: 1023px) {
+  .pz-pay-btn { white-space: normal; text-align: center; line-height: 1.15; padding: 6px var(--space-3); }
+}
+
+/* Customer + cart-discount strip: wrap instead of squeezing */
+@media (max-width: 480px) {
+  .pz-sum-body { flex-wrap: wrap; gap: var(--space-2); }
+  .pz-sum-body > .btn { flex: 1 1 100%; }
+  .pz-sum-body > .field { flex: 1 1 100%; }
+}
+
+/* The "Set up offline" / status chip must not sit on top of modals or the pay bar */
+.ofl-chip { z-index: 395 !important; }
+@media (max-width: 959px) {
+  .ofl-chip { padding: 5px 10px !important; font-size: .7rem !important; }
+  .ofl-chip.ofl-ok, .ofl-chip.ofl-info { font-size: 0 !important; gap: 0 !important; padding: 8px !important; }
+  body.pz-focus-on .ofl-chip.ofl-ok, body.pz-focus-on .ofl-chip.ofl-info { display: none !important; }
+  body.pz-focus-on .ofl-chip { bottom: auto !important; top: calc(env(safe-area-inset-top, 0px) + 6px); left: auto !important; right: 8px; }
+}
+
+/* Smallest phones (<= 360px) */
+@media (max-width: 360px) {
+  .pz-tr { grid-template-columns: auto minmax(44px, 0.6fr) minmax(0, 1.4fr) 28px; gap: 6px var(--space-1); padding-left: var(--space-1); padding-right: var(--space-1); }
+  .pz-price { font-size: 12px; }
+  .pz-x { width: 28px; }
+  .pz-total { padding: var(--space-2); }
+  .pz-total-label { flex-direction: column; align-items: flex-start; gap: 0; font-size: var(--text-xs); }
+  .pz-total-amount { font-size: clamp(1.25rem, 7vw, 1.6rem); }
+}
+
+/* Phones turned sideways (short + narrow): ticket on the left, totals on the right,
+   so the cart never collapses to zero height */
+@media (max-width: 1023px) and (max-height: 520px) and (orientation: landscape) {
+  .pz-main { grid-template-columns: minmax(0, 1fr) minmax(260px, 38%); grid-template-rows: minmax(0, 1fr); }
+  .pz-summary { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .pz-sum-body { flex-direction: column; align-items: stretch; flex: 0 0 auto; overflow: visible; padding: var(--space-2) var(--space-3); }
+  .pz-sum-body > .btn, .pz-sum-body > .field { flex: 0 0 auto; width: 100%; }
+  .pz-sum-body .input, .pz-sum-body .btn { height: 38px; min-height: 38px; }
+  .pz-cart-foot { flex-wrap: wrap; padding: var(--space-2) var(--space-3); position: sticky; bottom: 0; }
+  .pz-total { flex: 1 1 100%; flex-direction: column; align-items: flex-end; padding: var(--space-2) var(--space-3); }
+  .pz-total-label { align-self: stretch; flex-direction: row; justify-content: space-between; }
+  .pz-total-amount { font-size: clamp(1.3rem, 4vw, 1.8rem); white-space: nowrap; }
+  .pz-pay-btn { flex: 1 1 100%; min-height: 44px; }
+  .pz-searchbar { padding: var(--space-1) var(--space-2); }
+  .pz-searchwrap .input, .pz-scan-btn { height: 40px; }
+  .pz-topbar { padding-top: 2px; padding-bottom: 2px; }
+}

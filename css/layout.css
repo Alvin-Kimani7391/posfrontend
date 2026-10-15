@@ -422,6 +422,7 @@
   .pagination { padding: var(--space-3) var(--space-4); justify-content: center; }
   .modal-header { padding: var(--space-4); }
   .modal-body { padding: var(--space-4); }
+  .modal-body { overflow-x: auto; }
   .modal-footer { padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom)); flex-wrap: wrap; }
   .modal-footer .btn { flex: 1 1 auto; }
   .table th, .table td { padding: var(--space-3); }
@@ -483,4 +484,14 @@
 @media (max-height: 480px) and (orientation: landscape) {
   .auth-screen { align-items: flex-start; }
   .modal { max-height: 100vh; max-height: 100dvh; }
+}
+
+/* ---- Offline status: topbar button + floating chip (js/core/offline-ui.js) ---- */
+.ofl-chip { z-index: 395 !important; }   /* never above modals / pay bar */
+@media (max-width: 959px) {
+  #ofl-top-btn { font-size: 0 !important; gap: 0 !important; padding: 0 var(--space-2) !important; min-width: 34px; justify-content: center; }
+  #ofl-top-btn i { width: 10px !important; height: 10px !important; }
+  /* the topbar dot already shows the state, so the bottom chip is only kept for problems */
+  .ofl-chip.ofl-ok, .ofl-chip.ofl-info { display: none !important; }
+  .ofl-chip { padding: 5px 10px !important; font-size: .7rem !important; }
 }
