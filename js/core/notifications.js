@@ -14,9 +14,16 @@
  *     the badge immediately - used right after the POS raises a cash-drawer alert.
  *   - Coming back to the tab refreshes straight away instead of waiting for the next poll.
  *   - A critical notification that arrives while the app is open pops up once as a toast.
+ *
+ * SOUND (like WhatsApp Web): a short two-note "pop" plays when a NEW unread notification arrives while the app is open
+ * (never for the first load, once per check however many arrive). It is synthesised with the Web Audio API, so there is
+ * no audio file to load and it also works offline. Browsers only allow sound after the user has touched the page once,
+ * so the audio engine is unlocked by the first tap / key press. The bell menu has a Sound on/off switch (remembered
+ * on this device).
  */
 (function (window) {
-  const POLL_MS = 30000;
+  const POLL_MS = 15000;
+  const SOUND_KEY = 'pos.notifSound';
   let wrapEl = null;
   let pollTimer = null;
   let unreadCount = 0;
@@ -26,6 +33,51 @@
   let inflight = null;
   let firstLoadDone = false;
   const seenIds = new Set();
+
+  /* ---------------------------- notification sound ---------------------------- */
+  let audioCtx = null;
+  function soundOn() {
+    try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; }
+  }
+  function setSound(on) {
+    try { localStorage.setItem(SOUND_KEY, on ? 'on' : 'off'); } catch { /* storage blocked */ }
+  }
+  function getCtx() {
+    if (audioCtx) return audioCtx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try { audioCtx = new AC(); } catch { audioCtx = null; }
+    return audioCtx;
+  }
+  /** Browsers keep audio locked until a user gesture: unlock on the first tap / key press anywhere in the app. */
+  function unlockAudio() {
+    const ctx = getCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx && ctx.state === 'running') {
+      ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => document.removeEventListener(ev, unlockAudio, true));
+    }
+  }
+  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => document.addEventListener(ev, unlockAudio, true));
+
+  /** Two soft rising notes (~0.4 s). Silent (and harmless) if audio is still locked or unsupported. */
+  function playNotificationSound() {
+    if (!soundOn()) return;
+    const ctx = getCtx();
+    if (!ctx || ctx.state !== 'running') return;
+    const t0 = ctx.currentTime;
+    [[880, 0], [1318.5, 0.14]].forEach(([freq, delay]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t0 + delay);
+      gain.gain.exponentialRampToValueAtTime(0.35, t0 + delay + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + delay + 0.26);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0 + delay);
+      osc.stop(t0 + delay + 0.3);
+    });
+  }
 
   async function fetchUnread() {
     if (!enabled) return;
@@ -51,6 +103,7 @@
     const fresh = recent.filter((n) => !seenIds.has(n._id));
     recent.forEach((n) => seenIds.add(n._id));
     if (!firstLoadDone) { firstLoadDone = true; return; }
+    if (fresh.some((n) => !n.readAt)) playNotificationSound(); // any NEW unread notification, once per check
     fresh
       .filter((n) => !n.readAt && (n.severity || window.NotificationTypes.meta(n.type).severity) === 'critical')
       .slice(0, 2)
@@ -106,7 +159,10 @@
     menu.innerHTML = `
       <div class="notif-dropdown-head">
         <span>Notifications</span>
-        ${unreadCount > 0 ? '<button class="btn-link" id="notif-mark-all">Mark all read</button>' : ''}
+        <span>
+          <button class="btn-link" id="notif-sound-toggle" type="button" title="Play a sound when a new notification arrives">Sound: ${soundOn() ? 'on' : 'off'}</button>
+          ${unreadCount > 0 ? '<button class="btn-link" id="notif-mark-all">Mark all read</button>' : ''}
+        </span>
       </div>
       <div class="notif-dropdown-list">
         ${recent.length ? recent.map(itemHtml).join('') : `<div class="notif-empty">You're all caught up.</div>`}
@@ -128,6 +184,14 @@
         openNotification(n);
         fetchUnread();
       });
+    });
+
+    menu.querySelector('#notif-sound-toggle')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const next = !soundOn();
+      setSound(next);
+      e.currentTarget.textContent = `Sound: ${next ? 'on' : 'off'}`;
+      if (next) { unlockAudio(); playNotificationSound(); } // preview
     });
 
     menu.querySelector('#notif-mark-all')?.addEventListener('click', async () => {

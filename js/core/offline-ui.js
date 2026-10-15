@@ -15,6 +15,18 @@
   const onOfflinePage = /offline\.html$/.test(window.location.pathname);
   let chip = null; let lockEl = null;
 
+  /** Show/hide eye on every PIN / password field (set-PIN form, lock screen). password-toggle.js enhances fields added later too. */
+  (function loadPasswordToggle() {
+    if (window.PasswordToggle) { window.PasswordToggle.init(); return; }
+    if (document.getElementById('pw-toggle-script')) return;
+    const s = document.createElement('script');
+    s.id = 'pw-toggle-script';
+    s.src = 'js/core/password-toggle.js';
+    s.async = true;
+    s.onerror = () => console.warn('Password toggle: js/core/password-toggle.js could not be loaded');
+    document.head.appendChild(s);
+  })();
+
   function css() {
     if (document.getElementById('ofl-css')) return;
     const s = document.createElement('style'); s.id = 'ofl-css';
