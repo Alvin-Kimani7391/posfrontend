@@ -466,3 +466,7 @@ body.pz-focus-on { overflow: hidden; }
 .cc-breakdown .num { text-align: right; }
 .cc-breakdown tfoot td { font-weight: var(--font-bold); border-bottom: none; background: var(--color-bg); }
 .cc-breakdown tbody tr:last-child td { border-bottom: 1px solid var(--color-border); }
+/* Very small phones: let the pay button shrink instead of poking past the edge */
+@media (max-width: 380px) {
+  .pz-pay-btn { min-width: 0; padding-left: var(--space-2); padding-right: var(--space-2); }
+}

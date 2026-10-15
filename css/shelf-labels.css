@@ -3,6 +3,24 @@
 .sl-inline { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); }
 .sl-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-top: var(--space-3); }
 #print-area { display: none; }
+
+@media (max-width: 959px) {
+  .sl-controls { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+  .sl-controls .input, .sl-controls .select { min-width: 0; width: 100%; }
+  .sl-controls #sl-search { grid-column: 1 / -1; }
+  .sl-inline { justify-content: space-between; min-height: 44px; }
+  .sl-inline .select, .sl-inline .input { width: auto; flex: 1; }
+  .sl-actions { flex-direction: column; align-items: stretch; }
+  .sl-actions .btn { width: 100%; justify-content: center; }
+  .sl-actions > span[style] { display: none; }
+}
+@media (max-width: 479px) {
+  .sl-controls { grid-template-columns: 1fr; }
+  /* shelf label table: barcode is least useful on a phone, price column stays */
+  #sl-body td:nth-child(3), .table thead th:nth-child(3) { display: none; }
+  .table-wrap > .table { min-width: 0; }
+  #sl-body td:last-child { white-space: normal; }
+}
 .sl-was { text-decoration: line-through; color: var(--text-muted, #888); margin-right: 4px; }
 
 @media print {
