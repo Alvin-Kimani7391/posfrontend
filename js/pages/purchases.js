@@ -360,8 +360,8 @@
         ${attachmentsHtml(purchase.attachments)}
         <div class="table-wrap" style="margin-bottom: var(--space-4)">
           <table class="table">
-            <thead><tr><th>Item</th><th>Qty</th><th>Unit cost</th><th>Real unit cost</th><th>Total</th></tr></thead>
-            <tbody>${purchase.items.map((i) => `<tr><td class="text-sm">${esc(i.nameSnapshot)}</td><td>${i.quantity}</td><td>${window.UI.formatMoney(i.unitCost)}</td><td>${window.UI.formatMoney(i.total / i.quantity)}</td><td>${window.UI.formatMoney(i.total)}</td></tr>`).join('')}</tbody>
+            <thead><tr><th>Item</th><th>Qty</th><th>Unit cost</th><th>Real unit cost</th><th>Total</th>${purchase.items.some((i) => i.receivedLocation) ? '<th>Received into</th>' : ''}</tr></thead>
+            <tbody>${purchase.items.map((i) => `<tr><td class="text-sm">${esc(i.nameSnapshot)}</td><td>${i.quantity}</td><td>${window.UI.formatMoney(i.unitCost)}</td><td>${window.UI.formatMoney(i.total / i.quantity)}</td><td>${window.UI.formatMoney(i.total)}</td>${purchase.items.some((x) => x.receivedLocation) ? `<td>${i.receivedLocation === 'WAREHOUSE' ? '<span class="badge badge-info">Warehouse</span>' : i.receivedLocation ? '<span class="badge badge-neutral">Retail</span>' : '—'}</td>` : ''}</tr>`).join('')}</tbody>
           </table>
         </div>
         <div class="pos-totals-row"><span>Subtotal</span><span>${window.UI.formatMoney(purchase.subtotal)}</span></div>
@@ -381,20 +381,155 @@
     if (gallery) bindCards(gallery, (purchase.attachments || []).map(remoteItem));
 
     modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
-    modal.querySelector('[data-action="receive"]')?.addEventListener('click', async () => {
-      try {
-        await window.Api.post(`/purchases/${purchase._id}/receive`);
-        window.UI.toast.success('Purchase received - inventory updated');
-        window.UI.closeModal();
-        fetchAndRender();
-      } catch (err) {
-        window.UI.toast.error(err.message);
-      }
-    });
+    modal.querySelector('[data-action="receive"]')?.addEventListener('click', () => { window.UI.closeModal(); openReceiveDialog(purchase); });
     modal.querySelector('[data-action="pay"]')?.addEventListener('click', () => {
       window.UI.closeModal();
       openPaymentModal(purchase);
     });
+  }
+
+
+  /* ---------------- receive (where the goods go + batch / serial details) ---------------- */
+
+  const whOn = () => !!(window.AppShell.hasFeature && window.AppShell.hasFeature('multiWarehouse'));
+  const strictBatches = () => !!(window.AppShell.hasFeature && window.AppShell.hasFeature('batchTracking'));
+  const splitList = (txt) => String(txt || '').split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
+  const lineKey = (i) => `${i.productId}|${i.variantId || ''}`;
+
+  async function openReceiveDialog(purchase) {
+    const lines = purchase.items.filter((i) => i.quantity - (i.receivedQuantity || 0) > 0);
+
+    // which lines need batch / serial details? (the purchase lines only carry product ids)
+    const flags = {};
+    await Promise.all([...new Set(lines.map((i) => String(i.productId)))].map(async (pid) => {
+      try { const { data } = await window.Api.get(`/products/${pid}`); flags[pid] = data.product; } catch { flags[pid] = {}; }
+    }));
+    const needsBatch = (i) => !!flags[String(i.productId)]?.trackBatch;
+    const needsExpiry = (i) => !!flags[String(i.productId)]?.trackExpiry;
+    const needsSerial = (i) => !!flags[String(i.productId)]?.trackSerialNumber;
+    const wantsBatchRows = (i) => needsBatch(i) && (strictBatches() || needsExpiry(i));
+    const anyDetail = lines.some((i) => wantsBatchRows(i) || needsSerial(i));
+
+    // nothing to ask: keep the one-click behaviour
+    if (!whOn() && !anyDetail) return submitReceive(purchase, {});
+
+    const qtyOf = (i) => i.quantity - (i.receivedQuantity || 0);
+    const lineHtml = (i, idx) => `
+      <div class="rcv-line" data-idx="${idx}" style="padding:var(--space-3) 0; border-bottom:1px solid var(--color-border)">
+        <div class="flex items-center gap-2" style="flex-wrap:wrap">
+          <span class="text-sm" style="flex:1; min-width:160px"><strong>${esc(i.nameSnapshot)}</strong> <span class="text-muted">× ${qtyOf(i)}</span></span>
+          ${whOn() ? `<select class="select" data-line-loc="${idx}" style="width:auto; height:36px"><option value="">Same as above</option><option value="RETAIL">Retail</option><option value="WAREHOUSE">Warehouse</option></select>` : ''}
+        </div>
+        ${wantsBatchRows(i) ? `
+          <div class="text-xs text-muted" style="margin-top:var(--space-2)">Supplier batch details (quantities must add up to ${qtyOf(i)})</div>
+          <div data-batches="${idx}"></div>
+          <button type="button" class="btn btn-ghost btn-sm" data-add-batch="${idx}">${window.Icons.get('plus')} Add batch</button>` : ''}
+        ${needsSerial(i) ? `
+          <div class="text-xs text-muted" style="margin-top:var(--space-2)">Serial numbers / IMEIs, one per line (${qtyOf(i)} needed)</div>
+          <textarea class="textarea" rows="3" data-serials="${idx}"></textarea>` : ''}
+      </div>`;
+
+    const modal = window.UI.openModal({
+      title: `Receive ${purchase.purchaseNumber}`,
+      maxWidth: '720px',
+      bodyHtml: `
+        ${whOn() ? `<div class="field"><label>Receive goods into</label>
+          <select class="select" id="rcv-location"><option value="RETAIL">Retail (shop floor, ready to sell)</option><option value="WAREHOUSE">Warehouse (wholesale store)</option></select>
+          <span class="field-hint">Warehouse stock cannot be sold at the till until it is moved to retail. You can override this per item below.</span></div>` : ''}
+        <div id="rcv-lines">${lines.map(lineHtml).join('')}</div>`,
+      footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="confirm" id="rcv-confirm">Receive goods</button>`,
+    });
+
+    // batch rows state: idx -> [{ batchNumber, quantity, expiryDate, manufacturingDate }]
+    const batches = {};
+    function renderBatches(idx) {
+      const i = lines[idx];
+      const host = modal.querySelector(`[data-batches="${idx}"]`);
+      if (!host) return;
+      host.innerHTML = batches[idx].map((b, k) => `
+        <div class="flex items-center gap-2" style="margin-top:var(--space-2); flex-wrap:wrap">
+          <input class="input" placeholder="Batch no." value="${esc(b.batchNumber)}" data-b="${idx}:${k}:batchNumber" style="flex:1; min-width:110px; height:36px" />
+          <input class="input" type="number" min="0" step="any" placeholder="Qty" value="${esc(b.quantity)}" data-b="${idx}:${k}:quantity" style="width:80px; height:36px" />
+          ${needsExpiry(i) ? `<input class="input" type="date" title="Expiry date" value="${esc(b.expiryDate)}" data-b="${idx}:${k}:expiryDate" style="width:150px; height:36px" />` : ''}
+          ${batches[idx].length > 1 ? `<button type="button" class="btn btn-ghost btn-sm btn-icon" data-rm-batch="${idx}:${k}">${window.Icons.get('trash')}</button>` : ''}
+        </div>`).join('');
+      host.querySelectorAll('[data-b]').forEach((el) => el.addEventListener('input', () => {
+        const [a, k, f] = el.dataset.b.split(':'); batches[a][Number(k)][f] = el.value;
+      }));
+      host.querySelectorAll('[data-rm-batch]').forEach((el) => el.addEventListener('click', () => {
+        const [a, k] = el.dataset.rmBatch.split(':'); batches[a].splice(Number(k), 1); renderBatches(Number(a));
+      }));
+    }
+    lines.forEach((i, idx) => {
+      if (!wantsBatchRows(i)) return;
+      batches[idx] = [{ batchNumber: '', quantity: qtyOf(i), expiryDate: '', manufacturingDate: '' }];
+      renderBatches(idx);
+    });
+    modal.querySelectorAll('[data-add-batch]').forEach((b) => b.addEventListener('click', () => {
+      const idx = Number(b.dataset.addBatch);
+      batches[idx].push({ batchNumber: '', quantity: '', expiryDate: '', manufacturingDate: '' });
+      renderBatches(idx);
+    }));
+
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
+    modal.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
+      const body = { batches: [], serials: [], lineLocations: [] };
+      if (whOn()) body.location = modal.querySelector('#rcv-location').value;
+
+      for (let idx = 0; idx < lines.length; idx += 1) {
+        const i = lines[idx];
+        const out = qtyOf(i);
+
+        const ov = modal.querySelector(`[data-line-loc="${idx}"]`)?.value;
+        if (ov) body.lineLocations.push({ productId: i.productId, variantId: i.variantId || undefined, location: ov });
+
+        if (batches[idx]) {
+          const rows = batches[idx].filter((b) => String(b.batchNumber).trim() || String(b.expiryDate).trim());
+          if (!rows.length) {
+            if (strictBatches()) return window.UI.toast.error(`${i.nameSnapshot}: enter the supplier batch number${needsExpiry(i) ? ' and expiry date' : ''}`);
+          } else {
+            let sum = 0;
+            for (const b of rows) {
+              if (!String(b.batchNumber).trim()) return window.UI.toast.error(`${i.nameSnapshot}: every batch needs a batch number`);
+              if (needsExpiry(i) && !b.expiryDate) return window.UI.toast.error(`${i.nameSnapshot}: batch ${b.batchNumber} needs an expiry date`);
+              const q = Number(b.quantity);
+              if (!(q > 0)) return window.UI.toast.error(`${i.nameSnapshot}: enter a quantity for batch ${b.batchNumber}`);
+              sum += q;
+              body.batches.push({ productId: i.productId, variantId: i.variantId || undefined, batchNumber: String(b.batchNumber).trim(), quantity: q, expiryDate: b.expiryDate || undefined });
+            }
+            if (Math.round(sum * 1000) !== Math.round(out * 1000)) return window.UI.toast.error(`${i.nameSnapshot}: batch quantities (${sum}) must add up to ${out}`);
+          }
+        }
+
+        if (needsSerial(i)) {
+          const list = splitList(modal.querySelector(`[data-serials="${idx}"]`)?.value);
+          if (list.length !== out) return window.UI.toast.error(`${i.nameSnapshot}: enter ${out} serial number(s) - you entered ${list.length}`);
+          body.serials.push({ productId: i.productId, variantId: i.variantId || undefined, serialNumbers: list });
+        }
+      }
+      if (!body.batches.length) delete body.batches;
+      if (!body.serials.length) delete body.serials;
+      if (!body.lineLocations.length) delete body.lineLocations;
+
+      const btn = modal.querySelector('#rcv-confirm');
+      window.UI.setButtonLoading(btn, true, 'Receiving…');
+      const ok = await submitReceive(purchase, body);
+      if (!ok) window.UI.setButtonLoading(btn, false);
+    });
+  }
+
+  async function submitReceive(purchase, body) {
+    try {
+      await window.Api.post(`/purchases/${purchase._id}/receive`, body);
+      const toWh = body.location === 'WAREHOUSE' || (body.lineLocations || []).some((l) => l.location === 'WAREHOUSE');
+      window.UI.toast.success(toWh ? 'Purchase received - inventory updated (warehouse stock included)' : 'Purchase received - inventory updated');
+      window.UI.closeModal();
+      fetchAndRender();
+      return true;
+    } catch (err) {
+      window.UI.toast.error(err.message);
+      return false;
+    }
   }
 
   function openPaymentModal(purchase) {

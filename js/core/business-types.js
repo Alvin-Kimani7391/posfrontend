@@ -32,7 +32,7 @@
     batchTracking:         { label: 'Batch tracking',           group: 'Stock',      ready: true,  desc: 'Receive stock in batches; quarantine, release or dispose a batch.' },
     productVariants:       { label: 'Product variants',         group: 'Stock',      ready: true,  desc: 'Sell one product in sizes, colours or shades.' },
     unitConversions:       { label: 'Unit conversions',         group: 'Stock',      ready: false, desc: 'Buy in cartons, sell in pieces (and similar).' },
-    multiWarehouse:        { label: 'Multiple warehouses',      group: 'Stock',      ready: false, desc: 'Track stock across several warehouses.' },
+    multiWarehouse:        { label: 'Warehouse & retail stock', group: 'Stock',      ready: true,  desc: 'Keep a wholesale warehouse and the shop floor as separate stock. Receive into either, and move stock between them.' },
     serialNumberTracking:  { label: 'Serial numbers / IMEI',    group: 'After-sales', ready: true, desc: 'Track each unit by serial number or IMEI.' },
     warrantyManagement:    { label: 'Warranty claims',          group: 'After-sales', ready: true, desc: 'Open and decide warranty claims. Needs serial numbers.', requires: ['serialNumberTracking'] },
     repairManagement:      { label: 'Repairs',                  group: 'After-sales', ready: true, desc: 'Take in items for repair and follow the job to collection.' },

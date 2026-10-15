@@ -20,6 +20,8 @@
     show();
   });
 
+  const wh = () => !!(window.AppShell.hasFeature && window.AppShell.hasFeature('multiWarehouse'));
+  const loc = (b) => (b.location === 'WAREHOUSE' ? '<span class="badge badge-info">Warehouse</span>' : '<span class="badge badge-neutral">Retail</span>');
   const name = (b) => K.esc(b.productId?.name || '-');
   const actions = (b) => (K.can('batches.manage') ? [
     b.status === 'active' ? K.btn('quarantine', 'Quarantine') : '',
@@ -33,9 +35,11 @@
       list = K.listPage({
         container: root, endpoint: '/batches', search: true, searchPlaceholder: 'Search batch number',
         query: () => ({ branchId: K.branchId() }),
-        filters: [{ key: 'status', label: 'All statuses', options: ['active', 'quarantined', 'recalled', 'expired', 'depleted'] }],
+        filters: [{ key: 'status', label: 'All statuses', options: ['active', 'quarantined', 'recalled', 'expired', 'depleted'] },
+          ...(wh() ? [{ key: 'location', label: 'Retail + warehouse', options: [['RETAIL', 'Retail only'], ['WAREHOUSE', 'Warehouse only']] }] : [])],
         columns: [
           { label: 'Product', render: name }, { label: 'Batch', render: (b) => K.esc(b.batchNumber) },
+          ...(wh() ? [{ label: 'Where', render: loc }] : []),
           { label: 'Qty left', align: 'right', render: (b) => b.quantity }, { label: 'Expiry', render: (b) => K.date(b.expiryDate) },
           { label: 'Status', render: (b) => K.badge(b.status) },
         ],

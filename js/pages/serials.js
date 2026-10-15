@@ -16,10 +16,13 @@
     list = K.listPage({
       container: document.getElementById('mk-root'), endpoint: '/serials', search: true, searchPlaceholder: 'Search serial number',
       query: () => ({ branchId: K.branchId() }),
-      filters: [{ key: 'status', label: 'All statuses', options: ['in_stock', 'sold', 'damaged', 'returned'] }],
+      filters: [{ key: 'status', label: 'All statuses', options: ['in_stock', 'sold', 'damaged', 'returned'] },
+        ...(window.AppShell.hasFeature?.('multiWarehouse') ? [{ key: 'location', label: 'Retail + warehouse', options: [['RETAIL', 'Retail only'], ['WAREHOUSE', 'Warehouse only']] }] : [])],
       columns: [
         { label: 'Serial / IMEI', render: (u) => `<strong>${K.esc(u.serialNumber)}</strong>` }, { label: 'Product', render: (u) => K.esc(u.productId?.name || '-') },
-        { label: 'Status', render: (u) => K.badge(u.status) }, { label: 'Warranty ends', render: (u) => K.date(u.warrantyEnd) },
+        { label: 'Status', render: (u) => K.badge(u.status) },
+        ...(window.AppShell.hasFeature?.('multiWarehouse') ? [{ label: 'Where', render: (u) => (u.location === 'WAREHOUSE' ? '<span class="badge badge-info">Warehouse</span>' : '<span class="badge badge-neutral">Retail</span>') }] : []),
+        { label: 'Warranty ends', render: (u) => K.date(u.warrantyEnd) },
       ],
       rowActions: (u) => K.btn('view', 'Details') + (u.status === 'returned' && K.can('serials.manage') ? ` ${K.btn('inspect', 'Inspect')}` : ''),
       onAction: (a, u, reload) => (a === 'view' ? lookup(u.serialNumber) : inspect(u, reload)),
