@@ -3,6 +3,10 @@
  * Reads GET /products (all active products + variants). Barcode = product barcode, or the SKU when
  * a product has none (flagged in the table so the owner can add real barcodes).
  *
+ * PAPER: "Sheet" prints the cut-apart grid (A4 / normal printer). "Receipt roll" (80 mm or 58 mm) prints ONE landscape
+ * label per row down a continuous strip for a thermal receipt printer: name + price on the left, barcode on the
+ * right, a dashed cut line between labels. The page is sized to the roll width (@page size Nmm auto, no margins).
+ *
  * DISCOUNTS: a product's standing per-unit discount (defaultDiscount, set on the Products page) is
  * shown here as Was / Now / Save. The owner can print ALL products (discounted ones are marked
  * with the struck-through old price) or ONLY the discounted products.
@@ -15,10 +19,15 @@
     medium: { label: 'Medium (63 × 38 mm)', w: 63, h: 38 },
     large:  { label: 'Large (90 × 50 mm)',  w: 90, h: 50 },
   };
+  // Receipt rolls: paper width, printable width, label height (mm).
+  const ROLLS = {
+    roll80: { label: 'Receipt roll 80 mm (long strip)', paper: 80, w: 72, h: 28 },
+    roll58: { label: 'Receipt roll 58 mm (long strip)', paper: 58, w: 48, h: 24 },
+  };
   const esc = (v) => window.UI.escapeHtml(v == null ? '' : v);
 
   let contentEl;
-  const state = { rows: [], selected: new Set(), search: '', categoryId: '', size: 'medium', copies: 1, showSku: true, mode: 'all', categories: [], businessName: '' };
+  const state = { rows: [], selected: new Set(), search: '', categoryId: '', size: 'medium', media: 'sheet', copies: 1, showSku: true, mode: 'all', categories: [], businessName: '' };
 
   async function init() {
     contentEl = window.AppShell.mount({ title: 'Shelf labels' });
@@ -89,7 +98,11 @@
         <div class="sl-controls">
           <input class="input" id="sl-search" placeholder="Search name, SKU or barcode" />
           <select class="select" id="sl-cat"><option value="">All categories</option>${state.categories.map((c) => `<option value="${c._id}">${esc(c.name)}</option>`).join('')}</select>
-          <select class="select" id="sl-size">${Object.entries(SIZES).map(([k, v]) => `<option value="${k}" ${k === state.size ? 'selected' : ''}>${v.label}</option>`).join('')}</select>
+          <select class="select" id="sl-media" title="Paper to print on">
+            <option value="sheet" ${state.media === 'sheet' ? 'selected' : ''}>Sheet / A4 (grid of labels)</option>
+            ${Object.entries(ROLLS).map(([k, v]) => `<option value="${k}" ${k === state.media ? 'selected' : ''}>${v.label}</option>`).join('')}
+          </select>
+          <select class="select" id="sl-size" ${state.media === 'sheet' ? '' : 'disabled'}>${Object.entries(SIZES).map(([k, v]) => `<option value="${k}" ${k === state.size ? 'selected' : ''}>${v.label}</option>`).join('')}</select>
           <label class="sl-inline">Print
             <select class="select" id="sl-mode" style="min-width:0">
               <option value="all" ${state.mode === 'all' ? 'selected' : ''}>All products (discounts marked)</option>
@@ -104,7 +117,7 @@
           <button class="btn btn-secondary" id="sl-print-list">${window.Icons.get('printer')} Print price list (A4)</button>
           <button class="btn btn-primary" id="sl-print-labels">${window.Icons.get('printer')} Print shelf labels</button>
         </div>
-        <div class="text-xs text-muted" style="margin-top:var(--space-2)">Labels print as a grid with dashed cut lines: print, cut along the lines, and stick one on each shelf edge. Discounted products show the old price crossed out, the new price and the amount saved. Products with no barcode use their SKU (marked <span class="badge badge-warning">SKU</span>).</div>
+        <div class="text-xs text-muted" style="margin-top:var(--space-2)">Labels print as a grid with dashed cut lines: print, cut along the lines, and stick one on each shelf edge. For a receipt printer choose <b>Receipt roll</b>: one wide label per row on a long strip (in the print window pick your receipt printer, margins None, scale 100%). Discounted products show the old price crossed out, the new price and the amount saved. Products with no barcode use their SKU (marked <span class="badge badge-warning">SKU</span>).</div>
       </div></div>
       <div class="card"><div class="table-wrap"><table class="table">
         <thead><tr><th style="width:36px"><input type="checkbox" id="sl-all" /></th><th>Product</th><th>Barcode</th><th style="text-align:right">Price</th></tr></thead>
@@ -137,6 +150,10 @@
     document.getElementById('sl-cat').addEventListener('change', (e) => { state.categoryId = e.target.value; renderBody(); });
     document.getElementById('sl-mode').addEventListener('change', (e) => { state.mode = e.target.value; renderBody(); });
     document.getElementById('sl-size').addEventListener('change', (e) => { state.size = e.target.value; });
+    document.getElementById('sl-media').addEventListener('change', (e) => {
+      state.media = e.target.value;
+      document.getElementById('sl-size').disabled = state.media !== 'sheet'; // roll labels have a fixed size
+    });
     document.getElementById('sl-copies').addEventListener('change', (e) => { state.copies = Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 1)); e.target.value = state.copies; });
     document.getElementById('sl-sku').addEventListener('change', (e) => { state.showSku = e.target.checked; });
     document.getElementById('sl-all').addEventListener('change', (e) => { visible().forEach((r) => (e.target.checked ? state.selected.add(r.id) : state.selected.delete(r.id))); renderBody(); });
@@ -148,6 +165,7 @@
   function print(mode) {
     const rows = chosen();
     if (!rows.length) { window.UI.toast.error(state.mode === 'discount' ? 'No discounted products selected' : 'Select at least one product'); return; }
+    let pageStyle = null;
     let area = document.getElementById('print-area');
     if (!area) { area = document.createElement('div'); area.id = 'print-area'; document.body.appendChild(area); }
     const date = new Date().toLocaleDateString();
@@ -159,6 +177,30 @@
         ${rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}${state.showSku && r.sku ? `<div class="pl-sku">${esc(r.sku)}</div>` : ''}</td><td class="pl-bc">${window.Barcode.svg(r.barcode, { height: 34, module: 1.6, quiet: 6 })}<div class="pl-code">${esc(r.barcode)}</div></td><td class="pl-r">${r.hasDiscount ? `<span class="pl-was">${window.UI.formatMoney(r.price)}</span><br>${window.UI.formatMoney(r.now)}<div class="pl-save">SAVE ${window.UI.formatMoney(r.discount)}</div>` : window.UI.formatMoney(r.price)}</td></tr>`).join('')}
         </tbody></table>`;
       document.body.dataset.printMode = 'list';
+    } else if (ROLLS[state.media]) {
+      const roll = ROLLS[state.media];
+      const cells = [];
+      rows.forEach((r) => { for (let i = 0; i < state.copies; i++) cells.push(r); });
+      const narrow = roll.paper <= 58;
+      area.innerHTML = `<div class="rl-roll${narrow ? ' rl-narrow' : ''}" style="--rl-w:${roll.w}mm;--rl-h:${roll.h}mm">
+        ${cells.map((r) => `<div class="rl${r.hasDiscount ? ' rl-disc' : ''}">
+          <div class="rl-info">
+            <div class="rl-name">${esc(r.name)}</div>
+            ${r.hasDiscount
+              ? `<div class="rl-was-row"><span class="rl-was">Was ${window.UI.formatMoney(r.price)}</span><span class="rl-save">SAVE ${window.UI.formatMoney(r.discount)}</span></div><div class="rl-price"><span class="rl-now">NOW</span> ${window.UI.formatMoney(r.now)}</div>`
+              : `<div class="rl-price">${window.UI.formatMoney(r.price)}</div>`}
+          </div>
+          <div class="rl-barcode">
+            <div class="rl-bc">${window.Barcode.svg(r.barcode, { fluid: true, height: 40, module: 2, quiet: 8 })}</div>
+            <div class="rl-code">${esc(r.barcode)}${state.showSku && r.fromSku === false && r.sku ? ` · ${esc(r.sku)}` : ''}</div>
+          </div>
+        </div>`).join('')}</div>`;
+      document.body.dataset.printMode = 'labels';
+      // The roll is as wide as the paper and as long as the labels: size the page to it (no margins).
+      pageStyle = document.createElement('style');
+      pageStyle.id = 'sl-page-style';
+      pageStyle.textContent = `@page { size: ${roll.paper}mm auto; margin: 0; } @media print { body[data-print-mode] { margin: 0 !important; } }`;
+      document.head.appendChild(pageStyle);
     } else {
       const sz = SIZES[state.size];
       const cells = [];
@@ -176,7 +218,7 @@
         </div>`).join('')}</div>`;
       document.body.dataset.printMode = 'labels';
     }
-    const done = () => { window.removeEventListener('afterprint', done); document.body.removeAttribute('data-print-mode'); area.innerHTML = ''; window.BusinessSetup?.markStepDone('labels'); };
+    const done = () => { window.removeEventListener('afterprint', done); document.body.removeAttribute('data-print-mode'); area.innerHTML = ''; if (pageStyle) pageStyle.remove(); window.BusinessSetup?.markStepDone('labels'); };
     window.addEventListener('afterprint', done);
     setTimeout(() => window.print(), 100);
   }
