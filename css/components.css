@@ -1058,3 +1058,13 @@ table.table {
 .drawer-setup-state.ok .drawer-setup-dot { background: var(--color-success); }
 .drawer-setup-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
  
+/* ---- Invoice viewer (invoice-view.js) ---- */
+.inv-bar { display:flex; flex-wrap:wrap; gap:var(--space-3); align-items:center; justify-content:space-between; margin-bottom:var(--space-3); }
+.inv-seg { display:inline-flex; border:1px solid var(--color-border-strong); border-radius:var(--radius-full); overflow:hidden; }
+.inv-seg button { border:0; background:var(--color-surface); padding:8px 16px; font:inherit; font-size:var(--text-sm); font-weight:var(--font-medium); color:var(--color-text-secondary); cursor:pointer; }
+.inv-seg button.on { background:var(--color-primary); color:#fff; }
+.inv-copy { width:auto !important; min-width:160px; }
+.inv-stage { background:#e9ebef; border-radius:var(--radius-md); padding:var(--space-3); min-height:360px; display:flex; justify-content:center; }
+.inv-frame { border:0; background:#fff; box-shadow:var(--shadow-md); width:100%; max-width:794px; height:min(68vh,1000px); border-radius:4px; }
+.inv-frame.a5 { max-width:560px; }
+.inv-loading { align-self:center; text-align:center; color:var(--color-text-secondary); font-size:var(--text-sm); }

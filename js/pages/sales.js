@@ -3,6 +3,17 @@
  *
  * One workspace with two views: "New sale" (the POS) and "Sales history".
  *
+ * HYBRID RETAIL + WHOLESALE (one screen for both)
+ *   Businesses that have warehouses (feature multiWarehouse - on by default for the Wholesale type) get a
+ *   [Retail | Wholesale] switch in the top bar. Every other business sees the plain retail screen and nothing else.
+ *   - RETAIL    : exactly the till below (shop-floor stock, retail prices, offline selling).
+ *   - WHOLESALE : same ticket, same summary, same payment window - but products come from a warehouse
+ *                 (GET /warehouse/catalog), every line has a Unit (piece / bundle / carton) at the wholesale
+ *                 unit price, and the payment window can take a PART payment and put the rest on CREDIT with
+ *                 a due date. All payment methods work (cash, M-PESA STK, M-PESA Till, bank, card, credit).
+ *   Each mode keeps its own cart, so flipping the switch never loses work.
+ *   Deep link: sales.html?mode=wholesale (the old wholesale-sales.html redirects there).
+ *
  * LAYOUT
  *   Top bar  : tabs | shift status (open/close) | cashier + clock | view buttons
  *   Search   : scan / search bar (+ camera scan button + shortcut hints)
@@ -125,12 +136,192 @@
     lastAdded: null, // key of the last product added
     currentShift: null,
     flags: { ...DEFAULT_FLAGS },
-    history: { page: 1, limit: 10, search: '', from: '', to: '' },
+    history: { page: 1, limit: 10, search: '', from: '', to: '', channel: '' },
+    mode: 'RETAIL', // 'RETAIL' | 'WHOLESALE' (wholesale only exists for businesses with warehouses)
+    dueDate: '', // wholesale: when the credit part of an invoice is due (YYYY-MM-DD)
   };
 
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
   const fm = (n) => window.UI.formatMoney(n);
   const $ = (id) => document.getElementById(id);
+
+  /* ================================================================== *
+   * HYBRID: retail + wholesale on one screen
+   * ================================================================== */
+  const MODE_KEY = 'pos.saleMode';
+  const ws = { list: [], whId: '', settings: {}, ready: false, loading: null, error: '' };
+  // The cart / customer / discount of the mode that is NOT on screen is parked here.
+  const parked = {
+    RETAIL: { cart: [], customer: null, cartDiscount: 0, key: null, lastAdded: null },
+    WHOLESALE: { cart: [], customer: null, cartDiscount: 0, key: null, lastAdded: null },
+  };
+  let modeExplicit = false;
+  let rootObserver = null;
+  let lastRootW = 0;
+
+  const WSK = () => window.WS; // wholesale-kit helpers
+  const isWsBiz = () => !!(window.WS && window.AppShell.hasFeature && window.AppShell.hasFeature('multiWarehouse'));
+  const isWs = () => state.mode === 'WHOLESALE' && isWsBiz();
+  const wsWarehouse = () => ws.list.find((w) => String(w._id) === String(ws.whId)) || null;
+  const wsDefaultUnit = (item) => item.units.find((u) => u.isDefault) || item.units.find((u) => u.isBase) || item.units[0];
+  const wsUnitOf = (line) => line.catalog.units.find((u) => String(u.unitId || '') === String(line.unitId || '')) || line.catalog.units[0];
+  const wsSellable = (item) => item.availableQuantity > 0 && !item.trackSerialNumber;
+  const wsAvailText = (item) => item.units.map((u) => `${WSK().num(u.available)} ${u.name}`).slice(0, 3).join(' · ');
+  function wsStockIssue(line) {
+    if (!line.ws) return '';
+    const u = wsUnitOf(line);
+    return Number(line.quantity) > u.available + 1e-9 ? `Only ${WSK().num(u.available)} ${u.name} available` : '';
+  }
+
+  /** Catalog item -> a cart line shaped like a retail line, so the ticket, totals and discount window are shared. */
+  function wsLineFrom(item) {
+    const key = `${item.productId}:${item.variantId || ''}`;
+    return {
+      ws: true, key, catalog: item, productId: item.productId, variantId: item.variantId || undefined,
+      product: { _id: item.productId, name: item.name, sku: item.sku || '', barcode: item.barcode || '', taxRate: 0, defaultDiscount: 0 },
+      variant: null, unitId: wsDefaultUnit(item).unitId || null,
+      quantity: 1, discount: 0, autoDiscount: false, overridePriceEnabled: false, overridePrice: null,
+    };
+  }
+
+  /* Wholesale boot data (warehouses + settings) is cached on this device so the till paints instantly,
+     then refreshed silently. Both requests run in parallel (they used to run one after the other). */
+  const WS_BOOT_KEY = 'pos.wsBoot.v1';
+  function readBootCache() {
+    try { const c = JSON.parse(localStorage.getItem(WS_BOOT_KEY) || 'null'); return c && Array.isArray(c.list) && c.settings ? c : null; } catch { return null; }
+  }
+  function applyBoot(list, settings) {
+    ws.list = list.filter((w) => w.status !== 'inactive' && w.allowSales !== false);
+    ws.settings = settings || {};
+    const active = String(window.AppShell.getActiveBranchId() || '');
+    const inBranch = (w) => String(WSK().branchOf(w) || '') === active;
+    const keep = ws.whId && ws.list.find((w) => w._id === ws.whId);
+    const pick = keep || ws.list.find((w) => w._id === ws.settings.defaultWarehouseId)
+      || ws.list.find((w) => inBranch(w) && w.isDefault) || ws.list.find(inBranch)
+      || ws.list.find((w) => w.isDefault) || ws.list[0];
+    ws.whId = pick ? pick._id : '';
+    if (!state.dueDate) {
+      const days = Number(ws.settings.defaultPaymentTermsDays) || 0;
+      state.dueDate = days ? new Date(Date.now() + days * 86400000).toISOString().slice(0, 10) : '';
+    }
+    ws.ready = true;
+  }
+  async function fetchBoot() {
+    const [list, settings] = await Promise.all([WSK().warehouses(true), WSK().settings()]);
+    try { localStorage.setItem(WS_BOOT_KEY, JSON.stringify({ list, settings, at: Date.now() })); } catch { /* storage full/private */ }
+    return { list, settings };
+  }
+
+  function ensureWsReady() {
+    if (ws.ready) return Promise.resolve(true);
+    if (ws.loading) return ws.loading;
+    const cached = readBootCache();
+    if (cached) {
+      // Instant path: use what we knew last time, refresh behind the scenes.
+      applyBoot(cached.list, cached.settings);
+      fetchBoot().then(({ list, settings }) => {
+        const before = ws.whId;
+        applyBoot(list, settings);
+        if (isWs() && state.view === 'new-sale' && (ws.whId !== before || !ws.list.length)) renderNewSaleView();
+      }).catch(() => { /* cached data keeps working */ });
+      return Promise.resolve(true);
+    }
+    ws.loading = (async () => {
+      try {
+        ws.error = '';
+        const { list, settings } = await fetchBoot();
+        applyBoot(list, settings);
+        return true;
+      } catch (e) {
+        ws.error = (e && e.message) || 'Could not load warehouses';
+        return false;
+      } finally { ws.loading = null; }
+    })();
+    return ws.loading;
+  }
+
+  async function wsSearch(term) {
+    const wh = wsWarehouse();
+    if (!wh) throw new Error('No sellable warehouse. Create one under Warehouses & stock (turn on "Can sell").');
+    const { data } = await window.Api.get('/warehouse/catalog', {
+      warehouseId: ws.whId, branchId: WSK().branchOf(wh) || undefined, search: term, page: 1, limit: 15, inStockOnly: 'false',
+    });
+    return data.items || [];
+  }
+
+  async function addWholesaleByCode(code) {
+    const items = await wsSearch(code);
+    const c = String(code).trim().toLowerCase();
+    const exact = items.find((i) => [i.barcode, i.sku].some((v) => v && String(v).toLowerCase() === c)) || (items.length === 1 ? items[0] : null);
+    if (!exact) { window.UI.toast.error(`No warehouse stock found for "${code}"`); return; }
+    if (!wsSellable(exact)) { window.UI.toast.error(exact.trackSerialNumber ? `${exact.name} is serial-tracked - sell it in retail mode` : `${exact.name} is out of stock in this warehouse`); return; }
+    addWholesale(exact);
+  }
+
+  function parkMode() {
+    parked[state.mode] = { cart: state.cart, customer: state.customer, cartDiscount: state.cartDiscount, key: checkoutKey, lastAdded: state.lastAdded };
+  }
+  function loadMode(m) {
+    const b = parked[m];
+    state.mode = m;
+    state.cart = b.cart; state.customer = b.customer; state.cartDiscount = b.cartDiscount; state.lastAdded = b.lastAdded;
+    checkoutKey = b.key || window.Api.newIdempotencyKey();
+  }
+
+  /** Which sale type to open in: ?mode= link, then the last choice on this device, then wholesale for wholesale businesses. */
+  function chooseInitialMode() {
+    let want = null;
+    try { const q = new URLSearchParams(window.location.search).get('mode'); if (q) want = q.toUpperCase(); } catch { /* ignore */ }
+    if (!want) { try { want = (localStorage.getItem(MODE_KEY) || '').toUpperCase(); } catch { /* ignore */ } }
+    modeExplicit = want === 'RETAIL' || want === 'WHOLESALE';
+    if (!isWsBiz() || isOfflineNow()) { state.mode = 'RETAIL'; return; }
+    state.mode = want === 'RETAIL' ? 'RETAIL' : 'WHOLESALE';
+  }
+
+  /** Mode switch, accent colour and the data attributes the stylesheet keys off. */
+  function refreshModeUi() {
+    const biz = isWsBiz();
+    if (!biz && state.mode === 'WHOLESALE') { parkMode(); loadMode('RETAIL'); }
+    const seg = $('pz-seg');
+    if (seg) {
+      seg.hidden = !biz;
+      seg.dataset.mode = state.mode;
+      seg.querySelectorAll('button').forEach((b) => {
+        const on = b.dataset.mode === state.mode;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', String(on));
+      });
+    }
+    const root = $('pz-root');
+    if (root) {
+      root.dataset.mode = biz && state.mode === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+      root.dataset.view = state.view;
+    }
+    document.body.classList.toggle('pz-mode-wholesale', isWs() && state.view === 'new-sale');
+    fitRoot();
+  }
+
+  async function setMode(next) {
+    if (next === state.mode) return;
+    if (next === 'WHOLESALE' && !isWsBiz()) return;
+    if (state.pendingMpesa) { window.UI.toast.error('An M-PESA payment is waiting to be saved. Finish that sale first.'); return; }
+    if (drawerLocked()) { window.UI.toast.error('Close the cash drawer first'); return; }
+    if (next === 'WHOLESALE' && isOfflineNow()) { window.UI.toast.error('Wholesale selling needs an internet connection. Retail still works offline.'); return; }
+    parkMode();
+    loadMode(next);
+    modeExplicit = true;
+    try { localStorage.setItem(MODE_KEY, next); } catch { /* private mode - fine */ }
+    refreshModeUi();
+    if (state.view !== 'new-sale') return;
+    if (next === 'WHOLESALE' && !ws.ready) { renderNewSaleView(); await ensureWsReady(); if (isWs()) renderNewSaleView(); return; }
+    renderNewSaleView();
+  }
+
+  function onProfileChanged() {
+    refreshModeUi();
+    if (isWsBiz() && !modeExplicit && state.mode === 'RETAIL' && !state.cart.length && !isOfflineNow()) { setMode('WHOLESALE'); return; }
+    if (isWs() && !ws.ready) ensureWsReady().then(() => { if (isWs() && state.view === 'new-sale') renderNewSaleView(); });
+  }
 
   const lookupSearch = (t) => (window.Offline && window.Offline.lookup
     ? window.Offline.lookup.search(t)
@@ -172,17 +363,35 @@
 
     try { state.focus = localStorage.getItem(FOCUS_KEY) !== '0'; } catch { state.focus = true; }
 
+    // Retail or wholesale? Uses the cached business profile, so the till paints without waiting on the network.
+    chooseInitialMode();
     contentEl.innerHTML = pageSkeleton();
     bindTopbar();
+    refreshModeUi();
     applyFocus(state.focus);
     window.addEventListener('resize', fitRoot);
+    window.AppShell.onProfileChange?.(onProfileChanged);
 
-    await Promise.all([loadShift(), renderNewSaleView()]);
+    const applyDefaultMode = () => {
+      // Owner chose "open the sale screen in Retail" (Wholesale settings) and nobody picked a mode here yet.
+      if (ws.ready && !modeExplicit && ws.settings.defaultMode === 'RETAIL' && isWs()) { parkMode(); loadMode('RETAIL'); refreshModeUi(); }
+    };
+    if (isWs()) {
+      const pending = ensureWsReady();
+      if (ws.ready) applyDefaultMode(); // cached: no waiting
+      else pending.then(() => { applyDefaultMode(); if (state.view === 'new-sale') renderNewSaleView(); });
+    }
+    // Paint the till first; the shift / payment flags / cash drawer load in the background.
+    renderNewSaleView();
+    loadShift().catch(() => {});
 
     // The cash drawer module (and any unfinished "close the drawer" lock) is set up
     // after the screen is on, so a slow or missing drawer never delays selling.
-    await initDrawer();
-    window.Offline?.on('mode', () => { loadShift(); if (state.view === 'history') renderHistory(); });
+    initDrawer().catch(() => {});
+    window.Offline?.on('mode', () => {
+      if (isOfflineNow() && isWs()) { setMode('RETAIL'); window.UI.toast.info?.('Offline: switched to retail. Wholesale needs an internet connection.'); }
+      loadShift(); if (state.view === 'history') renderHistory();
+    });
     window.Offline?.on('shift', renderShiftBanner);
 
     // The branch name arrives after the branch list loads (and may never arrive for roles
@@ -208,7 +417,8 @@
       if (drawerKeyHandler) document.removeEventListener('keydown', drawerKeyHandler, true);
       clearInterval(drawerTimer);
       detachHardwareScanner();
-      document.body.classList.remove('pz-focus-on');
+      document.body.classList.remove('pz-focus-on', 'pz-mode-wholesale');
+      rootObserver?.disconnect();
     });
   }
 
@@ -217,11 +427,15 @@
    * ================================================================== */
   function pageSkeleton() {
     return `
-      <div class="pz-root" id="pz-root">
+      <div class="pz-root" id="pz-root" data-mode="${state.mode}" data-view="new-sale">
         <header class="pz-topbar">
           <div class="pz-tabs" role="tablist">
             <button class="pz-tab active" data-view="new-sale" role="tab"><i class="fa-solid fa-cash-register" aria-hidden="true"></i> New sale</button>
             <button class="pz-tab" data-view="history" role="tab" data-requires-permission="sales.view"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Sales history</button>
+          </div>
+          <div class="pz-seg" id="pz-seg" data-mode="${state.mode}" role="tablist" aria-label="Sale type" hidden>
+            <button type="button" data-mode="RETAIL" role="tab"><i class="fa-solid fa-store" aria-hidden="true"></i> Retail</button>
+            <button type="button" data-mode="WHOLESALE" role="tab"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i> Wholesale</button>
           </div>
           <div class="pz-shift" id="shift-banner"></div>
           <div class="pz-top-right">
@@ -258,6 +472,7 @@
         contentEl.querySelectorAll('.pz-tab').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         state.view = btn.dataset.view;
+        refreshModeUi();
         if (state.view === 'new-sale') {
           renderNewSaleView();
         } else {
@@ -267,6 +482,20 @@
       });
     });
     window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+
+    $('pz-seg')?.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+    // Re-measure whenever the workspace itself changes size (sidebar open / collapsed, full view, rotation...).
+    if (typeof ResizeObserver !== 'undefined' && $('pz-root')) {
+      rootObserver?.disconnect();
+      let raf = 0;
+      rootObserver = new ResizeObserver(() => {
+        const w = $('pz-root')?.clientWidth || 0;
+        if (w === lastRootW) return;
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(fitRoot);
+      });
+      rootObserver.observe($('pz-root'));
+    }
 
     $('pz-focus-btn').addEventListener('click', () => applyFocus(!state.focus));
     $('pz-fs-btn').addEventListener('click', toggleBrowserFullscreen);
@@ -320,10 +549,33 @@
     else document.documentElement.requestFullscreen?.().catch(() => window.UI.toast.error('Full screen is not available in this browser'));
   }
 
+  /**
+   * Layout is decided from the width the workspace REALLY has (not the browser window), so an open sidebar,
+   * the collapsed rail, full view and phones all get a layout that fits. See the header of css/pos.css.
+   */
+  function applySizeClasses(root) {
+    const cs = window.getComputedStyle(root);
+    const w = Math.max(0, root.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0));
+    if (!w) return;
+    lastRootW = root.clientWidth;
+    const wsMode = root.dataset.mode === 'WHOLESALE';
+    const bucket = w >= 1280 ? 'xl' : w >= 1040 ? 'lg' : w >= 800 ? 'md' : w >= 560 ? 'sm' : 'xs';
+    const side = w >= 800;
+    const summaryW = bucket === 'xl' ? 380 : bucket === 'lg' ? 340 : 310;
+    const ticketW = side ? w - summaryW - 12 : w;
+    const wide = ticketW >= (wsMode ? 940 : 700);
+    const bc = wide && ticketW >= (wsMode ? 1120 : 900);
+    ['xs', 'sm', 'md', 'lg', 'xl'].forEach((b) => root.classList.toggle(`pz-w-${b}`, b === bucket));
+    root.classList.toggle('pz-side', side);
+    root.classList.toggle('pz-wide', wide);
+    root.classList.toggle('pz-bc', bc);
+  }
+
   /** In full view the CSS pins the workspace; otherwise it is sized to the space under the app bar. */
   function fitRoot() {
     const root = $('pz-root');
     if (!root) return;
+    applySizeClasses(root);
     if (state.focus) { root.style.height = ''; return; }
     const top = root.getBoundingClientRect().top + window.scrollY;
     root.style.height = `${Math.max(window.innerHeight - top - 12, 520)}px`;
@@ -560,8 +812,11 @@
     lastScan = { code, at: now };
 
     try {
-      const data = await lookupBarcode(code);
-      addToCart(data.product, data.variant);
+      if (isWs()) await addWholesaleByCode(code);
+      else {
+        const data = await lookupBarcode(code);
+        addToCart(data.product, data.variant);
+      }
     } catch (err) {
       window.UI.toast.error(err.code === 'BARCODE_NOT_FOUND' ? `No product found for barcode "${code}"` : err.message);
     }
@@ -792,6 +1047,10 @@
   }
   /** Retail / wholesale price info for a cart line (ignores any manual override). */
   function priceInfoOf(item) {
+    if (item.ws) {
+      const p = wsUnitOf(item).wholesalePrice / 100; // the warehouse catalog sends cents
+      return { unit: p, priceType: 'WHOLESALE', retail: p, wholesale: null, moq: null };
+    }
     return window.Wholesale ? window.Wholesale.forItem(state.cart, item) : { unit: item.variant ? item.variant.sellingPrice : item.product.sellingPrice, priceType: 'RETAIL', retail: item.variant ? item.variant.sellingPrice : item.product.sellingPrice, wholesale: null, moq: null };
   }
   function unitPriceOf(item) {
@@ -833,19 +1092,44 @@
     return wp === null ? '' : `<small>${fm(wp)} from ${r.product.moq}</small>`;
   }
 
+  function renderWsUnavailable(body) {
+    const loading = !!ws.loading;
+    body.innerHTML = `
+      <div class="card">
+        <div class="pz-empty">
+          <i class="fa-solid ${loading ? 'fa-spinner fa-spin' : 'fa-warehouse'}" aria-hidden="true"></i>
+          <strong>${loading ? 'Loading warehouses…' : 'Wholesale is not ready'}</strong>
+          ${esc(loading ? 'One moment.' : (ws.error || 'Turn on "Warehouse & retail stock" in Settings > Business type & features.'))}
+          ${loading ? '' : `<div style="margin-top:var(--space-4);display:flex;gap:var(--space-2);justify-content:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="ws-retry">Try again</button>
+            <button class="btn btn-secondary" id="ws-to-retail">Switch to retail</button></div>`}
+        </div>
+      </div>`;
+    $('ws-retry')?.addEventListener('click', async () => { renderWsUnavailable(body); await ensureWsReady(); if (isWs()) renderNewSaleView(); });
+    $('ws-to-retail')?.addEventListener('click', () => setMode('RETAIL'));
+  }
+
   function renderNewSaleView() {
     const body = $('view-body');
     body.className = 'pz-view pz-view-pos';
+    const wsOn = isWs();
+    if (wsOn && !ws.ready) { detachHardwareScanner(); renderWsUnavailable(body); return; }
+
     body.innerHTML = `
       <div class="card pz-searchbar">
         <div class="pz-search-row">
           <div class="pz-searchwrap" id="pz-searchwrap">
             <div class="input-group">
               <span class="input-group-icon">${window.Icons.get('search')}</span>
-              <input class="input" id="pos-search" type="text" autocomplete="off" autofocus placeholder="Scan a barcode or search a product by name / SKU" />
+              <input class="input" id="pos-search" type="text" autocomplete="off" autofocus placeholder="${wsOn ? 'Scan a barcode or search warehouse stock by name / SKU' : 'Scan a barcode or search a product by name / SKU'}" />
             </div>
             <div class="pz-dd" id="pz-dd" role="listbox"></div>
           </div>
+          ${wsOn ? `
+            <label class="pz-wh" title="The warehouse this invoice sells from">
+              <i class="fa-solid fa-warehouse" aria-hidden="true"></i>
+              <select id="pz-wh" aria-label="Warehouse">${ws.list.length ? WSK().whOptions(ws.list, ws.whId) : '<option value="">No sellable warehouse</option>'}</select>
+            </label>` : ''}
           ${window.BarcodeScanner ? `
             <button type="button" class="btn btn-primary pz-scan-btn" id="pos-scan-btn">
               ${window.BarcodeScanner.cameraIconSvg} <span class="pz-scan-label">Scan barcode</span>
@@ -862,12 +1146,12 @@
       <div class="pz-main">
         <section class="card pz-ticketwrap" aria-label="Ticket">
           <div class="pz-hr pz-hgroup">
-            <div class="pz-left"><h3>Products</h3></div>
-            <div class="pz-rgt"><h3>Cart <span class="pz-count" id="pz-count">0</span></h3></div>
+            <div class="pz-left"><h3>${wsOn ? 'Warehouse stock' : 'Products'}</h3></div>
+            <div class="pz-rgt"><h3>${wsOn ? 'Invoice' : 'Cart'} <span class="pz-count" id="pz-count">0</span></h3></div>
           </div>
           <div class="pz-hr pz-hlabels">
             <div class="pz-left"><span>#</span><span class="pz-c-bc">Barcode</span><span>Product name</span><span class="pz-right">Price per unit</span></div>
-            <div class="pz-rgt"><span>Quantity</span><span>Discount</span><span class="pz-right">Subtotal</span><span></span></div>
+            <div class="pz-rgt"><span>Quantity</span>${wsOn ? '<span>Unit</span>' : ''}<span>Discount</span><span class="pz-right">Subtotal</span><span></span></div>
           </div>
           <div class="pz-tbody" id="pz-ticket"></div>
           <div class="pz-tfoot">
@@ -876,10 +1160,11 @@
           </div>
         </section>
 
-        <aside class="card pz-summary" aria-label="Sale summary">
-          <div class="pz-sum-head"><h3>Sale summary</h3></div>
+        <aside class="card pz-summary" aria-label="${wsOn ? 'Invoice summary' : 'Sale summary'}">
+          <div class="pz-sum-head"><h3>${wsOn ? 'Invoice summary' : 'Sale summary'}</h3>${wsOn ? '<span class="pz-chip"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i> Wholesale</span>' : ''}</div>
           <div class="pz-sum-body">
-            <button class="btn btn-secondary" id="pick-customer-btn"></button>
+            <button class="btn btn-secondary pz-cust-btn" id="pick-customer-btn"></button>
+            <p class="pz-sum-hint" id="pz-cust-hint"></p>
             <div class="field">
               <label for="cart-discount-input">Cart discount (KES)</label>
               <input class="input" id="cart-discount-input" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0" value="${state.cartDiscount || ''}" />
@@ -898,7 +1183,7 @@
 
     $('clear-cart-btn').addEventListener('click', async () => {
       if (!state.cart.length) return;
-      const ok = await window.UI.confirmDialog({ title: 'Clear cart?', confirmText: 'Clear', danger: true });
+      const ok = await window.UI.confirmDialog({ title: wsOn ? 'Clear invoice?' : 'Clear cart?', confirmText: 'Clear', danger: true });
       if (ok) resetCart();
     });
     $('cart-discount-input').addEventListener('input', (e) => {
@@ -909,6 +1194,17 @@
       if (isOfflineNow()) return window.UI.toast.error('Customers are not available offline. Sell to a walk-in customer.');
       window.CustomerPicker.open({ onSelect: (customer) => { state.customer = customer; renderCustomerButton(); } });
     });
+    $('pz-wh')?.addEventListener('change', async (e) => {
+      if (state.cart.length) {
+        const ok = await window.UI.confirmDialog({ title: 'Change warehouse?', message: 'The invoice lines are cleared because stock is counted per warehouse.', confirmText: 'Change warehouse', danger: true });
+        if (!ok) { e.target.value = ws.whId; return; }
+        state.cart = []; state.lastAdded = null; checkoutKey = window.Api.newIdempotencyKey();
+        renderCart();
+      }
+      ws.whId = e.target.value;
+      clearSearch();
+      $('pos-search')?.focus();
+    });
 
     attachHardwareScanner();
     fitRoot();
@@ -918,8 +1214,18 @@
   function renderCustomerButton() {
     const b = $('pick-customer-btn');
     if (!b) return;
-    b.innerHTML = `${window.Icons.get('employees')} ${state.customer ? esc(state.customer.name) : 'Walk-in customer'}`;
-    b.title = state.customer ? 'Change customer' : 'Tap to add a customer (needed for credit)';
+    const needCust = isWs() && !!ws.settings.requireCustomerForWholesale;
+    const c = state.customer;
+    b.innerHTML = `${window.Icons.get('employees')} ${c ? esc(c.name) : (needCust ? 'Choose customer (required)' : 'Walk-in customer')}`;
+    b.title = c ? 'Change customer' : 'Tap to add a customer (needed for credit)';
+    b.classList.toggle('pz-need', needCust && !c);
+    const hint = $('pz-cust-hint');
+    if (hint) {
+      if (c && isWs() && c.outstandingBalance > 0) hint.textContent = `${c.name} already owes ${fm(c.outstandingBalance)}.`;
+      else if (isWs()) hint.textContent = needCust ? 'A customer is required on every wholesale invoice.' : 'Choose a customer to take a part payment or sell on credit.';
+      else hint.textContent = '';
+      hint.style.display = hint.textContent ? '' : 'none';
+    }
   }
 
   function bindScanButton() {
@@ -930,6 +1236,19 @@
         onDetect: (code) => handleScannedCode(code),
       });
     });
+  }
+
+  /** One result row for a warehouse (wholesale) product: price shown for its default unit. */
+  function wsResultRow(item, i, active) {
+    const d = wsDefaultUnit(item);
+    const ok = wsSellable(item);
+    const stock = item.trackSerialNumber ? 'Serial-tracked: sell in retail mode' : (item.availableQuantity > 0 ? wsAvailText(item) : 'Out of stock');
+    return `
+      <div class="pz-dd-row ${active ? 'active' : ''} ${ok ? '' : 'disabled'}" data-idx="${i}" role="option" aria-disabled="${!ok}">
+        <span class="pz-mono">${esc(item.barcode || '') || '-'}</span>
+        <span class="pz-name">${esc(item.name)}<small>${esc(item.sku ? `SKU ${item.sku} · ` : '')}${esc(stock)}</small></span>
+        <span class="pz-price">${WSK().cents(d.wholesalePrice)}<span class="pz-per"> / ${esc(d.name)}</span></span>
+      </div>`;
   }
 
   /* ---- Search: results only exist while the cashier is searching ---- */
@@ -956,6 +1275,7 @@
       dd.innerHTML = `
         <div class="pz-dd-head"><span>Barcode</span><span>Product name</span><span class="pz-right">Price per unit</span></div>
         ${rows.map((r, i) => {
+          if (r.ws) return wsResultRow(r.item, i, i === active);
           const off = unitDiscountOf(r.product);
           return `
           <div class="pz-dd-row ${i === active ? 'active' : ''}" data-idx="${i}" role="option">
@@ -974,7 +1294,10 @@
     function pick(i) {
       const r = rows[i];
       if (!r) return;
-      addToCart(r.product, r.variant);
+      if (r.ws) {
+        if (!wsSellable(r.item)) { window.UI.toast.error(r.item.trackSerialNumber ? 'Serial-tracked products are sold in retail mode' : 'Out of stock in this warehouse'); return; }
+        addWholesale(r.item);
+      } else addToCart(r.product, r.variant);
       clearSearch();
       input.focus();
     }
@@ -983,10 +1306,12 @@
       const my = ++seq;
       render(term, true);
       try {
-        const found = await lookupSearch(term);
+        const wsOn = isWs();
+        const found = await (wsOn ? wsSearch(term) : lookupSearch(term));
         if (my !== seq) return rows;
         rows = [];
-        found.forEach((product) => {
+        if (wsOn) found.forEach((item) => rows.push({ ws: true, item }));
+        else found.forEach((product) => {
           if (product.variants?.length) product.variants.forEach((v) => rows.push({ product, variant: v }));
           else rows.push({ product, variant: null });
         });
@@ -1029,7 +1354,7 @@
   }
 
   /* ---- Cart operations ---- */
-  function keyOf(item) { return item.variant ? item.variant._id : item.product._id; }
+  function keyOf(item) { return item.key || (item.variant ? item.variant._id : item.product._id); }
 
   function addToCart(product, variant) {
     if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before starting the next sale'); return; }
@@ -1049,6 +1374,17 @@
     }
     state.lastAdded = key;
     renderCart(key); // scrolls the new / updated row into view
+  }
+
+  /** Wholesale: add a warehouse product (a second tap adds one more of the same unit). */
+  function addWholesale(item) {
+    if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before starting the next sale'); return; }
+    const line = wsLineFrom(item);
+    const existing = state.cart.find((i) => i.key === line.key);
+    if (existing) existing.quantity = Math.round((Number(existing.quantity) + 1) * 1000) / 1000;
+    else state.cart.push(line);
+    state.lastAdded = line.key;
+    renderCart(line.key);
   }
 
   /** Client-side preview only - see the file header note. */
@@ -1089,7 +1425,9 @@
     if (clearBtn) clearBtn.disabled = !state.cart.length;
 
     if (!state.cart.length) {
-      el.innerHTML = `<div class="pz-empty"><i class="fa-solid fa-barcode" aria-hidden="true"></i><strong>No products yet</strong>Scan a barcode or search above.<br/>Every product you add lands here with its quantity, discount and subtotal on the same line.</div>`;
+      el.innerHTML = isWs()
+        ? `<div class="pz-empty"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><strong>No items on this invoice</strong>Scan a barcode or search warehouse stock above.<br/>Pick the unit (piece, bundle or carton) on each line.</div>`
+        : `<div class="pz-empty"><i class="fa-solid fa-barcode" aria-hidden="true"></i><strong>No products yet</strong>Scan a barcode or search above.<br/>Every product you add lands here with its quantity, discount and subtotal on the same line.</div>`;
       if (foot) foot.innerHTML = '<span>Nothing scanned yet</span>';
       return;
     }
@@ -1103,28 +1441,42 @@
       const preview = previewLine(unit, item.quantity, item.discount, item.product.taxRate);
       const bc = barcodeOf(item.product, item.variant);
       const d = item.discount || 0;
-      const info = priceInfoOf(item);
-      const wholesaleHint = info.priceType === 'WHOLESALE'
-        ? 'wholesale price'
-        : (info.wholesale !== null && info.moq ? `wholesale ${fm(info.wholesale)} from ${info.moq}` : '');
-      const priceHint = item.overridePriceEnabled ? 'price changed' : (info.priceType === 'WHOLESALE' ? 'wholesale price' : (item.autoDiscount ? 'product discount' : wholesaleHint));
       const discTitle = item.autoDiscount
         ? `Product discount (${fm(unitDiscountOf(item.product))} per unit) - tap to change`
         : `Tap to set a discount${canOverride ? ' or change the price' : ''}`;
+
+      let priceCell;
+      let nameExtra = '';
+      let unitCell = '';
+      if (item.ws) {
+        const u = wsUnitOf(item);
+        const issue = wsStockIssue(item);
+        priceCell = `@ ${fm(unit)}<span class="pz-per"> / ${esc(u.name)}</span>${item.overridePriceEnabled ? '<small>price changed</small>' : ''}${issue ? `<small class="pz-bad">${esc(issue)}</small>` : ''}`;
+        nameExtra = `<small>${esc(wsAvailText(item.catalog))} in stock</small>`;
+        unitCell = `<select class="pz-c-unit pz-unit" data-action="unit" data-idx="${i}" aria-label="Unit">${item.catalog.units.map((x) => `<option value="${esc(x.unitId || '')}" ${String(x.unitId || '') === String(item.unitId || '') ? 'selected' : ''}>${esc(WSK().unitLabel(x))}</option>`).join('')}</select>`;
+      } else {
+        const info = priceInfoOf(item);
+        const wholesaleHint = info.priceType === 'WHOLESALE'
+          ? 'wholesale price'
+          : (info.wholesale !== null && info.moq ? `wholesale ${fm(info.wholesale)} from ${info.moq}` : '');
+        const priceHint = item.overridePriceEnabled ? 'price changed' : (info.priceType === 'WHOLESALE' ? 'wholesale price' : (item.autoDiscount ? 'product discount' : wholesaleHint));
+        priceCell = `@ ${fm(unit)}${priceHint ? `<small>${priceHint}</small>` : ''}`;
+      }
       return `
         <div class="pz-tr ${cls}" data-idx="${i}" data-key="${esc(k)}">
           <div class="pz-left">
             <span class="pz-c-no">${i + 1}</span>
             <span class="pz-c-bc pz-mono">${esc(bc) || '-'}</span>
-            <span class="pz-c-name pz-name">${esc(nameOf(item.product, item.variant))}${bc ? `<small class="pz-name-bc">${esc(bc)}</small>` : ''}</span>
-            <span class="pz-c-price pz-price">@ ${fm(unit)}${priceHint ? `<small>${priceHint}</small>` : ''}</span>
+            <span class="pz-c-name pz-name"><span class="pz-nm">${esc(nameOf(item.product, item.variant))}</span>${nameExtra}${bc ? `<small class="pz-name-bc">${esc(bc)}</small>` : ''}</span>
+            <span class="pz-c-price pz-price">${priceCell}</span>
           </div>
           <div class="pz-rgt">
             <div class="pz-c-qty pz-stepper">
               <button type="button" data-action="dec" data-idx="${i}" aria-label="Decrease quantity">−</button>
-              <input type="number" inputmode="numeric" min="0" step="1" value="${item.quantity}" data-action="qty" data-idx="${i}" aria-label="Quantity" />
+              <input type="number" inputmode="${item.ws ? 'decimal' : 'numeric'}" min="0" step="${item.ws ? 'any' : '1'}" value="${item.quantity}" data-action="qty" data-idx="${i}" aria-label="Quantity" />
               <button type="button" data-action="inc" data-idx="${i}" aria-label="Increase quantity">+</button>
             </div>
+            ${unitCell}
             <button type="button" class="pz-c-disc pz-disc ${d ? 'has' : ''}" data-action="discount" data-idx="${i}" title="${esc(discTitle)}">${d ? Number(d).toLocaleString() : '0'}</button>
             <div class="pz-c-sub pz-sub">${fm(preview.total)}</div>
             <button type="button" class="pz-c-x pz-x" data-action="remove" data-idx="${i}" aria-label="Remove item">${window.Icons.get('close')}</button>
@@ -1175,10 +1527,16 @@
     });
 
     el.addEventListener('change', (e) => {
+      const sel = e.target.closest('select[data-action="unit"]');
+      if (sel) {
+        const line = state.cart[Number(sel.dataset.idx)];
+        if (line) { line.unitId = sel.value || null; syncAutoDiscount(line); renderCart(); }
+        return;
+      }
       const inp = e.target.closest('input[data-action="qty"]');
       if (!inp) return;
       const idx = Number(inp.dataset.idx);
-      const n = Math.floor(Number(inp.value));
+      const n = state.cart[idx] && state.cart[idx].ws ? Math.round(Number(inp.value) * 1000) / 1000 : Math.floor(Number(inp.value));
       if (!Number.isFinite(n) || n <= 0) state.cart.splice(idx, 1);
       else if (state.cart[idx]) {
         state.cart[idx].quantity = n;
@@ -1217,17 +1575,17 @@
       lines.innerHTML = `
         <div class="pz-mini"><span>Subtotal</span><span>${fm(subtotal)}</span></div>
         ${discounts ? `<div class="pz-mini"><span>Discounts</span><span>-${fm(discounts)}</span></div>` : ''}
-        <div class="pz-mini"><span>Tax (est.)</span><span>${fm(tax)}</span></div>
+        ${isWs() ? '<div class="pz-mini"><span>Tax</span><span>added when you complete</span></div>' : `<div class="pz-mini"><span>Tax (est.)</span><span>${fm(tax)}</span></div>`}
       `;
     }
 
     foot.innerHTML = `
       <div class="pz-total" aria-live="polite">
-        <div class="pz-total-label"><span>Total to pay</span><span>${itemCount} unit${itemCount === 1 ? '' : 's'}</span></div>
+        <div class="pz-total-label"><span>${isWs() ? 'Invoice total' : 'Total to pay'}</span><span>${itemCount} unit${itemCount === 1 ? '' : 's'}</span></div>
         <div class="pz-total-amount">${fm(total)}</div>
       </div>
       <button class="btn btn-success pz-pay-btn" id="checkout-btn" ${state.cart.length ? '' : 'disabled'}>
-        Add payment to complete sale
+        ${isWs() ? 'Take payment or sell on credit' : 'Add payment to complete sale'}
         <small>Press F9</small>
       </button>
     `;
@@ -1324,9 +1682,20 @@
     return pending && pending.mode === 'MANUAL' ? 'MPESA_TILL' : 'MPESA';
   }
 
-  function openPaymentModal(initialMethod) {
+  function openPaymentModal(initialMethod, carry) {
     if (drawerLocked()) return window.UI.toast.error('Close the cash drawer before taking the next payment');
     if (!state.cart.length) return window.UI.toast.error('Cart is empty');
+    const wholesale = isWs();
+    if (wholesale) {
+      if (isOfflineNow()) return window.UI.toast.error('Wholesale sales need an internet connection.');
+      const bad = state.cart.find((l) => wsStockIssue(l));
+      if (bad) return window.UI.toast.error(`${bad.product.name}: ${wsStockIssue(bad)}`);
+      if (ws.settings.requireCustomerForWholesale && !state.customer) {
+        window.UI.toast.error('Choose a customer for a wholesale sale');
+        window.CustomerPicker.open({ onSelect: (c) => { state.customer = c; renderCustomerButton(); openPaymentModal(initialMethod, carry); } });
+        return;
+      }
+    }
     const offlineNow = isOfflineNow();
     if (offlineNow && state.pendingMpesa) return window.UI.toast.error('An M-PESA payment was received online. Reconnect to save that sale.');
     let offCaps = {}; let offTill = null;
@@ -1340,7 +1709,12 @@
     const resumeMpesa = !!state.pendingMpesa;
     if (total <= 0 && !resumeMpesa) return window.UI.toast.error('Total must be greater than zero');
 
-    const dueAmount = resumeMpesa ? state.pendingMpesa.amount : total;
+    let dueAmount = resumeMpesa ? state.pendingMpesa.amount : total;
+    // Wholesale: "paying now" can be less than the invoice total (part payment) once a customer is chosen.
+    if (wholesale && !resumeMpesa && carry && state.customer) {
+      const want = round2(Number(carry.payNow));
+      if (want > 0 && want < total) dueAmount = want;
+    }
     const resumeId = resumeMpesa ? mpesaMethodIdFor(state.pendingMpesa) : null;
     const methods = (offlineNow ? OFFLINE_METHODS : METHODS).filter((m) => {
       if (offlineNow) {
@@ -1356,10 +1730,25 @@
     let method = resumeId || (initialMethod && methods.some((m) => m.id === initialMethod) ? initialMethod : 'CASH');
 
     const modal = window.UI.openModal({
-      title: 'Payment',
+      title: wholesale ? 'Wholesale payment' : 'Payment',
       maxWidth: '600px',
       bodyHtml: `
-        <div class="pz-pay-total"><span>Amount due</span><strong>${fm(dueAmount)}</strong></div>
+        <div class="pz-pay-total"><span id="pz-due-label">Amount due</span><strong id="pz-due-amt">${fm(dueAmount)}</strong></div>
+        ${wholesale ? `
+        <div class="pz-ws" id="pz-ws">
+          <div class="pz-ws-row"><span>Invoice total</span><strong>${fm(total)}</strong></div>
+          <div id="pz-ws-paynow">
+            <div class="pz-ws-row"><label for="pz-paynow">Paying now (KES)</label>
+              <input class="input" id="pz-paynow" type="number" inputmode="decimal" step="0.01" min="0" value="${dueAmount}" ${state.customer && !resumeMpesa ? '' : 'disabled'} /></div>
+            ${state.customer && !resumeMpesa ? `<div class="pz-ws-quick" style="margin-top:var(--space-2)"><button type="button" data-pn="full">Full amount</button><button type="button" data-pn="half">Half now</button></div>` : ''}
+          </div>
+          <div class="pz-ws-credit" id="pz-ws-credit"></div>
+          <div class="field" id="pz-ws-due"><label for="pz-due">Credit due date</label><input class="input" type="date" id="pz-due" value="${esc(state.dueDate || '')}" /></div>
+          <div class="pz-ws-cust">
+            <div class="who">${state.customer ? `${esc(state.customer.name)}<small>${esc(state.customer.phone || '')}${state.customer.outstandingBalance > 0 ? ` · owes ${fm(state.customer.outstandingBalance)}` : ''}</small>` : 'Walk-in customer<small>Choose a customer to take a part payment or sell on credit</small>'}</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="pz-ws-cust-btn">${state.customer ? 'Change' : 'Choose customer'}</button>
+          </div>
+        </div>` : ''}
         <div class="pz-methods" id="pz-methods">
           ${methods.map((m) => `<button type="button" class="pz-method" data-method="${m.id}"><span class="pz-method-ico"><i class="${m.ico}" aria-hidden="true"></i></span>${m.label}</button>`).join('')}
         </div>
@@ -1398,6 +1787,24 @@
       modal.querySelectorAll('.pz-method').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
       const renderers = { CASH: renderCash, MPESA: renderMpesa, MPESA_TILL: renderMpesaTill, MPESA_OFFLINE: renderMpesaOffline, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
       renderers[method]();
+      syncWs();
+    }
+
+    /** Wholesale: keeps the "paying now / on credit / due date" strip in step with the chosen method and amount. */
+    function syncWs() {
+      if (!wholesale) return;
+      const isCredit = method === 'CREDIT';
+      const paying = isCredit ? 0 : dueAmount;
+      const bal = round2(total - paying);
+      const q = (sel) => modal.querySelector(sel);
+      if (q('#pz-ws-paynow')) q('#pz-ws-paynow').style.display = isCredit ? 'none' : '';
+      if (q('#pz-ws-credit')) {
+        q('#pz-ws-credit').className = `pz-ws-credit${bal > 0.009 ? '' : ' none'}`;
+        q('#pz-ws-credit').textContent = bal > 0.009 ? `${fm(bal)} will be recorded as credit${state.customer ? ` for ${state.customer.name}` : ''}` : 'Paid in full - nothing on credit';
+      }
+      if (q('#pz-ws-due')) q('#pz-ws-due').style.display = bal > 0.009 ? '' : 'none';
+      if (q('#pz-due-label')) q('#pz-due-label').textContent = isCredit ? 'On credit' : (bal > 0.009 ? 'Paying now' : 'Amount due');
+      if (q('#pz-due-amt')) q('#pz-due-amt').textContent = fm(isCredit ? total : dueAmount);
     }
 
     /* ---- CASH ---- */
@@ -1476,7 +1883,7 @@
     /* ---- CREDIT ---- */
     async function renderCredit() {
       panel.innerHTML = `
-        <div class="pz-note warn">The full <strong>${fm(dueAmount)}</strong> will be recorded as a debt against the customer.</div>
+        <div class="pz-note warn">The full <strong>${fm(wholesale ? total : dueAmount)}</strong> will be recorded as a debt against the customer${wholesale ? ' (set the due date above)' : ''}.</div>
         <div class="field">
           <label for="pz-customer">Customer</label>
           <select class="select" id="pz-customer"><option value="">Loading customers…</option></select>
@@ -1687,6 +2094,31 @@
     });
     completeBtn.addEventListener('click', () => { if (onComplete) onComplete(); });
 
+    if (wholesale) {
+      const pn = modal.querySelector('#pz-paynow');
+      const applyPayNow = (raw) => {
+        // An M-PESA request that is already out cannot change amount mid-flight.
+        if (state.pendingMpesa || (modal._mpesaPoll && !modal._manualRef)) { if (pn) pn.value = dueAmount; return window.UI.toast.error('A payment is in progress. Cancel it before changing the amount.'); }
+        let v = round2(Number(raw));
+        if (!Number.isFinite(v) || v < 0) v = total;
+        if (v > total) v = total;
+        if (v <= 0) { selectMethod('CREDIT'); return; }
+        dueAmount = v;
+        if (pn) pn.value = v;
+        if (modal._manualRef) cancelManualAttempt(modal); // TILL: release the old request, the panel below asks for a new one
+        selectMethod(method);
+      };
+      pn?.addEventListener('change', () => applyPayNow(pn.value));
+      pn?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); pn.blur(); } });
+      modal.querySelectorAll('[data-pn]').forEach((b) => b.addEventListener('click', () => applyPayNow(b.dataset.pn === 'half' ? round2(total / 2) : total)));
+      modal.querySelector('#pz-due')?.addEventListener('input', (e) => { state.dueDate = e.target.value; });
+      modal.querySelector('#pz-ws-cust-btn')?.addEventListener('click', () => {
+        if (state.pendingMpesa || (modal._mpesaPoll && !modal._manualRef) || modal._manualRef) return window.UI.toast.error('A payment is in progress. Cancel it first.');
+        window.UI.closeModal();
+        window.CustomerPicker.open({ onSelect: (c) => { state.customer = c; renderCustomerButton(); openPaymentModal(method, { payNow: dueAmount }); } });
+      });
+    }
+
     selectMethod(method);
   }
 
@@ -1882,18 +2314,37 @@
     if (checkingOut) return false;
     if (!state.cart.length) { window.UI.toast.error('Cart is empty'); return false; }
 
+    const wholesale = isWs();
     const off = window.Offline;
     const offlineNow = isOfflineNow();
-    const canOffline = !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
+    const canOffline = !wholesale && !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
+    let onCredit = false;
+    if (wholesale) {
+      if (offlineNow) { window.UI.toast.error('Wholesale sales need an internet connection.'); return false; }
+      const bad = state.cart.find((l) => wsStockIssue(l));
+      if (bad) { window.UI.toast.error(`${bad.product.name}: ${wsStockIssue(bad)}`); return false; }
+      if (!wsWarehouse()) { window.UI.toast.error('Choose a warehouse to sell from'); return false; }
+      if (ws.settings.requireCustomerForWholesale && !state.customer) { window.UI.toast.error('Choose a customer for a wholesale sale'); return false; }
+      const paidNow = state.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      const balance = round2(computeTotals().total - paidNow);
+      if (balance < -0.009) { window.UI.toast.error('Payments are more than the invoice total'); return false; }
+      onCredit = balance > 0.009;
+      if (onCredit && !state.customer) { window.UI.toast.error('Choose a customer to sell on credit or take a part payment'); return false; }
+    }
     const ctid = checkoutKey.replace(/-/g, ''); // same id online and offline, so a retry can never become a second sale
 
-    const branchId = window.AppShell.getActiveBranchId();
+    const branchId = wholesale ? (WSK().branchOf(wsWarehouse()) || window.AppShell.getActiveBranchId()) : window.AppShell.getActiveBranchId();
     const payload = {
       branchId,
+      // Wholesale businesses tag every sale with its channel (same as the old wholesale screen did).
+      ...(wholesale
+        ? { channel: 'WHOLESALE', warehouseId: ws.whId, dueDate: onCredit && state.dueDate ? state.dueDate : undefined }
+        : (isWsBiz() ? { channel: 'RETAIL' } : {})),
       customerId: state.customer?._id,
       cartDiscount: state.cartDiscount || 0,
       items: state.cart.map((item) => ({
-        productId: item.product._id, variantId: item.variant?._id, quantity: item.quantity,
+        productId: item.product._id, variantId: item.variantId || item.variant?._id, quantity: item.quantity,
+        ...(wholesale && item.unitId ? { unitId: item.unitId } : {}),
         discount: item.discount || 0, overridePrice: item.overridePriceEnabled ? item.overridePrice : undefined,
       })),
       payments: state.payments.map((p) => ({
@@ -1927,11 +2378,18 @@
         window.CashDrawer.beginChange({ change, tendered, due, receiptNumber: data.sale.receiptNumber, saleId: data.sale._id || '' });
       }
       if (document.querySelector('.modal-backdrop')) window.UI.closeModal();
-      window.UI.toast.success(data.offline ? `Sale ${data.sale.receiptNumber} saved on this till` : `Sale ${data.sale.receiptNumber} completed`);
+      window.UI.toast.success(data.offline ? `Sale ${data.sale.receiptNumber} saved on this till` : `Sale ${data.sale.receiptNumber} completed${onCredit ? ' (balance on credit)' : ''}`);
       if (change > 0 && !drawerDriven) window.UI.toast.success(`Give change: ${fm(change)}`);
-      window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: true });
       resetCart();
       loadShift();
+      try {
+        // Wholesale sales open the professional invoice (receipt is one tap away); retail keeps the auto-printing receipt.
+        if (payload.channel === 'WHOLESALE' && !data.offline && data.sale && data.sale._id && window.InvoiceView) {
+          window.InvoiceView.open(data.sale._id, { receipt: data.receipt, title: `Invoice ${data.sale.invoiceNumber || data.sale.receiptNumber}` });
+        } else window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: true });
+      } catch (receiptErr) {
+        window.UI.toast.error(`Sale saved, but the receipt could not be shown: ${receiptErr.message}`);
+      }
       return true;
     } catch (err) {
       window.UI.toast.error(err.message);
@@ -1971,6 +2429,8 @@
             <span class="input-group-icon">${window.Icons.get('search')}</span>
             <input class="input" id="history-search" type="text" placeholder="Search by receipt number" />
           </div>
+          ${isWsBiz() ? `<select class="select" id="history-channel" style="max-width:170px" aria-label="Sale type">
+            <option value="">All sales</option><option value="RETAIL">Retail only</option><option value="WHOLESALE">Wholesale only</option></select>` : ''}
           <div class="flex gap-2">
             <input class="input" id="history-from" type="date" style="max-width:160px" />
             <input class="input" id="history-to" type="date" style="max-width:160px" />
@@ -1989,6 +2449,10 @@
     $('history-search').addEventListener('input', window.UI.debounce((e) => {
       state.history.search = e.target.value.trim(); state.history.page = 1; fetchHistory();
     }));
+    if ($('history-channel')) {
+      $('history-channel').value = state.history.channel || '';
+      $('history-channel').addEventListener('change', (e) => { state.history.channel = e.target.value; state.history.page = 1; fetchHistory(); });
+    }
     $('history-from').addEventListener('change', (e) => { state.history.from = e.target.value; state.history.page = 1; fetchHistory(); });
     $('history-to').addEventListener('change', (e) => { state.history.to = e.target.value; state.history.page = 1; fetchHistory(); });
 
@@ -2007,13 +2471,15 @@
       const { data } = await window.Api.get('/sales', {
         branchId, page: state.history.page, limit: state.history.limit, search: state.history.search,
         from: state.history.from || undefined, to: state.history.to || undefined,
+        channel: isWsBiz() && state.history.channel ? state.history.channel : undefined,
       });
+      if (isWsBiz() && state.history.channel) data.items = data.items.filter((s) => (s.channel || 'RETAIL') === state.history.channel);
       if (!data.items.length) {
         tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'sales', title: 'No sales found' })}</td></tr>`;
       } else {
         tbody.innerHTML = data.items.map((s) => `
           <tr data-id="${s._id}">
-            <td class="cell-primary">${s.receiptNumber}</td>
+            <td class="cell-primary">${s.receiptNumber}${s.channel === 'WHOLESALE' ? ' <span class="badge badge-info">Wholesale</span>' : ''}</td>
             <td class="text-sm">${window.UI.formatDateTime(s.createdAt)}</td>
             <td class="text-sm">${esc(s.cashierId?.name || '')}</td>
             <td class="text-sm">${s.customerId ? esc(s.customerId.name) : '<span class="text-muted">Walk-in</span>'}</td>
@@ -2021,6 +2487,7 @@
             <td>
               <span class="badge ${PAYMENT_BADGE[s.paymentStatus] || 'badge-neutral'}">${s.paymentStatus}</span>
               ${s.saleStatus === 'CANCELLED' ? '<span class="badge badge-neutral">Cancelled</span>' : ''}
+              ${s.balance > 0 && s.saleStatus !== 'CANCELLED' ? `<div class="text-xs text-muted">owes ${fm(s.balance)}${s.dueDate ? ` · due ${window.UI.formatDate(s.dueDate)}` : ''}</div>` : ''}
             </td>
             <td class="actions"><button class="btn btn-secondary btn-sm" data-action="view">View</button></td>
           </tr>
@@ -2051,7 +2518,7 @@
     const canRefund = sale.saleStatus === 'COMPLETED' && hasRefundableItems && window.Permissions.can(user, 'refunds.create');
 
     const modal = window.UI.openModal({
-      title: `Sale ${sale.receiptNumber}`,
+      title: `Sale ${sale.receiptNumber}${sale.channel === 'WHOLESALE' ? ' · Wholesale' : ''}`,
       maxWidth: '520px',
       bodyHtml: `
         <div class="text-sm text-secondary" style="margin-bottom: var(--space-3)">
@@ -2069,11 +2536,13 @@
         <div class="pos-totals-row"><span>Subtotal</span><span>${fm(sale.subtotal)}</span></div>
         <div class="pos-totals-row"><span>Tax</span><span>${fm(sale.tax)}</span></div>
         <div class="pos-totals-row grand"><span>Total</span><span>${fm(sale.total)}</span></div>
-        ${sale.balance > 0 ? `<div class="pos-totals-row" style="color:var(--color-warning)"><span>Balance owed</span><span>${fm(sale.balance)}</span></div>` : ''}
+        ${sale.channel === 'WHOLESALE' && sale.amountPaid != null ? `<div class="pos-totals-row"><span>Paid</span><span>${fm(sale.amountPaid)}</span></div>` : ''}
+        ${sale.balance > 0 ? `<div class="pos-totals-row" style="color:var(--color-warning)"><span>Balance owed${sale.dueDate ? ` (due ${window.UI.formatDate(sale.dueDate)})` : ''}</span><span>${fm(sale.balance)}</span></div>` : ''}
         ${sale.saleStatus === 'CANCELLED' ? `<div class="form-alert form-alert-error" style="margin-top: var(--space-3)">Cancelled: ${esc(sale.cancelReason || '')}</div>` : ''}
       `,
       footerHtml: `
         <button class="btn btn-secondary" data-action="close">Close</button>
+        ${window.InvoiceView && sale.saleStatus !== 'CANCELLED' ? `<button class="btn ${sale.channel === 'WHOLESALE' ? 'btn-primary' : 'btn-secondary'}" data-action="invoice">Invoice</button>` : ''}
         ${receipt ? `<button class="btn btn-secondary" data-action="receipt">View receipt</button>` : ''}
         ${canRefund ? `<button class="btn btn-secondary" data-action="refund">Request refund</button>` : ''}
         ${canCancel ? `<button class="btn btn-danger" data-action="cancel">Cancel sale</button>` : ''}
@@ -2082,6 +2551,7 @@
 
     modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
     modal.querySelector('[data-action="receipt"]')?.addEventListener('click', () => window.ReceiptView.showReceiptModal(receipt));
+    modal.querySelector('[data-action="invoice"]')?.addEventListener('click', () => { window.UI.closeModal(); window.InvoiceView.open(sale._id, { receipt, title: `Invoice ${sale.invoiceNumber || sale.receiptNumber}` }); });
     modal.querySelector('[data-action="refund"]')?.addEventListener('click', () => {
       window.UI.closeModal();
       openRefundModal(sale);

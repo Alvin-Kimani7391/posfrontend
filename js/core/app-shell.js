@@ -35,6 +35,12 @@
     { key: 'sales',         label: 'Sales',              icon: 'sales',     href: 'sales.html',         permission: 'sales.view' },
     { key: 'products',      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
     { key: 'inventory',     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view' },
+    // Wholesale section: shown when the business has warehouses (on by default for the Wholesale business type).
+    // Selling (retail AND wholesale) happens on the single Sales screen, which has a Retail | Wholesale switch.
+    { key: 'wholesale',       label: 'Wholesale',          icon: 'truck',     href: 'wholesale.html',       permission: 'inventory.view', feature: ['multiWarehouse'] },
+    { key: 'wholesale-reports', label: 'Wholesale reports', icon: 'reports',   href: 'wholesale-reports.html', permission: 'reports.profit', feature: ['multiWarehouse'] },
+    { key: 'warehouses',      label: 'Warehouses & stock', icon: 'building',  href: 'warehouses.html',      permission: 'inventory.view', feature: ['multiWarehouse'] },
+    { key: 'payables',        label: 'Supplier payables',  icon: 'wallet',    href: 'payables.html',        permission: 'purchases.view', feature: ['multiWarehouse'] },
     // Specialised screens: shown only when the business has the matching feature switched on
     // (feature = ANY of the listed flags) AND the user holds the permission.
     { key: 'batches',       label: 'Batches & expiry',   icon: 'layers',    href: 'batches.html',       permission: 'batches.view',   feature: ['batchTracking', 'expiryTracking'] },

@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v2.5.0';
+const VERSION = 'v2.8.0';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -17,6 +17,7 @@ const PRECACHE = [
   'purchases.html', 'expenses.html', 'refunds.html', 'reports.html', 'audit-logs.html', 'settings.html',
   'cash-register.html', 'notifications.html', 'offline-review.html', 'billing.html', 'crm.html',
 
+  'wholesale.html', 'wholesale-reports.html', 'wholesale-sales.html', 'warehouses.html', 'payables.html', 'css/wholesale.css', 'js/core/wholesale-kit.js', 'js/pages/wholesale.js', 'js/pages/wholesale-reports.js', 'js/core/invoice-view.js', 'js/pages/warehouses.js', 'js/pages/payables.js',
   'css/variables.css', 'css/base.css', 'css/components.css', 'css/layout.css', 'css/pos.css', 'css/reports.css',
   'css/tour.css', 'css/announcements.css', 'css/billing.css', 'css/crm.css',
 

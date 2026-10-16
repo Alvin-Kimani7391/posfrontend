@@ -26,7 +26,7 @@
     MANAGER: [
       'categories.view', 'categories.create', 'categories.update',
       'products.view', 'products.create', 'products.update',
-      'inventory.view', 'inventory.adjust', 'inventory.receive', 'inventory.transfer',
+      'inventory.view', 'inventory.adjust', 'inventory.receive', 'inventory.transfer', 'warehouses.manage',
       'batches.view', 'batches.manage',
       'stocktake.view', 'stocktake.count', 'stocktake.manage', 'stocktake.approve',
       'serials.view', 'serials.manage', 'warranty.view', 'warranty.manage', 'warranty.decide',

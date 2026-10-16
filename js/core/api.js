@@ -143,11 +143,32 @@
     return (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   }
 
+  /** GET that returns the response body as TEXT (e.g. the printable invoice HTML). Sends the token, retries once after a refresh. */
+  async function requestText(path, query, isRetry) {
+    const headers = {};
+    const token = window.Storage.getAccessToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await timedFetch(buildUrl(path, query), { method: 'GET', headers }, 45000);
+    if (res.status === 401 && !isRetry && window.Storage.getRefreshToken()) {
+      if (!refreshPromise) refreshPromise = refreshAccessToken().finally(() => { refreshPromise = null; });
+      await refreshPromise;
+      return requestText(path, query, true);
+    }
+    const text = await res.text();
+    if (!res.ok) {
+      let msg = `Request failed (${res.status})`;
+      try { msg = JSON.parse(text).message || msg; } catch { /* not json */ }
+      throw new ApiError(msg, { status: res.status });
+    }
+    return text;
+  }
+
   const withOpts = (o = {}) => ({ headers: o.headers, background: o.background, timeoutMs: o.timeoutMs });
 
   window.Api = {
     ApiError,
     newIdempotencyKey,
+    getText: requestText,
     get: (path, query, opts) => request('GET', path, { query, ...withOpts(opts) }),
     post: (path, body, opts) => request('POST', path, {
       body,
