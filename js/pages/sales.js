@@ -1092,17 +1092,28 @@
     return wp === null ? '' : `<small>${fm(wp)} from ${r.product.moq}</small>`;
   }
 
+  /** Neutral grey placeholder in the shape of the till (search + product list on the left, ticket on the right). */
+  function wsLoadingHtml() {
+    const sk = (h, w = '100%', x = '') => `<div class="skeleton" style="height:${h}px;width:${w};${x}"></div>`;
+    const row = `<div class="pz-load-row">${sk(36, '36px', 'border-radius:var(--radius-sm)')}<div style="flex:1">${sk(12, '55%')}${sk(10, '30%', 'margin-top:8px')}</div>${sk(14, '72px')}</div>`;
+    return `<div class="pz-load" role="status" aria-label="Loading the wholesale till">
+      <div class="pz-load-main">${sk(44, '100%', 'border-radius:var(--radius-md)')}<div class="pz-load-list">${row.repeat(7)}</div></div>
+      <aside class="pz-load-side">${sk(14, '40%')}${sk(40, '100%', 'margin-top:16px;border-radius:var(--radius-md)')}${sk(12, '100%', 'margin-top:28px')}${sk(12, '100%', 'margin-top:12px')}${sk(12, '70%', 'margin-top:12px')}${sk(48, '100%', 'margin-top:36px;border-radius:var(--radius-md)')}</aside>
+    </div>`;
+  }
+
   function renderWsUnavailable(body) {
     const loading = !!ws.loading;
+    if (loading) { body.innerHTML = wsLoadingHtml(); return; }
     body.innerHTML = `
       <div class="card">
         <div class="pz-empty">
-          <i class="fa-solid ${loading ? 'fa-spinner fa-spin' : 'fa-warehouse'}" aria-hidden="true"></i>
-          <strong>${loading ? 'Loading warehouses…' : 'Wholesale is not ready'}</strong>
-          ${esc(loading ? 'One moment.' : (ws.error || 'Turn on "Warehouse & retail stock" in Settings > Business type & features.'))}
-          ${loading ? '' : `<div style="margin-top:var(--space-4);display:flex;gap:var(--space-2);justify-content:center;flex-wrap:wrap">
+          <i class="fa-solid fa-warehouse" aria-hidden="true"></i>
+          <strong>Wholesale is not ready</strong>
+          ${esc(ws.error || 'Turn on "Warehouse & retail stock" in Settings > Business type & features.')}
+          <div style="margin-top:var(--space-4);display:flex;gap:var(--space-2);justify-content:center;flex-wrap:wrap">
             <button class="btn btn-primary" id="ws-retry">Try again</button>
-            <button class="btn btn-secondary" id="ws-to-retail">Switch to retail</button></div>`}
+            <button class="btn btn-secondary" id="ws-to-retail">Switch to retail</button></div>
         </div>
       </div>`;
     $('ws-retry')?.addEventListener('click', async () => { renderWsUnavailable(body); await ensureWsReady(); if (isWs()) renderNewSaleView(); });

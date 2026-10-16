@@ -88,9 +88,7 @@ body.pz-focus-on { overflow: hidden; }
   z-index: var(--pz-z);
   gap: var(--space-3);
   padding: 0 var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
-  background:
-    radial-gradient(1200px 520px at 100% -10%, color-mix(in srgb, var(--color-primary) 7%, transparent), transparent 60%),
-    linear-gradient(180deg, #f8f9fc 0%, #eef0f5 100%);
+  background: var(--color-bg);
 }
 .pz-root .card {
   border-radius: 16px;
@@ -172,8 +170,8 @@ body.pz-focus-on { overflow: hidden; }
   top: 4px; bottom: 4px; left: 4px;
   width: calc(50% - 4px);
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
-  box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--color-primary) 70%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  background: var(--color-primary);
+  box-shadow: var(--shadow-sm);
   transition: transform 260ms cubic-bezier(0.3, 0.9, 0.3, 1.05), background 200ms ease;
 }
 .pz-seg[data-mode="WHOLESALE"]::before { transform: translateX(100%); }
@@ -388,7 +386,7 @@ body.pz-focus-on { overflow: hidden; }
 .pz-hgroup .pz-rgt { align-items: center; }
 .pz-count {
   min-width: 26px; height: 26px; padding: 0 8px; border-radius: var(--radius-full);
-  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark)); color: #fff; font-size: var(--text-xs); font-weight: var(--font-bold);
+  background: var(--color-primary); color: #fff; font-size: var(--text-xs); font-weight: var(--font-bold);
   display: inline-flex; align-items: center; justify-content: center;
   box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--color-primary) 70%, transparent);
 }
@@ -427,8 +425,8 @@ body.pz-focus-on { overflow: hidden; }
   display: flex; align-items: center; justify-content: center;
   width: 76px; height: 76px; margin: 0 auto var(--space-4);
   border-radius: 50%; font-size: 1.9rem; color: var(--color-primary);
-  background: radial-gradient(circle at 30% 25%, #fff, var(--color-primary-50));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 14%, transparent), 0 14px 28px -16px color-mix(in srgb, var(--color-primary) 60%, transparent);
+  background: var(--color-primary-50);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 .pz-empty strong { display: block; color: var(--color-text); font-size: var(--text-lg); margin-bottom: 4px; }
 
@@ -535,18 +533,16 @@ body.pz-focus-on { overflow: hidden; }
   overflow: hidden;
   margin: 0 0 var(--space-3); padding: var(--space-3) var(--space-4);
   border-radius: 16px; color: #fff;
-  background:
-    radial-gradient(140% 160% at 100% 0%, color-mix(in srgb, var(--color-primary) 55%, transparent) 0%, transparent 58%),
-    linear-gradient(155deg, var(--pz-ink-1) 0%, var(--pz-ink-2) 100%);
-  box-shadow: 0 18px 32px -18px rgba(21, 24, 41, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: var(--pz-ink-1);
+  box-shadow: var(--shadow-md);
   display: flex; flex-direction: column; align-items: flex-end; text-align: right;
 }
 .pz-total-label { align-self: stretch; display: flex; justify-content: space-between; font-size: var(--text-sm); opacity: 0.78; letter-spacing: 0.01em; }
 .pz-total-amount { font-size: clamp(2rem, 3vw, 2.9rem); font-weight: 800; line-height: 1.08; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .pz-pay-btn {
   height: 62px; font-size: var(--text-lg); width: 100%; flex-direction: column; gap: 0; line-height: 1.2; border-radius: 14px;
-  background: linear-gradient(180deg, #19c577 0%, #0fa862 100%);
-  box-shadow: 0 14px 24px -14px rgba(18, 183, 106, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  background: #12b76a;
+  box-shadow: var(--shadow-sm);
   transition: transform var(--transition-fast), filter var(--transition-fast);
 }
 .pz-pay-btn:hover:not(:disabled) { filter: brightness(1.04); }
@@ -605,7 +601,7 @@ body.pz-focus-on { overflow: hidden; }
 
 
 /* ------------------------------------------------------ payment modal ---- */
-.pz-pay-total { padding: var(--space-5); border-radius: 18px; background: radial-gradient(140% 160% at 100% 0%, color-mix(in srgb, var(--color-primary) 55%, transparent) 0%, transparent 58%), linear-gradient(155deg, #151829 0%, #262b46 100%); color: #fff; text-align: center; margin-bottom: var(--space-4); box-shadow: 0 18px 32px -18px rgba(21,24,41,.7); }
+.pz-pay-total { padding: var(--space-5); border-radius: 18px; background: var(--pz-ink-1); color: #fff; text-align: center; margin-bottom: var(--space-4); box-shadow: 0 18px 32px -18px rgba(21,24,41,.7); }
 .pz-pay-total span { display: block; font-size: var(--text-sm); opacity: 0.75; }
 .pz-pay-total strong { display: block; font-size: clamp(2.4rem, 8vw, 3.75rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .pz-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-4); }
@@ -715,3 +711,11 @@ body.pz-focus-on { overflow: hidden; }
   body.pz-focus-on .ofl-chip.ofl-ok, body.pz-focus-on .ofl-chip.ofl-info { display: none !important; }
   body.pz-focus-on .ofl-chip { bottom: auto !important; top: calc(env(safe-area-inset-top, 0px) + 6px); left: auto !important; right: 8px; }
 }
+
+/* ---- wholesale till loading state: neutral skeleton, no spinner ---- */
+.pz-load { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--space-4); padding: var(--space-4); align-items: start; }
+.pz-load-main, .pz-load-side { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-4); }
+.pz-load-list { margin-top: var(--space-4); }
+.pz-load-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; border-top: 1px solid var(--color-border); }
+@media (max-width: 900px) { .pz-load { grid-template-columns: 1fr; padding: var(--space-3); } }
+@media (prefers-reduced-motion: reduce) { .pz-load .skeleton { animation: none; } }
