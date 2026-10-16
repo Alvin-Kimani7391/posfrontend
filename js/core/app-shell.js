@@ -34,13 +34,10 @@
     { key: 'onboarding',    label: 'Setup guide',        icon: 'rocket',    href: 'onboarding.html',    permission: 'settings.update', ownerOnly: true, badge: 'setup' },
     { key: 'sales',         label: 'Sales',              icon: 'sales',     href: 'sales.html',         permission: 'sales.view' },
     { key: 'products',      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
-    { key: 'inventory',     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view' },
-    // Wholesale section: shown when the business has warehouses (on by default for the Wholesale business type).
-    // Selling (retail AND wholesale) happens on the single Sales screen, which has a Retail | Wholesale switch.
-    { key: 'wholesale',       label: 'Wholesale',          icon: 'truck',     href: 'wholesale.html',       permission: 'inventory.view', feature: ['multiWarehouse'] },
-    { key: 'wholesale-reports', label: 'Wholesale reports', icon: 'reports',   href: 'wholesale-reports.html', permission: 'reports.profit', feature: ['multiWarehouse'] },
-    { key: 'warehouses',      label: 'Warehouses & stock', icon: 'building',  href: 'warehouses.html',      permission: 'inventory.view', feature: ['multiWarehouse'] },
-    { key: 'payables',        label: 'Supplier payables',  icon: 'wallet',    href: 'payables.html',        permission: 'purchases.view', feature: ['multiWarehouse'] },
+    { key: 'inventory',     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view', wsLabel: 'Wholesale inventory' },
+    // Wholesale is no longer a separate section. For businesses with warehouses (feature multiWarehouse) the normal pages
+    // become hybrids: Dashboard (wholesale desk), Wholesale inventory (warehouses + stock), Suppliers (+ payables) and
+    // Reports (Wholesale tab). Selling, retail AND wholesale, is the single Sales screen (Retail | Wholesale switch).
     // Specialised screens: shown only when the business has the matching feature switched on
     // (feature = ANY of the listed flags) AND the user holds the permission.
     { key: 'batches',       label: 'Batches & expiry',   icon: 'layers',    href: 'batches.html',       permission: 'batches.view',   feature: ['batchTracking', 'expiryTracking'] },
@@ -304,6 +301,9 @@
     return () => window.removeEventListener('businessprofilechange', h);
   }
 
+  /** Sidebar label: wholesale businesses see the hybrid names (e.g. "Wholesale inventory"). */
+  function labelFor(item) { return item.wsLabel && hasFeature('multiWarehouse') ? item.wsLabel : item.label; }
+
   function itemVisibleForBusiness(item) {
     if (!item.feature) return true;
     return hasFeature(...item.feature);
@@ -347,10 +347,10 @@
       return `
         <a class="sidebar-link ${activeClass}" ${gated} data-nav-key="${item.key}"
            href="${disabled ? '#' : item.href}"
-           title="${disabled ? 'Coming soon' : item.label}"
+           title="${disabled ? 'Coming soon' : labelFor(item)}"
            ${disabled ? 'style="opacity:.45;pointer-events:none"' : ''}>
           <span class="icon">${window.Icons.get(item.icon)}</span>
-          <span>${item.label}</span>
+          <span>${labelFor(item)}</span>
           ${item.badge === 'setup' ? setupBadgeHtml() : ''}
         </a>`;
     }).join('');
@@ -362,7 +362,7 @@
               data-href="${item.disabled ? '' : item.href}"
               ${item.disabled ? 'style="opacity:.45"' : ''}>
         <span class="icon">${window.Icons.get(item.icon)}</span>
-        <span>${item.label}</span>
+        <span>${labelFor(item)}</span>
       </button>
     `).join('');
   }

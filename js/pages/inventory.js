@@ -14,6 +14,11 @@
  *   - "Move stock" button: move stock between the two pools (serial-tracked products need their serials)
  *   - a location choice on Receive stock / Adjust, and a location filter + column on Movements
  * Without the feature nothing changes.
+ *
+ * WHOLESALE HUB: for businesses with warehouses this page hands over to js/pages/wholesale-inventory.js ("Wholesale
+ * inventory": warehouses -> receive -> stock -> move -> adjust -> history). That page re-uses the tools below through
+ * window.InventoryTools (receive / adjust / branch transfer / the stock + ledger views), so nothing is duplicated.
+ * warehouses.html now redirects to inventory.html?step=warehouses.
  */
 (function () {
   const state = { view: 'stock', page: 1, limit: 10, search: '', location: '' };
@@ -28,16 +33,35 @@
   let contentEl;
   let branchesCache = null;
   let unsubscribeBranchChange = null;
+  const hooks = { onChanged: null }; // set by the wholesale hub so it can refresh after a receive / adjust
+  const afterChange = () => { if (hooks.onChanged) hooks.onChanged(); else renderActiveView(); };
 
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
-    contentEl = window.AppShell.mount({ title: 'Inventory' });
+    contentEl = window.AppShell.mount({ title: window.AppShell.hasFeature && window.AppShell.hasFeature('multiWarehouse') && window.WholesaleInventory ? 'Wholesale inventory' : 'Inventory' });
     if (!contentEl) return;
 
     // the warehouse tabs depend on the business features, so wait for the profile before drawing the page
     try { await window.AppShell.whenProfileReady?.(); } catch { /* the cached profile is used */ }
     await getBranches();
+
+    // Wholesale businesses get the guided "Wholesale inventory" page; it borrows the tools below.
+    if (wh() && window.WholesaleInventory) {
+      window.InventoryTools = {
+        receive: openReceiveModal,
+        adjust: openAdjustModal,
+        branchTransfer: openTransferModal,
+        /** Draw one of the classic views (overview | stock | lowstock | movements | transfers | locmoves) into #view-toolbar / #view-body / #pagination. */
+        showView(view) { state.view = view; state.page = 1; return renderActiveView(); },
+        setSearch(v) { state.search = v || ''; },
+        onChanged(fn) { hooks.onChanged = fn; },
+      };
+      document.title = `Wholesale inventory · ${window.AppShell.APP_NAME}`;
+      window.WholesaleInventory.mount(contentEl, window.InventoryTools);
+      return;
+    }
+
     contentEl.innerHTML = pageSkeleton();
     bindHeaderActions();
     bindTabs();
@@ -555,7 +579,7 @@
         });
         window.UI.toast.success(wh() && raw.location === 'WAREHOUSE' ? 'Stock received into the warehouse' : 'Stock received');
         window.UI.closeModal();
-        renderActiveView();
+        afterChange();
       } catch (err) {
         window.UI.toast.error(err.message);
       } finally {
@@ -632,7 +656,7 @@
         });
         window.UI.toast.success('Stock adjusted');
         window.UI.closeModal();
-        renderActiveView();
+        afterChange();
       } catch (err) {
         window.UI.toast.error(err.message);
       } finally {
@@ -728,7 +752,7 @@
         });
         window.UI.toast.success('Transfer requested');
         window.UI.closeModal();
-        document.querySelector('[data-view="transfers"]').click();
+        const tabBtn = document.querySelector('[data-view="transfers"]'); if (tabBtn) tabBtn.click(); else afterChange();
       } catch (err) {
         window.UI.toast.error(err.message);
       } finally {

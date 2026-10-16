@@ -1,5 +1,9 @@
 /**
  * suppliers.js
+ * WHOLESALE BUSINESSES (feature multiWarehouse): this page hands over to js/pages/wholesale-suppliers.js, the hybrid
+ * "Suppliers" hub (directory + payables: ageing, invoices, payments, statements). payables.html redirects here.
+ * Everyone else keeps the simple supplier list below, unchanged.
+ *
  * Follows the same list -> fetchAndRender -> modal pattern as branches.js.
  * currentBalance is read-only here (what we owe them) - it's only ever
  * changed by receiving/paying a purchase, never edited directly.
@@ -13,6 +17,8 @@
   async function init() {
     contentEl = window.AppShell.mount({ title: 'Suppliers' });
     if (!contentEl) return;
+    try { await window.AppShell.whenProfileReady?.(); } catch { /* cached profile is used */ }
+    if (window.WholesaleSuppliers && window.WS && window.WS.on('multiWarehouse')) { window.WholesaleSuppliers.mount(contentEl); return; }
     contentEl.innerHTML = pageSkeleton();
     bindToolbar();
     await fetchAndRender();

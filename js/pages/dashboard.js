@@ -1,5 +1,8 @@
 /**
  * dashboard.js
+ * WHOLESALE BUSINESSES (feature multiWarehouse): the Wholesale desk is part of this page. It sits under the KPI tiles and
+ * follows the same date range + branch filter (see js/pages/wholesale-dashboard.js). The old wholesale.html redirects here.
+ *
  * Two dashboards:
  *
  *  - Full dashboard (reports.view): unchanged - takings, KPIs, charts,
@@ -40,6 +43,7 @@
   let canSelfShift = false;
   let token = 0;
   let timer = null;
+  const wsOn = () => !!(window.WholesaleDashboard && window.WS && window.AppShell.hasFeature && window.AppShell.hasFeature('multiWarehouse'));
 
   document.addEventListener('DOMContentLoaded', init);
 
@@ -53,6 +57,7 @@
     canSelfSales = window.Permissions.can(user, 'sales.view') || window.Permissions.can(user, 'sales.create');
     canSelfInventory = window.Permissions.can(user, 'inventory.view');
     canSelfShift = window.Permissions.can(user, 'shifts.view');
+    try { await window.AppShell.whenProfileReady?.(); } catch { /* cached profile is used */ }
     businessId = await ensureBusinessId();
 
     contentEl.innerHTML = pageSkeleton();
@@ -111,9 +116,13 @@
       </div>
 
       <div class="quick-actions">
-        <a class="qa primary" href="sales.html" data-requires-permission="sales.view">${window.Icons.get('sales')} New sale</a>
+        ${wsOn() ? `
+        <a class="qa primary" href="sales.html?mode=wholesale" data-requires-permission="sales.view">${window.Icons.get('sales')} Wholesale sale</a>
+        <a class="qa" href="sales.html?mode=retail" data-requires-permission="sales.view">${window.Icons.get('sales')} Retail sale</a>` : `
+        <a class="qa primary" href="sales.html" data-requires-permission="sales.view">${window.Icons.get('sales')} New sale</a>`}
         <a class="qa" href="products.html" data-requires-permission="products.view">${window.Icons.get('products')} Products</a>
-        <a class="qa" href="inventory.html" data-requires-permission="inventory.view">${window.Icons.get('inventory')} Inventory</a>
+        <a class="qa" href="inventory.html" data-requires-permission="inventory.view">${window.Icons.get('inventory')} ${wsOn() ? 'Wholesale inventory' : 'Inventory'}</a>
+        ${wsOn() ? `<a class="qa" href="suppliers.html" data-requires-permission="suppliers.view">${window.Icons.get('truck')} Suppliers</a>` : ''}
         <a class="qa" href="customers.html" data-requires-permission="customers.view">${window.Icons.get('employees')} Customers</a>
         <a class="qa" href="crm.html" data-requires-permission="reports.view">${window.Icons.get('employees')} CRM</a>
         <a class="qa" href="expenses.html" data-requires-permission="expenses.view">${window.Icons.get('reports')} Expenses</a>
@@ -213,6 +222,8 @@
 
       <div class="kpi-grid" id="dash-kpi-grid">${tiles.join('')}</div>
 
+      ${wsOn() ? '<div id="ws-slot"></div>' : ''}
+
       <div class="chart-grid g-1-1">
         ${RT.chartCard({ id: 'd-pay', title: 'Payment mix', subtitle: 'Cash, M-PESA, card and more' })}
         ${RT.chartCard({ id: 'd-products', title: 'Top products', subtitle: 'Best five by revenue' })}
@@ -275,13 +286,15 @@
     });
 
     window.Permissions.applyPermissionGates(body, user);
+
+    // Wholesale desk: same dates + branch as the rest of the dashboard.
+    const slot = document.getElementById('ws-slot');
+    if (slot) {
+      const q = filterBar.getQuery();
+      window.WholesaleDashboard.render(slot, { from: st.from, to: st.to, branchId: q.branchId, canProfit });
+    }
   }
 
-
-
-
-
-  
   /* ==================================================================== *
    * PERSONAL DASHBOARD (no reports.view) - Cashier, Storekeeper, custom roles
    * ==================================================================== */

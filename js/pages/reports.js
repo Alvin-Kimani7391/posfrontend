@@ -1,5 +1,9 @@
 /**
  * reports.js
+ * WHOLESALE BUSINESSES (feature multiWarehouse) get a ninth "Wholesale" tab: the wholesale report lives here with every
+ * other report, on the shared date + branch filter (js/pages/wholesale-report.js). wholesale-reports.html redirects to
+ * reports.html?tab=wholesale. Open a tab directly with reports.html?tab=<key>.
+ *
  * One page, eight reports (Sales, Profit & loss, Payments, Cashiers, Expenses,
  * Inventory, Customers owing, Suppliers owed). Same list -> fetch -> render
  * pattern as the other pages, with a shared filter bar on top.
@@ -26,6 +30,7 @@
   const TABS = [
     { key: 'sales', label: 'Sales', endpoint: 'sales', permission: 'reports.view', scope: { dates: true, branch: true, cashier: true }, render: renderSales },
     { key: 'profit', label: 'Profit & loss', endpoint: 'profit', permission: 'reports.profit', scope: { dates: true, branch: true, cashier: false }, render: renderProfit },
+    { key: 'wholesale', label: 'Wholesale', endpoint: 'wholesale', permission: 'reports.profit', feature: 'multiWarehouse', extra: { top: 100 }, scope: { dates: true, branch: true, cashier: false }, render: renderWholesale },
     { key: 'payments', label: 'Payments', endpoint: 'payments', permission: 'reports.view', scope: { dates: true, branch: true, cashier: false }, render: renderPayments },
     { key: 'cashiers', label: 'Cashiers', endpoint: 'cashiers', permission: 'reports.view', scope: { dates: true, branch: true, cashier: false }, render: renderCashiers },
     { key: 'expenses', label: 'Expenses', endpoint: 'expenses', permission: 'reports.view', scope: { dates: true, branch: true, cashier: false }, render: renderExpenses },
@@ -39,6 +44,7 @@
   let filterBar;
   let user;
   let tabs = [];
+  let initialTab = '';
 
   document.addEventListener('DOMContentLoaded', init);
 
@@ -52,7 +58,10 @@
       return;
     }
 
-    tabs = TABS.filter((t) => window.Permissions.can(user, t.permission));
+    try { await window.AppShell.whenProfileReady?.(); } catch { /* cached profile is used */ }
+    tabs = TABS.filter((t) => window.Permissions.can(user, t.permission) && (!t.feature || (window.AppShell.hasFeature && window.AppShell.hasFeature(t.feature))));
+    const wantTab = new URLSearchParams(window.location.search).get('tab');
+    initialTab = (tabs.find((t) => t.key === wantTab) || tabs[0]).key;
     contentEl.innerHTML = pageSkeleton();
 
     filterBar = RT.createFilterBar(document.getElementById('filters'), {
@@ -84,7 +93,7 @@
       </div>
       <div id="filters"></div>
       <div class="tabs" style="margin-bottom: var(--space-4)" role="tablist">
-        ${tabs.map((t, i) => `<button class="tab-btn ${i === 0 ? 'active' : ''}" role="tab" data-tab="${t.key}">${esc(t.label)}</button>`).join('')}
+        ${tabs.map((t) => `<button class="tab-btn ${t.key === initialTab ? 'active' : ''}" role="tab" data-tab="${t.key}">${esc(t.label)}</button>`).join('')}
       </div>
       <p class="report-meta" id="report-meta"></p>
       <div id="report-body"></div>
@@ -99,7 +108,7 @@
         loadTab();
       });
     });
-    state.tab = tabs[0].key;
+    state.tab = initialTab || tabs[0].key;
   }
 
   /* ------------------------------------------------------------------ *
@@ -123,7 +132,7 @@
       let data = state.cache[cacheKey];
       if (!data) {
         body.innerHTML = loadingHtml();
-        const res = await window.Api.get(`/reports/${tab.endpoint}`, query);
+        const res = await window.Api.get(`/reports/${tab.endpoint}`, tab.extra ? { ...query, ...tab.extra } : query);
         data = res && res.data !== undefined ? res.data : res;
         state.cache[cacheKey] = data;
       }
@@ -771,6 +780,14 @@
   /* ================================================================== *
    * SUPPLIERS OWED
    * ================================================================== */
+  /* ================================================================== *
+   * WHOLESALE (wholesale businesses only) - see js/pages/wholesale-report.js
+   * ================================================================== */
+  function renderWholesale(el, d, ctx) {
+    if (!window.WholesaleReport) { el.innerHTML = emptyReport('Wholesale report unavailable', 'Reload the page to try again.'); return null; }
+    return window.WholesaleReport.render(el, d, ctx);
+  }
+
   function renderSuppliers(el, d) {
     const list = d.suppliers || [];
     if (!list.length) {

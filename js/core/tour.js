@@ -145,6 +145,7 @@
         { target: '.quick-actions', title: 'Shortcuts for common jobs', body: 'Start a sale, check products or record an expense in one tap. Buttons you do not have access to are hidden.' },
         { target: '#dash-filters, #dash-personal-filters', title: 'Choose the period', body: 'Switch between today, yesterday, 7 days, 30 days or this month. Every figure on this page follows your choice. <b>If you see zero, widen the period.</b>' },
         { target: '.takings', title: 'Money in, at a glance', body: 'Your sales for the period and how customers paid: cash, M-PESA, card or credit.' },
+        { target: '#ws-slot', title: 'Your wholesale desk', body: 'Wholesale sales, credit owed to you, overdue invoices, warehouse stock and supplier payables. It follows the same period and branch as the rest of the page.' },
         { target: '#dash-kpi-grid, #dash-personal-kpi-grid', title: 'Key figures', body: 'Profit, refunds and what is owed to you or by you. Figures with a drop-down can be tapped to list the sales behind them. Cashiers can tap <b>Transactions</b> to see their own sales.' },
         { target: '#dash-refresh', title: 'Always up to date', body: "Today's figures refresh every minute. Press Refresh to update right away." },
         { target: cardOf('#copy-business-id'), title: 'Give staff their login details', body: 'Staff sign in at the till with your <b>Business ID</b>, their employee code and their PIN. Copy the ID or a ready-made login link here.' },
@@ -209,6 +210,8 @@
     inventory: {
       label: 'Inventory', href: 'inventory.html', version: 1, permission: 'inventory.view',
       steps: [
+        { target: '#wi-flow', title: 'Six steps, in order', body: 'Wholesale inventory follows the way you work: <b>1 Warehouses</b>, <b>2 Receive</b>, <b>3 Stock</b>, <b>4 Move to shop</b>, <b>5 Adjust and count</b>, <b>6 History</b>. Tap any step, or use the Next button at the bottom of each one.' },
+        { target: '#wi-stats', title: 'Your stock at a glance', body: 'Units and value in the warehouses and on the shop floor for the branch you are working in.' },
         { target: '.tabs', title: 'Four views of your stock', body: '<b>Stock levels</b> shows what you have. <b>Low stock</b> lists what to reorder. <b>Movements</b> records every change and who made it. <b>Transfers</b> moves stock between branches.' },
         { target: '#adjust-stock-btn', title: 'Fix mistakes', body: 'Use Adjust for damaged, expired or lost items and count corrections. A reason is required and the change is logged.' },
         { target: '#new-transfer-btn', title: 'Move stock between branches', body: 'The other branch approves, then you dispatch, then they mark it received.' },
@@ -251,6 +254,8 @@
     suppliers: {
       label: 'Suppliers', href: 'suppliers.html', version: 1, permission: 'suppliers.view',
       steps: [
+        { target: '#sp-stats', title: 'What you owe, at a glance', body: 'Total owed to suppliers, what is overdue and what is still within terms.' },
+        { target: '#sp-tabs', title: 'Suppliers and payables together', body: '<b>Suppliers</b> is your directory. <b>Ageing</b>, <b>Invoices</b>, <b>Payments</b> and <b>Statements</b> are the money side. Tap a supplier name to see everything about them in one place.' },
         { target: '#search-input', title: 'Find a supplier', body: 'Search by name or phone.' },
         { target: '.table-wrap', title: 'What you owe', body: 'The Payable column shows what you still owe each supplier. It only changes when you receive or pay a purchase.' },
         { target: '#add-supplier-btn', title: 'Add a supplier', body: 'Save their phone, payment terms and tax PIN so purchases are quick to create.' },

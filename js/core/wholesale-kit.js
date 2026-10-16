@@ -1,6 +1,11 @@
 /**
- * wholesale-kit.js - shared helpers for the wholesale section
- * (wholesale.html, warehouses.html, payables.html). Selling lives on sales.html (Retail | Wholesale switch).
+ * wholesale-kit.js - shared helpers for the wholesale experience. Wholesale is no longer a separate section:
+ * it lives INSIDE four hybrid pages (shown when the business has the multiWarehouse feature):
+ *   dashboard.html  -> js/pages/wholesale-dashboard.js   (wholesale desk under the normal dashboard)
+ *   inventory.html  -> js/pages/wholesale-inventory.js   ("Wholesale inventory": warehouses, receive, stock, move, adjust, history)
+ *   suppliers.html  -> js/pages/wholesale-suppliers.js   (suppliers + payables: ageing, invoices, payments, statements)
+ *   reports.html    -> js/pages/wholesale-report.js      (a "Wholesale" tab next to every other report)
+ * Selling lives on sales.html (Retail | Wholesale switch).
  * Money rule (matches the backend): /warehouse/catalog returns CENTS, every other endpoint used here returns KES.
  * Everything WE SEND is KES (the backend converts to cents).
  */
@@ -14,17 +19,23 @@
   const icon = (n) => window.Icons.get(n);
   const dayKey = (d) => new Date(d).toISOString().slice(0, 10);
 
-  const PAGES = [
-    { key: 'wholesale',       label: 'Overview',        href: 'wholesale.html',       icon: 'dashboard', perm: 'inventory.view' },
-    { key: 'sales',           label: 'Sell',            href: 'sales.html?mode=wholesale', icon: 'sales', perm: 'sales.create' },
-    { key: 'reports',         label: 'Reports',         href: 'wholesale-reports.html', icon: 'reports', perm: 'reports.profit' },
-    { key: 'warehouses',      label: 'Warehouses & stock', href: 'warehouses.html',   icon: 'inventory', perm: 'inventory.view' },
-    { key: 'payables',        label: 'Supplier payables', href: 'payables.html',      icon: 'wallet',    perm: 'purchases.view' },
-  ];
-  function subnav(active) {
-    return `<nav class="ws-subnav">${PAGES.filter((p) => can(p.perm)).map((p) =>
-      `<a href="${p.href}" class="${p.key === active ? 'active' : ''}"><span class="icon">${icon(p.icon)}</span>${p.label}</a>`).join('')}</nav>`;
+  /** Kept so old callers do not break: wholesale pages no longer carry a second navigation bar. */
+  function subnav() { return ''; }
+
+  /** True when this business uses warehouses (the wholesale feature set). */
+  const isWs = () => on('multiWarehouse');
+
+  /** Pill tabs used by the hybrid pages. items: [{key,label,icon?,count?,perm?}] */
+  function hubTabs(items, active, id = 'hub-tabs') {
+    return `<nav class="hub-tabs" id="${id}" role="tablist">${items.filter((t) => !t.perm || can(t.perm)).map((t) =>
+      `<button type="button" role="tab" class="hub-tab ${t.key === active ? 'active' : ''}" data-tab="${t.key}">${t.icon ? `<span class="icon">${icon(t.icon)}</span>` : ''}<span>${esc(t.label)}</span>${t.count != null ? `<em>${esc(t.count)}</em>` : ''}</button>`).join('')}</nav>`;
   }
+
+  /** Small stat tile used in hub headers. tone: '' | success | warning | danger | info */
+  function stat(label, value, foot = '', tone = '') {
+    return `<div class="hub-stat ${tone ? `tone-${tone}` : ''}"><span>${esc(label)}</span><b>${value}</b>${foot ? `<small>${foot}</small>` : ''}</div>`;
+  }
+
   function header(title, sub, actionsHtml = '') {
     return `<div class="page-header"><div><h1>${esc(title)}</h1><p>${esc(sub)}</p></div><div class="mk-actions" style="margin:0">${actionsHtml}</div></div>`;
   }
@@ -243,6 +254,79 @@
     render();
   }
 
+
+  /* ------------------------------------------------------------------ *
+   * Warehouse create / edit  and  stock adjustment (shared by the inventory hub and anywhere else)
+   * ------------------------------------------------------------------ */
+  async function openWarehouseModal(w, { onDone } = {}) {
+    const edit = !!w;
+    let branches = [];
+    if (!edit) { try { branches = (await window.Api.get('/branches', { limit: 100 })).data.items || []; } catch { branches = []; } }
+    const modal = window.UI.openModal({
+      title: edit ? `Edit ${w.name}` : 'New warehouse', maxWidth: '560px',
+      bodyHtml: `<form id="wm-form">
+        <div class="field"><label>Name</label><input class="input" name="name" required maxlength="80" value="${esc(w?.name || '')}" /></div>
+        ${edit ? '' : `<div class="form-row"><div class="field"><label>Branch</label><select class="select" name="branchId">${branches.map((b) => `<option value="${b._id}" ${b._id === window.AppShell.getActiveBranchId() ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></div>
+          <div class="field"><label>Code <span class="text-muted">(optional)</span></label><input class="input" name="code" maxlength="20" /></div></div>`}
+        <div class="form-row"><div class="field"><label>Phone</label><input class="input" name="phone" maxlength="30" value="${esc(w?.phone || '')}" /></div>
+          <div class="field"><label>Address</label><input class="input" name="address" maxlength="200" value="${esc(w?.address || '')}" /></div></div>
+        <div class="field"><label>Notes</label><textarea class="textarea" name="notes" maxlength="500" rows="2">${esc(w?.notes || '')}</textarea></div>
+        <div class="field"><label><input type="checkbox" name="allowSales" ${w?.allowSales === false ? '' : 'checked'} /> Can sell from this warehouse (untick for storage only)</label></div>
+        ${edit && !w.isDefault && w.status !== 'inactive' ? '<div class="field"><label><input type="checkbox" name="isDefault" /> Make this the default warehouse of its branch</label></div>' : ''}
+        ${edit ? `<div class="field"><label><input type="checkbox" name="inactive" ${w.status === 'inactive' ? 'checked' : ''} /> Inactive <span class="text-muted">(must be empty to deactivate)</span></label></div>` : ''}
+      </form>`,
+      footerHtml: '<button class="btn btn-secondary" data-action="close">Cancel</button><button class="btn btn-primary" id="wm-save">Save</button>',
+    });
+    bindClose(modal);
+    modal.querySelector('#wm-save').addEventListener('click', async (ev) => {
+      const f = modal.querySelector('#wm-form'); const g = (n) => f.elements[n];
+      if (!g('name').value.trim()) return window.UI.toast.error('Name is required');
+      const data = { name: g('name').value.trim(), phone: g('phone').value.trim() || undefined, address: g('address').value.trim() || undefined, notes: g('notes').value.trim() || undefined, allowSales: g('allowSales').checked };
+      if (!edit) { data.branchId = g('branchId').value; if (g('code').value.trim()) data.code = g('code').value.trim(); }
+      else { if (g('isDefault')?.checked) data.isDefault = true; data.status = g('inactive').checked ? 'inactive' : 'active'; }
+      window.UI.setButtonLoading(ev.currentTarget, true);
+      try {
+        edit ? await window.Api.patch(`/warehouse/${w._id}`, data) : await window.Api.post('/warehouse', data);
+        bust(); window.UI.closeModal(); window.UI.toast.success('Warehouse saved'); if (onDone) onDone();
+      } catch (err) { window.UI.setButtonLoading(ev.currentTarget, false); window.UI.toast.error(err.message); }
+    });
+  }
+
+  function openAdjustModal(w, { onDone } = {}) {
+    if (!w) return window.UI.toast.error('Choose a warehouse');
+    let picked = null;
+    const modal = window.UI.openModal({
+      title: `Adjust stock · ${w.name}`, maxWidth: '520px',
+      bodyHtml: `<div class="field"><label>Product</label><button type="button" class="btn btn-secondary btn-block" id="ad-pick">Choose product…</button></div>
+        <div class="form-row"><div class="field"><label>Type</label><select class="select" id="ad-type">
+          <option value="OPENING_STOCK">Opening stock (add)</option><option value="ADJUSTMENT_IN">Correction: add</option><option value="ADJUSTMENT_OUT">Correction: remove</option>
+          <option value="DAMAGE">Damaged (remove)</option><option value="EXPIRED">Expired (remove)</option><option value="LOST">Lost (remove)</option></select></div>
+          <div class="field"><label>Quantity</label><input class="input" id="ad-qty" type="number" min="0" step="any" /></div></div>
+        <div class="field"><label>Unit</label><select class="select" id="ad-unit"><option value="">—</option></select></div>
+        <div class="field"><label>Reason</label><input class="input" id="ad-reason" maxlength="300" placeholder="e.g. Opening count, broken carton" /></div>`,
+      footerHtml: '<button class="btn btn-secondary" data-action="close">Cancel</button><button class="btn btn-primary" id="ad-save">Save adjustment</button>',
+    });
+    bindClose(modal);
+    modal.querySelector('#ad-pick').addEventListener('click', () => window.ProductPicker.open({ onSelect: ({ product, variant }) => {
+      picked = { product, variant };
+      modal.querySelector('#ad-pick').textContent = product.name + (variant ? ` (${Object.values(variant.attributes || {}).join(', ')})` : '');
+      modal.querySelector('#ad-unit').innerHTML = `<option value="">${esc(product.unit || 'piece')} (base)</option>` + (product.units || []).filter((u) => u.status !== 'inactive').map((u) => `<option value="${u._id}">${esc(u.name)} (${u.factor} ${esc(product.unit || '')})</option>`).join('');
+    } }));
+    modal.querySelector('#ad-save').addEventListener('click', async (ev) => {
+      const q = Number(modal.querySelector('#ad-qty').value); const type = modal.querySelector('#ad-type').value; const reason = modal.querySelector('#ad-reason').value.trim();
+      if (!picked) return window.UI.toast.error('Choose a product');
+      if (!(q > 0)) return window.UI.toast.error('Enter a quantity above zero');
+      if (!reason) return window.UI.toast.error('Give a reason');
+      const sign = ['OPENING_STOCK', 'ADJUSTMENT_IN'].includes(type) ? 1 : -1;
+      window.UI.setButtonLoading(ev.currentTarget, true);
+      try {
+        await window.Api.post(`/warehouse/${w._id}/adjust`, { productId: picked.product._id, variantId: picked.variant?._id, quantity: sign * q, unitId: modal.querySelector('#ad-unit').value || undefined, type, reason });
+        window.UI.closeModal(); window.UI.toast.success('Stock adjusted'); bust(); if (onDone) onDone();
+      } catch (err) { window.UI.setButtonLoading(ev.currentTarget, false); window.UI.toast.error(err.message); }
+    });
+  }
+
   window.WS = { esc, kes, cents, num, can, on, icon, dayKey, subnav, header, featureOff, warehouses, bust, settings, whOptions, branchOf, unitLabel,
-    tableShell, errRow, emptyRow, pager, guard, bindClose, openTransferModal };
+    tableShell, errRow, emptyRow, pager, guard, bindClose, openTransferModal,
+    isWs, hubTabs, stat, openWarehouseModal, openAdjustModal };
 })(window);
