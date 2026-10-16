@@ -1,7 +1,8 @@
 /**
  * admin-billing-plans.js - view, edit and create plans. A plan is an ordered list of phases:
  *   TRIAL (free days) | INSTALLMENTS (total split into N monthly parts) | RECURRING (FLAT or TIERED monthly fee).
- * Money is typed in KES and sent as cents. For TIERED + SALES_VALUE the tier limits are also KES.
+ * Every plan is priced in ONE currency (KES or TZS, chosen when the plan is created). Money is typed in that currency and
+ * sent as cents. For TIERED + SALES_VALUE the tier limits are in the same currency.
  * Editing a plan only changes FUTURE invoices; invoices already issued keep their amounts.
  */
 (function () {
@@ -9,6 +10,7 @@
   const { esc, kes, formModal, val } = AB;
   let el;
   let plans = [];
+  let editCur = 'KES'; // currency of the plan being edited
 
   document.addEventListener('DOMContentLoaded', () => {
     el = window.AdminShell.mount({ title: 'Billing plans' });
@@ -29,7 +31,7 @@
     host.innerHTML = window.UI.skeletonRows(3, 1);
     try {
       ({ data: { items: plans } } = await window.Api.get('/admin/billing/plans'));
-      host.innerHTML = plans.map(planCard).join('') || window.UI.emptyStateHtml({ icon: 'reports', title: 'No plans yet' });
+      host.innerHTML = plans.map((p) => planCard(p)).join('') || window.UI.emptyStateHtml({ icon: 'reports', title: 'No plans yet' });
       host.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => openEditor(plans.find((p) => p._id === b.dataset.edit))));
       host.querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', () => toggle(plans.find((p) => p._id === b.dataset.toggle), b)));
     } catch (err) {
@@ -38,7 +40,8 @@
   }
 
   const unit = (m) => (m === 'SALES_VALUE' ? 'in sales' : 'sales');
-  function phaseLine(ph) {
+  function phaseLine(ph, cur) {
+    const kes = (c) => AB.kes(c, cur);
     if (ph.type === 'TRIAL') return `<b>${esc(ph.name)}</b>: ${ph.durationDays} days free`;
     if (ph.type === 'INSTALLMENTS') return `<b>${esc(ph.name)}</b>: ${kes(ph.totalAmountCents)} over ${ph.durationMonths} month(s) in ${ph.installments || ph.durationMonths} monthly instalment(s)`;
     const every = ph.intervalMonths > 1 ? `every ${ph.intervalMonths} months` : 'monthly';
@@ -54,14 +57,14 @@
     return `
       <section class="card bl-card-gap">
         <div class="card-header">
-          <div><h2>${esc(p.name)} <span class="badge ${p.isActive ? 'badge-success' : 'badge-neutral'}">${p.isActive ? 'Active' : 'Inactive'}</span></h2>
+          <div><h2>${esc(p.name)} ${AB.curBadge(p.currency)} <span class="badge ${p.isActive ? 'badge-success' : 'badge-neutral'}">${p.isActive ? 'Active' : 'Inactive'}</span></h2>
             <p class="text-sm text-muted">Key: <code>${esc(p.key)}</code> · ${p.subscribers} business(es)${p.description ? ` · ${esc(p.description)}` : ''}</p></div>
           <div style="display:flex;gap:var(--space-2)">
             <button class="btn btn-secondary btn-sm" data-edit="${esc(p._id)}">Edit</button>
             <button class="btn btn-ghost btn-sm" data-toggle="${esc(p._id)}">${p.isActive ? 'Deactivate' : 'Activate'}</button>
           </div>
         </div>
-        <div class="card-body"><ol class="bl-plan-lines">${p.phases.map((ph) => `<li>${phaseLine(ph)}</li>`).join('')}</ol></div>
+        <div class="card-body"><ol class="bl-plan-lines">${p.phases.map((ph) => `<li>${phaseLine(ph, p.currency || 'KES')}</li>`).join('')}</ol></div>
       </section>`;
   }
 
@@ -103,7 +106,7 @@
     } else if (ph.type === 'INSTALLMENTS') {
       body = `
         <div class="form-row">
-          <div class="field"><label>Total to pay (KES)</label>${inp(i, 'totalKES', ph.totalKES, 'type="number" min="0" step="1"')}</div>
+          <div class="field"><label>Total to pay (${editCur})</label>${inp(i, 'totalKES', ph.totalKES, 'type="number" min="0" step="1"')}</div>
           <div class="field"><label>Spread over (months)</label>${inp(i, 'instMonths', ph.instMonths, 'type="number" min="1" max="60"')}</div>
         </div>
         <div class="form-row">
@@ -123,15 +126,15 @@
           <div class="field"><label>Due after issue (days)</label>${inp(i, 'dueAfterDays', ph.dueAfterDays, 'type="number" min="0" max="60"')}</div>
         </div>
         ${ph.pricingMode === 'FLAT'
-          ? `<div class="field"><label>Amount (KES)</label>${inp(i, 'amountKES', ph.amountKES, 'type="number" min="0" step="1"')}</div>`
+          ? `<div class="field"><label>Amount (${editCur})</label>${inp(i, 'amountKES', ph.amountKES, 'type="number" min="0" step="1"')}</div>`
           : `<div class="field"><label>Usage measured by (previous month)</label>
-              <select class="select" data-i="${i}" data-f="tierMetric" data-rerender="1"><option value="TRANSACTION_COUNT" ${!sv ? 'selected' : ''}>Number of sales</option><option value="SALES_VALUE" ${sv ? 'selected' : ''}>Total sales value (KES)</option></select></div>
+              <select class="select" data-i="${i}" data-f="tierMetric" data-rerender="1"><option value="TRANSACTION_COUNT" ${!sv ? 'selected' : ''}>Number of sales</option><option value="SALES_VALUE" ${sv ? 'selected' : ''}>Total sales value (${editCur})</option></select></div>
             <label class="text-sm" style="font-weight:600">Tiers <span class="text-muted">(lowest first; the LAST tier must have no limit)</span></label>
             ${ph.tiers.map((t, k) => `
               <div class="bl-tier">
                 <input class="input" data-i="${i}" data-t="${k}" data-f="label" value="${esc(t.label)}" placeholder="Label" />
-                <input class="input" data-i="${i}" data-t="${k}" data-f="upTo" value="${esc(t.upTo)}" type="number" min="0" step="${sv ? 1 : 1}" placeholder="${sv ? 'Up to (KES)' : 'Up to (sales)'} - blank = no limit" />
-                <input class="input" data-i="${i}" data-t="${k}" data-f="amountKES" value="${esc(t.amountKES)}" type="number" min="0" step="1" placeholder="Fee (KES)" />
+                <input class="input" data-i="${i}" data-t="${k}" data-f="upTo" value="${esc(t.upTo)}" type="number" min="0" step="${sv ? 1 : 1}" placeholder="${sv ? `Up to (${editCur})` : 'Up to (sales)'} - blank = no limit" />
+                <input class="input" data-i="${i}" data-t="${k}" data-f="amountKES" value="${esc(t.amountKES)}" type="number" min="0" step="1" placeholder="Fee (${editCur})" />
                 <button type="button" class="btn btn-ghost btn-sm" data-act="rm-tier" data-i="${i}" data-t="${k}" ${ph.tiers.length <= 1 ? 'disabled' : ''}>&times;</button>
               </div>`).join('')}
             <button type="button" class="btn btn-secondary btn-sm" data-act="add-tier" data-i="${i}">Add tier</button>`}`;
@@ -162,6 +165,7 @@
 
   function openEditor(plan) {
     const isEdit = !!plan;
+    editCur = (plan && plan.currency) || 'KES';
     const phases = isEdit ? plan.phases.map(fromApi) : [blank('TRIAL'), blank('INSTALLMENTS'), blank('RECURRING')];
     if (!isEdit) { phases[0].name = 'Free trial'; phases[1].name = 'Setup'; phases[2].name = 'Monthly maintenance'; phases[1].dueAfterDays = 0; }
 
@@ -173,6 +177,12 @@
           <div class="field"><label>Plan name</label><input class="input" name="name" required minlength="2" maxlength="80" value="${esc(plan ? plan.name : '')}" /></div>
           <div class="field"><label>Key ${isEdit ? '<span class="text-muted">(fixed)</span>' : ''}</label><input class="input" name="key" ${isEdit ? 'readonly' : 'required'} pattern="[a-z0-9][a-z0-9_-]{1,39}" placeholder="e.g. premium" value="${esc(plan ? plan.key : '')}" /></div>
         </div>
+        <div class="field"><label>Currency</label>
+          <select class="select" name="currency" ${isEdit ? 'disabled' : ''}>
+            <option value="KES" ${editCur === 'KES' ? 'selected' : ''}>Kenya shillings (KES) - Kenyan businesses</option>
+            <option value="TZS" ${editCur === 'TZS' ? 'selected' : ''}>Tanzanian shillings (TZS) - Tanzanian businesses</option>
+          </select>
+          <span class="field-hint">${isEdit ? 'Fixed once the plan exists.' : 'A business can only be on a plan priced in its own currency. All amounts below are in this currency.'}</span></div>
         <div class="field"><label>Description <span class="text-muted">(optional)</span></label><input class="input" name="description" maxlength="300" value="${esc(plan ? plan.description : '')}" /></div>
         <div id="pl-phases"></div>
         <button type="button" class="btn btn-secondary btn-sm" data-act="add-phase">Add phase</button>`,
@@ -188,6 +198,8 @@
     });
 
     const host = modal.querySelector('#pl-phases');
+    const curSel = modal.querySelector('[name="currency"]');
+    if (curSel) curSel.addEventListener('change', () => { collect(); editCur = curSel.value; draw(); });
     const draw = () => { host.innerHTML = phases.map((ph, i) => phaseHtml(ph, i, phases.length)).join(''); };
 
     function collect() {
@@ -203,6 +215,7 @@
       if (!phases.length) throw new Error('Add at least one phase');
       return {
         name: val(f, 'name'),
+        currency: editCur,
         description: val(f, 'description') || undefined,
         phases: phases.map((ph, i) => {
           const label = `phase ${i + 1}`;

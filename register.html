@@ -34,9 +34,27 @@
 
         <div class="form-row">
           <div class="field">
+            <label for="country">Country</label>
+            <select class="select" id="country" name="country">
+              <option value="KE">Kenya (KES)</option>
+              <option value="TZ">Tanzania (TZS)</option>
+            </select>
+            <span class="field-hint">Sets your currency, tax labels and receipts</span>
+          </div>
+          <div class="field">
+            <label for="language">Language</label>
+            <select class="select" id="language" name="language">
+              <option value="en">English</option>
+              <option value="sw">Kiswahili</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="field">
             <label for="phone">Phone number</label>
             <input class="input" type="tel" id="phone" name="phone" placeholder="0712345678" required autocomplete="tel" inputmode="tel" />
-            <span class="field-hint">Used to log in and for M-PESA</span>
+            <span class="field-hint" id="phone-hint">Used to log in and for M-PESA</span>
           </div>
           <div class="field">
             <label for="email">Email <span class="text-muted">(optional)</span></label>
@@ -74,6 +92,7 @@
   <script src="js/core/api.js"></script>
   <script src="js/core/permissions.js"></script>
   <script src="js/core/ui.js"></script>
+  <script src="js/core/i18n.js"></script>
   <script src="js/pages/register.js"></script>
 </body>
 </html>

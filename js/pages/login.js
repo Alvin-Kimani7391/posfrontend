@@ -207,6 +207,7 @@
   function onLoginSuccess(data) {
     window.Storage.setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
     window.Storage.setUser(data.user);
+    if (window.I18n && data.user) window.I18n.adopt(data.user.language, data.country && data.country.language, data.user._id || data.user.id);
     window.location.href = 'dashboard.html';
   }
 

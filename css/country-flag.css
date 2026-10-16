@@ -1,0 +1,50 @@
+/* Country flag badge (dashboard header) + one-time "choose your country" prompt. All classes are prefixed "cf-". */
+.cf-badge {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 8px;
+  border: 1px solid #e1e5ec; border-radius: 999px; background: #fff; color: var(--color-text, #151829);
+  font: inherit; font-size: 13px; font-weight: 600; line-height: 1; white-space: nowrap; cursor: default;
+}
+.cf-badge img { width: 24px; height: 16px; border-radius: 3px; object-fit: cover; box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.12); }
+.cf-badge small { font-weight: 500; color: var(--color-text-muted, #667085); }
+.cf-badge.cf-floating { position: fixed; top: 10px; right: 12px; z-index: 900; box-shadow: 0 6px 18px -8px rgba(16, 24, 40, 0.25); }
+@media (max-width: 640px) { .cf-badge small { display: none; } }
+
+.cf-backdrop {
+  position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(16, 24, 40, 0.55);
+}
+.cf-modal {
+  width: min(520px, 100%); max-height: 92vh; overflow: auto; padding: 24px; border-radius: 18px; background: #fff;
+  box-shadow: 0 30px 60px -20px rgba(16, 24, 40, 0.5);
+}
+.cf-modal h2 { margin: 0 0 6px; font-size: 20px; }
+.cf-modal p { margin: 0 0 16px; color: #475467; font-size: 14px; line-height: 1.5; }
+.cf-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+.cf-choice {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 12px; border: 2px solid #e1e5ec;
+  border-radius: 14px; background: #fff; font: inherit; cursor: pointer; transition: border-color .15s, background .15s;
+}
+.cf-choice:hover, .cf-choice:focus-visible { border-color: var(--color-primary, #0f766e); outline: none; }
+.cf-choice.cf-on { border-color: var(--color-primary, #0f766e); background: var(--color-primary-50, #f0fdfa); }
+.cf-choice img { width: 56px; height: 38px; border-radius: 5px; object-fit: cover; box-shadow: 0 0 0 1px rgba(16, 24, 40, 0.15); }
+.cf-choice strong { font-size: 16px; }
+.cf-choice span { font-size: 12px; color: #667085; }
+.cf-lang { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 14px; }
+.cf-lang select { height: 38px; border: 1px solid #d0d5dd; border-radius: 10px; padding: 0 10px; font: inherit; }
+.cf-error { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: #fef3f2; color: #b42318; font-size: 13px; }
+.cf-lock { margin: 0 0 14px; padding: 12px; border-radius: 10px; background: #fffaeb; border: 1px solid #fedf89; }
+.cf-lock p { margin: 0 0 10px; font-size: 13px; color: #7a2e0e; }
+.cf-ok { color: #067647 !important; }
+.cf-actions .cf-secondary, .cf-lock .cf-secondary { background: #fff; color: var(--color-primary, #0f766e); border: 1px solid var(--color-primary, #0f766e); height: 40px; padding: 0 14px; border-radius: 12px; font: inherit; font-weight: 600; cursor: pointer; }
+.cf-lock .cf-actions { flex-wrap: wrap; justify-content: flex-start; }
+.lang-switch select { height: 36px; border: 1px solid #e1e5ec; border-radius: 999px; padding: 0 10px; font: inherit; font-size: 13px; background: #fff; color: var(--color-text, #151829); }
+.lang-switch-floating { position: fixed; top: 10px; right: 12px; z-index: 900; }
+.cf-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.cf-actions button {
+  height: 44px; padding: 0 22px; border: none; border-radius: 12px; font: inherit; font-weight: 700; cursor: pointer;
+  background: var(--color-primary, #0f766e); color: #fff;
+}
+.cf-actions button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* Language is independent of country: the switcher is always available, compact on phones. */
+@media (max-width: 599px) { .lang-switch select { height: 32px; padding: 0 6px; font-size: 12px; } }

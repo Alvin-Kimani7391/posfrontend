@@ -135,7 +135,7 @@
               <label for="biz_vatRegistered" class="text-sm">VAT registered</label>
             </div>
             <div class="form-row">
-              <div class="field"><label>Currency</label><input class="input" name="currency" value="${esc(business.currency || 'KES')}" /></div>
+              <div class="field"><label>Currency</label><input class="input" name="currency" value="${esc(business.currency || 'KES')}" readonly title="Fixed by your country. Contact support if this is wrong." /></div>
               <div class="field"><label>Timezone</label><input class="input" name="timezone" value="${esc(business.timezone || 'Africa/Nairobi')}" /></div>
             </div>
             <div class="field"><label>Logo URL <span class="text-muted">(optional)</span></label><input class="input" name="logo" value="${esc(business.logo || '')}" placeholder="https://…" /></div>

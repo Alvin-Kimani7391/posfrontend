@@ -41,17 +41,27 @@
   const chk = (id, label, on) => `<label class="checkbox-row" style="margin-bottom:var(--space-3)"><input type="checkbox" id="${id}" ${on ? 'checked' : ''} /> ${label}</label>`;
   const txt = (id, label, v, extra = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${esc(v || '')}" ${extra} /></div>`;
   const list = (a) => (a || []).join(', ');
+  // A plan is priced in one currency; a business is only ever put on a plan of its own currency.
+  const planOptions = (currency, selected) => {
+    const rows = plans.filter((p) => p.isActive && (p.currency || 'KES') === currency);
+    return rows.length ? rows.map((p) => `<option value="${esc(p.key)}" ${p.key === selected ? 'selected' : ''}>${esc(p.name)}</option>`).join('') : '<option value="">No active plan in this currency</option>';
+  };
+  const tzReady = (mt) => !!(mt.enabled && mt.number);
 
   function render(body) {
-    const m = s.manual || {}; const e = s.enforcement || {}; const r = s.reminders || {}; const c = s.contact || {};
+    const m = s.manual || {}; const mt = s.manualTz || {}; const e = s.enforcement || {}; const r = s.reminders || {}; const c = s.contact || {};
     const credSet = !!(s.stk.credentials && s.stk.credentials.isSet);
     body.innerHTML = [
       card('master', 'Billing switch & default plan', 'While OFF nobody is invoiced, emailed or locked. Payments that are already in progress are still processed.',
         `${chk('m-enabled', '<b>Billing enabled</b>', s.billingEnabled)}
-         <div class="field" style="max-width:360px"><label for="m-plan">Default plan for new businesses</label><select class="select" id="m-plan">${plans.filter((p) => p.isActive).map((p) => `<option value="${esc(p.key)}" ${p.key === s.defaultPlanKey ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
+         <div class="form-row">
+           <div class="field"><label for="m-plan">Default plan - Kenya (KES)</label><select class="select" id="m-plan">${planOptions('KES', s.defaultPlanKey)}</select></div>
+           <div class="field"><label for="m-plan-tz">Default plan - Tanzania (TZS)</label><select class="select" id="m-plan-tz">${planOptions('TZS', s.defaultPlanKeyTZ)}</select></div>
+         </div>
+         ${tzReady(mt) ? '' : '<div class="bl-alert warning"><div class="grow"><b>Tanzania payment details are missing.</b> Fill in the Tanzania payment card below before switching billing on, or Tanzanian owners will see no number to pay.</div></div>'}
          <p class="bl-muted">Edit the amounts themselves on <a class="bl-link" href="admin-billing-plans.html">Plans & prices</a>.</p>`),
 
-      card('stk', 'M-PESA prompt (PayHero STK)', 'The platform\u2019s own PayHero account - money from shop owners lands here.',
+      card('stk', 'M-PESA prompt (PayHero STK) - Kenya only', 'The platform\u2019s own PayHero account - money from Kenyan shop owners lands here.',
         `${chk('k-enabled', 'Enabled', s.stk.enabled)}
          ${txt('k-channel', 'Payment channel ID', s.stk.channelId, 'placeholder="From PayHero > Payment Channels"')}
          <div class="field"><label for="k-type">Credential type</label><select class="select" id="k-type"><option value="token">Basic Auth token</option><option value="userpass">API username + password</option></select></div>
@@ -62,13 +72,21 @@
          <p class="bl-muted">Credentials are encrypted and can never be read back. The server needs <code>PUBLIC_API_BASE_URL</code> so PayHero can call back; each payment gets its own secret callback link.</p>`,
         '<button class="btn btn-secondary btn-sm" id="k-test">Test connection</button>'),
 
-      card('manual', 'Manual payment (till / paybill)', 'Shown to owners who pay themselves and paste the M-PESA message.',
+      card('manual', 'Kenya manual payment (till / paybill)', 'Shown to Kenyan owners who pay themselves and paste the M-PESA message.',
         `${chk('n-enabled', 'Enabled', m.enabled)}
          <div class="form-row">${txt('n-label', 'Method label', m.methodLabel, 'maxlength="60" placeholder="Till (Buy Goods)"')}${txt('n-number', 'Till / paybill number', m.number, 'maxlength="30"')}</div>
          <div class="form-row">${txt('n-name', 'Account name on the M-PESA message', m.accountName, 'maxlength="80"')}${txt('n-ref', 'Account / reference to use', m.accountReference, 'maxlength="120" placeholder="e.g. your business name"')}</div>
          ${txt('n-phone', 'Phone (optional)', m.phone, 'maxlength="20"')}
          <div class="field"><label for="n-instr">Extra instructions</label><textarea class="textarea" id="n-instr" rows="3" maxlength="1000">${esc(m.instructions || '')}</textarea></div>
          <p class="bl-muted">The number and name are also used to flag pasted messages that do not mention them.</p>`),
+
+      card('manualTz', 'Tanzania payment details (TZS)', 'Shown to Tanzanian owners. Tanzania has no automatic prompt: owners pay this number, then submit the transaction code for you to verify.',
+        `${chk('t-enabled', 'Enabled', mt.enabled)}
+         <div class="form-row">${txt('t-label', 'Method label', mt.methodLabel, 'maxlength="60" placeholder="Lipa Namba (M-Pesa / Mixx by Yas / Airtel Money)"')}${txt('t-number', 'Lipa Namba / account number', mt.number, 'maxlength="30"')}</div>
+         <div class="form-row">${txt('t-name', 'Account name shown on the confirmation', mt.accountName, 'maxlength="80"')}${txt('t-ref', 'Reference for the owner to use', mt.accountReference, 'maxlength="120" placeholder="e.g. your business name"')}</div>
+         ${txt('t-phone', 'Phone (optional)', mt.phone, 'maxlength="20"')}
+         <div class="field"><label for="t-instr">Extra instructions (e.g. bank name and account)</label><textarea class="textarea" id="t-instr" rows="3" maxlength="1000">${esc(mt.instructions || '')}</textarea></div>
+         <p class="bl-muted">The number and name are used to flag submissions that do not mention them.</p>`),
 
       card('enf', 'Arrears & locking', 'A locked owner can still log in and pay; everything else is blocked until the balance is cleared.',
         `${chk('e-auto', 'Automatically lock accounts with overdue balances', e.autoSuspendEnabled !== false)}
@@ -101,10 +119,18 @@
     master: async () => {
       const enabled = $('m-enabled').checked;
       if (enabled && !s.billingEnabled) {
-        const ok = await window.UI.confirmDialog({ title: 'Switch billing ON?', message: 'Businesses will start receiving invoices, reminders and (after the grace period) locks. Make sure the plan amounts and payment details are correct.', confirmText: 'Switch on' });
+        const tzMissing = !tzReady(s.manualTz || {});
+        const ok = await window.UI.confirmDialog({
+          title: tzMissing ? 'Tanzania payment details are missing' : 'Switch billing ON?',
+          message: `Businesses will start receiving invoices, reminders and (after the grace period) locks. Make sure the plan amounts and payment details are correct.${tzMissing ? ' WARNING: the Tanzania payment card has no enabled Lipa Namba / account number yet, so Tanzanian owners will have nowhere to pay and may be locked. Save that card first, or continue only if no Tanzanian business is on the platform.' : ''}`,
+          confirmText: tzMissing ? 'Switch on anyway' : 'Switch on',
+        });
         if (!ok) return null;
       }
-      return { billingEnabled: enabled, defaultPlanKey: $('m-plan').value };
+      const out = { billingEnabled: enabled };
+      if ($('m-plan').value) out.defaultPlanKey = $('m-plan').value;
+      if ($('m-plan-tz').value) out.defaultPlanKeyTZ = $('m-plan-tz').value;
+      return out;
     },
     stk: () => {
       const stk = { enabled: $('k-enabled').checked };
@@ -123,6 +149,10 @@
     manual: () => ({ manual: {
       enabled: $('n-enabled').checked, methodLabel: $('n-label').value.trim(), number: $('n-number').value.trim(),
       accountName: $('n-name').value.trim(), accountReference: $('n-ref').value.trim(), phone: $('n-phone').value.trim(), instructions: $('n-instr').value.trim(),
+    } }),
+    manualTz: () => ({ manualTz: {
+      enabled: $('t-enabled').checked, methodLabel: $('t-label').value.trim(), number: $('t-number').value.trim(),
+      accountName: $('t-name').value.trim(), accountReference: $('t-ref').value.trim(), phone: $('t-phone').value.trim(), instructions: $('t-instr').value.trim(),
     } }),
     enf: () => ({ enforcement: { autoSuspendEnabled: $('e-auto').checked, graceDays: Number($('e-grace').value) } }),
     rem: () => ({ reminders: { beforeDueDays: nums('r-before', 'Before due'), overdueDays: nums('r-over', 'After due'), trialEndingDays: nums('r-trial', 'Trial ending') } }),

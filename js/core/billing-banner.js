@@ -6,7 +6,8 @@
 (function (window) {
   'use strict';
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
-  const kes = (c) => window.UI.formatMoney((Number(c) || 0) / 100);
+  // Amounts are in the business's own billing currency (KES or TZS); /billing/status returns it as s.currency.
+  const money = (c, currency) => window.UI.formatMoney((Number(c) || 0) / 100, currency || 'KES');
   const POLL_MS = 5 * 60 * 1000;
   const DISMISS_KEY = 'sixstar.billing.trialDismissed';
   let el = null;
@@ -27,7 +28,7 @@
     }
     if (canPay && s.arrearsCents > 0) {
       const when = s.lockAt ? ` Your account will be locked on ${window.UI.formatDate(s.lockAt)} if unpaid.` : '';
-      return { tone: 'danger', sticky: true, text: `${kes(s.arrearsCents)} is overdue.${when}`, link: { href: 'billing.html', label: 'Pay now' } };
+      return { tone: 'danger', sticky: true, text: `${money(s.arrearsCents, s.currency)} is overdue.${when}`, link: { href: 'billing.html', label: 'Pay now' } };
     }
     if (s.status === 'TRIALING' && s.daysLeftInTrial != null) {
       const d = s.daysLeftInTrial;

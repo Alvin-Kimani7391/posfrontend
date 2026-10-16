@@ -86,12 +86,22 @@
       const badge = document.getElementById('ab-pay-badge');
       if (badge) badge.innerHTML = d.pendingVerification ? `<span class="badge badge-warning">${d.pendingVerification}</span>` : '';
 
+      // Billing is ON but Tanzanian owners have no number to pay: they would be invoiced and then locked.
+      let tzWarn = '';
+      if (d.billingEnabled) {
+        try {
+          const { data: st } = await window.Api.get('/admin/billing/settings');
+          const mt = st.manualTz || {};
+          if (!(mt.enabled && mt.number)) tzWarn = `<div class="bl-alert danger"><div class="grow"><b>Tanzania payment details are missing.</b> Tanzanian owners are being billed but have no Lipa Namba / account to pay.</div><a class="btn btn-secondary btn-sm" href="admin-billing-settings.html">Add details</a></div>`;
+        } catch { /* the warning is optional */ }
+      }
       pane.innerHTML = `
+        ${tzWarn}
         ${d.billingEnabled ? '' : `<div class="bl-alert warning"><div class="grow"><b>Billing is OFF.</b> Nobody is invoiced, emailed or locked. Finish setup, then switch it on.</div><a class="btn btn-secondary btn-sm" href="admin-billing-settings.html">Open settings</a></div>`}
         <div class="bl-stats">
           ${AB.stat({ label: 'To verify', value: d.pendingVerification, sub: 'Manual payments waiting', tone: d.pendingVerification ? 'warning' : '', href: '?tab=payments' })}
-          ${AB.stat({ label: 'Total arrears', value: kes(d.arrears.totalCents), sub: `${d.arrears.businesses} business(es)`, tone: d.arrears.totalCents ? 'danger' : '' })}
-          ${AB.stat({ label: 'Collected this month', value: kes(d.collectedThisMonth.totalCents), sub: `${d.collectedThisMonth.payments} payment(s)`, tone: 'success' })}
+          ${AB.stat({ label: 'Total arrears', value: AB.byCur(d.arrears.byCurrency || { KES: d.arrears }), sub: `${d.arrears.businesses} business(es)${d.arrears.byCurrency ? ` · ${AB.CURRENCIES.map((c) => `${c} ${(d.arrears.byCurrency[c] || {}).businesses || 0}`).join(' / ')}` : ''}`, tone: Object.values(d.arrears.byCurrency || { KES: d.arrears }).some((x) => x.totalCents) ? 'danger' : '' })}
+          ${AB.stat({ label: 'Collected this month', value: AB.byCur(d.collectedThisMonth.byCurrency || { KES: d.collectedThisMonth }), sub: `${d.collectedThisMonth.payments} payment(s)${d.collectedThisMonth.byCurrency ? ` · ${AB.CURRENCIES.map((c) => `${c} ${(d.collectedThisMonth.byCurrency[c] || {}).payments || 0}`).join(' / ')}` : ''}`, tone: 'success' })}
           ${AB.stat({ label: 'Trials ending in 3 days', value: d.trialsEndingSoon })}
         </div>
         <div class="bl-stats">
@@ -105,13 +115,13 @@
           <section class="card">
             <div class="card-header"><h2>Biggest arrears</h2></div>
             <div class="table-wrap flat"><table class="table"><thead><tr><th>Business</th><th class="bl-right">Overdue</th><th>Since</th><th>Status</th></tr></thead><tbody>
-              ${d.topDefaulters.map((s) => `<tr><td class="cell-primary"><a class="bl-link" href="admin-billing-business.html?id=${esc(s.businessId)}">${esc(s.businessName || '-')}</a></td><td class="bl-right font-semibold">${kes(s.arrearsCents)}</td><td class="text-sm">${AB.fdate(s.oldestOverdueAt)}</td><td>${AB.badge(AB.SUB_BADGE, AB.SUB_LABEL, s.status)}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">Nobody is in arrears.</td></tr>'}
+              ${d.topDefaulters.map((s) => `<tr><td class="cell-primary"><a class="bl-link" href="admin-billing-business.html?id=${esc(s.businessId)}">${esc(s.businessName || '-')}</a></td><td class="bl-right font-semibold">${kes(s.arrearsCents, s.currency)} ${AB.curBadge(s.currency)}</td><td class="text-sm">${AB.fdate(s.oldestOverdueAt)}</td><td>${AB.badge(AB.SUB_BADGE, AB.SUB_LABEL, s.status)}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">Nobody is in arrears.</td></tr>'}
             </tbody></table></div>
           </section>
           <section class="card">
             <div class="card-header"><h2>Recent payments</h2></div>
             <div class="table-wrap flat"><table class="table"><thead><tr><th>Business</th><th class="bl-right">Amount</th><th>Method</th><th>Status</th></tr></thead><tbody>
-              ${d.recentPayments.map((p) => `<tr class="bl-row-click" data-pay="${esc(p._id)}"><td class="cell-primary">${esc(p.businessName || '-')}<div class="bl-muted">${window.UI.timeAgo(p.createdAt)}</div></td><td class="bl-right font-semibold">${kes(p.status === 'SUBMITTED' ? p.claimedAmount : p.amount)}</td><td class="text-sm">${esc(AB.METHOD_LABEL[p.method] || p.method)}</td><td>${AB.badge(AB.PAY_BADGE, AB.PAY_LABEL, p.status)}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">No payments yet.</td></tr>'}
+              ${d.recentPayments.map((p) => `<tr class="bl-row-click" data-pay="${esc(p._id)}"><td class="cell-primary">${esc(p.businessName || '-')}<div class="bl-muted">${window.UI.timeAgo(p.createdAt)}</div></td><td class="bl-right font-semibold">${kes(p.status === 'SUBMITTED' ? p.claimedAmount : p.amount, p.currency)} ${AB.curBadge(p.currency)}</td><td class="text-sm">${esc(AB.methodText(p))}</td><td>${AB.badge(AB.PAY_BADGE, AB.PAY_LABEL, p.status)}</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">No payments yet.</td></tr>'}
             </tbody></table></div>
           </section>
         </div>`;
@@ -133,15 +143,17 @@
       filters: [
         { key: 'status', type: 'select', label: 'Status', options: [['', 'All'], ['TRIALING', 'Trial'], ['ACTIVE', 'Active'], ['PAST_DUE', 'Past due'], ['SUSPENDED', 'Locked'], ['CANCELLED', 'Cancelled']] },
         { key: 'arrears', type: 'select', label: 'Arrears', options: [['', 'All'], ['1', 'In arrears']] },
+        { key: 'currency', type: 'select', label: 'Currency', options: [['', 'All'], ['KES', 'Kenya (KES)'], ['TZS', 'Tanzania (TZS)']] },
         { key: 'sort', type: 'select', label: 'Sort', options: [['', 'Newest first'], ['arrears', 'Highest arrears']] },
       ],
       columns: [
         { label: 'Business', render: (s) => `<b>${esc(s.business?.name || '-')}</b><div class="bl-muted">${esc(s.business?.phone || '')}</div>` },
         { label: 'Plan / phase', render: (s) => `${esc(s.planName || '-')}<div class="bl-muted">${esc(s.phaseName || 'Complete')}</div>` },
         { label: 'Status', render: (s) => `${AB.badge(AB.SUB_BADGE, AB.SUB_LABEL, s.status)}${s.locked ? ` <span class="badge badge-danger">${s.lockReason === 'ADMIN' ? 'Locked by admin' : 'Auto-locked'}</span>` : ''}` },
-        { label: 'Overdue', num: true, render: (s) => (s.arrearsCents ? `<b style="color:var(--color-danger)">${kes(s.arrearsCents)}</b><div class="bl-muted">${s.daysOverdue} day(s)</div>` : '-') },
-        { label: 'Open balance', num: true, render: (s) => kes(s.openBalanceCents) },
-        { label: 'Credit', num: true, render: (s) => (s.creditCents ? kes(s.creditCents) : '-') },
+        { label: 'Overdue', num: true, render: (s) => (s.arrearsCents ? `<b style="color:var(--color-danger)">${kes(s.arrearsCents, s.currency)}</b><div class="bl-muted">${s.daysOverdue} day(s)</div>` : '-') },
+        { label: 'Open balance', num: true, render: (s) => kes(s.openBalanceCents, s.currency) },
+        { label: 'Credit', num: true, render: (s) => (s.creditCents ? kes(s.creditCents, s.currency) : '-') },
+        { label: 'Currency', render: (s) => AB.curBadge(s.currency) },
         { label: 'Last payment', render: (s) => (s.lastPaymentAt ? window.UI.timeAgo(s.lastPaymentAt) : '<span class="text-muted">Never</span>') },
       ],
       onRow: (s) => { if (s.businessId) window.location.href = `admin-billing-business.html?id=${s.businessId}`; },
@@ -157,12 +169,13 @@
       endpoint: '/admin/billing/payments',
       filters: [
         { key: 'status', type: 'select', label: 'Status', options: [['', 'All'], ['SUBMITTED', 'To verify'], ['SUCCESS', 'Received'], ['PENDING', 'Waiting'], ['FAILED', 'Failed'], ['REJECTED', 'Rejected']] },
-        { key: 'method', type: 'select', label: 'Method', options: [['', 'All'], ['STK', 'M-PESA prompt'], ['MPESA_MANUAL', 'M-PESA manual'], ['CASH', 'Cash'], ['BANK', 'Bank'], ['OTHER', 'Other']] },
+        { key: 'method', type: 'select', label: 'Method', options: [['', 'All'], ['STK', 'M-PESA prompt'], ['MPESA_MANUAL', 'Manual (M-PESA / mobile money)'], ['CASH', 'Cash'], ['BANK', 'Bank'], ['OTHER', 'Other']] },
+        { key: 'currency', type: 'select', label: 'Currency', options: [['', 'All'], ['KES', 'Kenya (KES)'], ['TZS', 'Tanzania (TZS)']] },
       ],
       columns: [
         { label: 'Business', render: (p) => `<b>${esc(p.businessName || '-')}</b><div class="bl-muted">${esc(p.businessPhone || '')}</div>` },
-        { label: 'Method', render: (p) => esc(AB.METHOD_LABEL[p.method] || p.method) },
-        { label: 'Amount', num: true, render: (p) => `<b>${kes(p.status === 'SUBMITTED' ? p.claimedAmount : p.amount)}</b>` },
+        { label: 'Method', render: (p) => esc(AB.methodText(p)) },
+        { label: 'Amount', num: true, render: (p) => `<b>${kes(p.status === 'SUBMITTED' ? p.claimedAmount : p.amount, p.currency)}</b> ${AB.curBadge(p.currency)}` },
         { label: 'Code / reference', render: (p) => `${esc(p.mpesaReceiptNumber || '-')}<div class="bl-muted">${esc(p.reference)}</div>` },
         { label: 'Flags', render: (p) => ((p.flags || []).length ? `<span class="badge badge-warning">${p.flags.length} flag(s)</span>` : '<span class="text-muted">-</span>') },
         { label: 'Submitted', render: (p) => window.UI.timeAgo(p.createdAt) },

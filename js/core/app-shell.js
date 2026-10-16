@@ -397,6 +397,8 @@
             <div class="topbar-title">${window.UI.escapeHtml(title)}</div>
           </div>
           <div class="topbar-right">
+            <span id="lang-switch-wrap"></span>
+            <span id="country-flag"></span>
             <div class="dropdown" id="drawer-chip-wrap"></div>
             <div class="dropdown" id="branch-switcher-wrap"></div>
             <div class="dropdown" id="notif-bell-wrap"></div>
@@ -497,6 +499,27 @@
     } catch (err) {
       console.warn('Announcements: not loaded', err);
     }
+  }
+
+  /** Country flag badge + one-time "choose your country" window for older accounts (js/core/country-flag.js). */
+  function loadCountryFlag(user) {
+    try {
+      // Language switcher first (every user, including super admin pages that use this shell): the person's own language.
+      if (window.I18n) { window.I18n.ready.then(() => window.I18n.mountSwitcher(document.getElementById('lang-switch-wrap'))); }
+      if (!document.getElementById('country-flag-css')) { // styles the language switcher too, so load it for everyone
+        const l = document.createElement('link');
+        l.id = 'country-flag-css'; l.rel = 'stylesheet'; l.href = 'css/country-flag.css';
+        document.head.appendChild(l);
+      }
+      if (user && user.role === 'SUPER_ADMIN') return;
+      if (window.PosMoney || document.getElementById('country-flag-script')) return;
+      const s = document.createElement('script');
+      s.id = 'country-flag-script';
+      s.src = 'js/core/country-flag.js';
+      s.async = true;
+      s.onerror = () => console.warn('Country flag: js/core/country-flag.js could not be loaded');
+      document.head.appendChild(s);
+    } catch { /* never block the page */ }
   }
 
   /** Billing banner (locked / overdue / trial). Same pattern as loadTour/loadAnnouncements. */
@@ -653,6 +676,7 @@
     loadTour();
     loadAnnouncements();
     loadBillingBanner();
+    loadCountryFlag(user);
     loadBusinessSetup(user);
     if (window.Permissions.can(user, 'sales.view')) {
       loadCashDrawer().then((drawer) => { if (drawer) mountDrawerChip(drawer); });

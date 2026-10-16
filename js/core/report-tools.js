@@ -106,7 +106,7 @@
    * Numbers & text
    * ------------------------------------------------------------------ */
   function money0(n) {
-    const cur = window.APP_CONFIG?.CURRENCY || 'KES';
+    const cur = window.UI?.activeCurrency ? window.UI.activeCurrency() : window.APP_CONFIG?.CURRENCY || 'KES';
     return new Intl.NumberFormat('en-KE', { style: 'currency', currency: cur, maximumFractionDigits: 0 }).format(Number(n) || 0);
   }
   function fmtNum(n) { return (Number(n) || 0).toLocaleString('en-KE'); }

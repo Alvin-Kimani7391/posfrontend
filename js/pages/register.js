@@ -18,6 +18,23 @@
     document.getElementById('app-name').textContent = window.APP_CONFIG.APP_NAME;
 
     setupForm();
+    setupCountry();
+  }
+
+  /** Country drives the currency, so it also sets the default language and the phone-number hint. */
+  function setupCountry() {
+    const country = document.getElementById('country');
+    const language = document.getElementById('language');
+    const phone = document.getElementById('phone');
+    const hint = document.getElementById('phone-hint');
+    if (!country) return;
+    const apply = () => {
+      const tz = country.value === 'TZ';
+      phone.placeholder = tz ? '0712345678 or +255712345678' : '0712345678';
+      hint.textContent = tz ? 'Used to log in. Tanzanian numbers only (+255)' : 'Used to log in and for M-PESA';
+    };
+    country.addEventListener('change', () => { language.value = country.value === 'TZ' ? 'sw' : 'en'; apply(); });
+    apply();
   }
 
   /** Show/hide eye button on every password / PIN field (file loads itself once, then watches for fields added later). */

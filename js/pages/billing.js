@@ -1,14 +1,20 @@
 /**
  * billing.js - the shop owner's billing page.
- * Plan + phase progress, arrears, upcoming invoice, pay by M-PESA prompt (STK) or by pasting the M-PESA SMS,
- * outstanding invoices, invoice + payment history. All API money is integer cents.
+ * Plan + phase progress, arrears, upcoming invoice, outstanding invoices, invoice + payment history. All API money is integer cents.
+ * How to pay depends on the business currency (the backend decides what is offered, in overview.paymentOptions):
+ *   KES (Kenya)    - M-PESA prompt (PayHero STK) and/or paste the M-PESA SMS.
+ *   TZS (Tanzania) - no STK. Pay the platform's Lipa Namba / bank account, then submit the transaction code and/or the
+ *                    confirmation message; a platform admin verifies it before the account is credited.
  *
  * This page still works when the account is LOCKED (the backend lets /billing/* through), which is the point:
  * a locked owner can always get here and pay.
  */
 (function () {
   const esc = window.UI.escapeHtml;
-  const fm = (c) => window.UI.formatMoney((Number(c) || 0) / 100);
+  // Money is always shown in the business's own billing currency (KES or TZS), never mixed.
+  const cur = () => (state.data && state.data.currency) || 'KES';
+  const isTz = () => cur() === 'TZS';
+  const fm = (c, currency) => window.UI.formatMoney((Number(c) || 0) / 100, currency || cur());
   const $ = (id) => document.getElementById(id);
 
   const SUB_BADGE = { TRIALING: 'badge-info', ACTIVE: 'badge-success', PAST_DUE: 'badge-warning', SUSPENDED: 'badge-danger', CANCELLED: 'badge-neutral' };
@@ -18,6 +24,13 @@
   const PAY_BADGE = { PENDING: 'badge-info', SUBMITTED: 'badge-warning', SUCCESS: 'badge-success', FAILED: 'badge-danger', REJECTED: 'badge-danger', CANCELLED: 'badge-neutral' };
   const PAY_LABEL = { PENDING: 'Waiting', SUBMITTED: 'Awaiting verification', SUCCESS: 'Received', FAILED: 'Failed', REJECTED: 'Not approved', CANCELLED: 'Cancelled' };
   const METHOD_LABEL = { STK: 'M-PESA prompt', MPESA_MANUAL: 'M-PESA (manual)', CASH: 'Cash', BANK: 'Bank', OTHER: 'Other' };
+  const METHOD_LABEL_TZ = { MPESA_MANUAL: 'Mobile money', BANK: 'Bank transfer' };
+  const methodLabel = (p) => {
+    if ((p.currency || cur()) === 'TZS' && METHOD_LABEL_TZ[p.method]) return `${METHOD_LABEL_TZ[p.method]}${p.provider ? ` · ${p.provider}` : ''}`;
+    return METHOD_LABEL[p.method] || p.method;
+  };
+  // Tanzanian networks. The chosen value is stored with the payment so the admin knows which statement to check.
+  const TZ_PROVIDERS = ['M-Pesa', 'Mixx by Yas', 'Airtel Money', 'HaloPesa', 'Bank'];
   const FAIL_LABELS = {
     wrong_pin: 'Wrong PIN entered', insufficient_funds: 'Insufficient M-PESA balance', cancelled: 'Cancelled on the phone',
     timeout: 'No response in time', in_progress: 'Another request already pending', system_error: 'M-PESA system error',
@@ -203,59 +216,85 @@
       return card('Make a payment', '<p class="text-sm text-secondary">You can view billing but not pay. Ask the business owner to make payments.</p>');
     }
     const opts = d.paymentOptions || {};
-    const stk = !!(opts.stk && opts.stk.available);
+    const tz = isTz();
+    const stk = !tz && !!(opts.stk && opts.stk.available); // the backend never offers STK to Tanzania
     const man = !!(opts.manual && opts.manual.available);
     if (!stk && !man) {
       const c = d.contact || {};
-      return card('Make a payment', `<p class="text-sm text-secondary">Online payment is not available right now. Please contact support${c.supportPhone ? ` on <strong>${esc(c.supportPhone)}</strong>` : ''}.</p>`);
+      return card('Make a payment', `<p class="text-sm text-secondary">${tz ? 'Payment details are not available yet' : 'Online payment is not available right now'}. Please contact support${c.supportPhone ? ` on <strong>${esc(c.supportPhone)}</strong>` : ''}.</p>`);
     }
     const due = s.arrearsCents > 0 ? s.arrearsCents : s.openBalanceCents;
-    const dueKes = due > 0 ? Math.ceil(due / 100) : '';
+    const dueAmt = due > 0 ? Math.ceil(due / 100) : '';
     const chips = [];
     if (s.arrearsCents > 0) chips.push(`<button type="button" class="bl-chip" data-amt="${Math.ceil(s.arrearsCents / 100)}">Overdue · ${fm(s.arrearsCents)}</button>`);
     if (s.openBalanceCents > 0 && s.openBalanceCents !== s.arrearsCents) chips.push(`<button type="button" class="bl-chip" data-amt="${Math.ceil(s.openBalanceCents / 100)}">Full balance · ${fm(s.openBalanceCents)}</button>`);
     let savedPhone = '';
     try { savedPhone = localStorage.getItem(PHONE_KEY) || ''; } catch { /* ignore */ }
     const m = opts.manual || {};
+    const c = cur();
+
+    const instr = `
+      <div class="bl-instr">
+        <div><span>${esc(m.label || 'Pay to')}</span><strong>${esc(m.number || '-')}</strong><button type="button" class="bl-copy" data-copy="${esc(m.number || '')}">Copy</button></div>
+        ${m.accountName ? `<div><span>Name</span><strong>${esc(m.accountName)}</strong></div>` : ''}
+        ${m.accountReference ? `<div><span>${tz ? 'Reference to use' : 'Account / reference'}</span><strong>${esc(m.accountReference)}</strong></div>` : ''}
+        ${m.phone ? `<div><span>Phone</span><strong>${esc(m.phone)}</strong></div>` : ''}
+        ${m.instructions ? `<p>${esc(m.instructions)}</p>` : ''}
+      </div>`;
+
+    const manualKes = `
+      ${instr}
+      <div class="field"><label for="bl-man-msg">Paste the full M-PESA confirmation message</label>
+        <textarea class="textarea" id="bl-man-msg" rows="4" placeholder="e.g. UJK1A2B3C4 Confirmed. Ksh5,000.00 paid to ..."></textarea></div>
+      <div class="field" style="max-width:260px"><label for="bl-man-amount">Amount paid (KES) <span class="text-muted">(read from the message if possible)</span></label>
+        <input class="input" id="bl-man-amount" type="number" inputmode="decimal" min="1" step="0.01" /></div>
+      <div class="bl-chips">${chips.join('')}</div>
+      <button class="btn btn-primary" id="bl-man-send">Submit for verification</button>
+      <p class="bl-muted" style="margin-top:var(--space-2)">We check this against our M-PESA statement and credit your account once verified - usually within a few hours.</p>`;
+
+    const manualTz = `
+      <ol class="bl-steps">
+        <li>Send the amount to the number below using your mobile money or bank app.</li>
+        <li>Keep the confirmation message you receive.</li>
+        <li>Enter the transaction code and/or paste the message here, then submit.</li>
+      </ol>
+      ${instr}
+      <div class="form-row">
+        <div class="field"><label for="bl-man-provider">Paid with</label>
+          <select class="select" id="bl-man-provider">${TZ_PROVIDERS.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('')}</select></div>
+        <div class="field"><label for="bl-man-code">Transaction code</label>
+          <input class="input" id="bl-man-code" maxlength="20" autocapitalize="characters" autocomplete="off" placeholder="e.g. 8H3K2L9QXR" /></div>
+      </div>
+      <div class="field"><label for="bl-man-msg">Confirmation message <span class="text-muted">(optional if you typed the code)</span></label>
+        <textarea class="textarea" id="bl-man-msg" rows="3" placeholder="Paste the full SMS from your mobile money or bank"></textarea></div>
+      <div class="field" style="max-width:260px"><label for="bl-man-amount">Amount paid (TZS) <span class="text-muted">(read from the message if possible)</span></label>
+        <input class="input" id="bl-man-amount" type="number" inputmode="decimal" min="1" step="1" value="${dueAmt}" /></div>
+      <div class="bl-chips">${chips.join('')}</div>
+      <button class="btn btn-primary" id="bl-man-send">Submit for verification</button>
+      <p class="bl-muted" style="margin-top:var(--space-2)">There is no automatic prompt in Tanzania. We check your payment against our statement and credit your account once verified - usually within a few hours.</p>`;
 
     return `
       <div class="card bl-card-gap" id="bl-pay">
-        <div class="card-header"><h2>Make a payment</h2></div>
+        <div class="card-header"><h2>Make a payment</h2><span class="bl-cur">${esc(c)}</span></div>
         <div class="card-body">
           ${due > 0 ? '' : '<p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">Nothing is due right now. You can still pay in advance - it is kept as credit.</p>'}
           <div class="tabs" id="bl-methods" style="margin-bottom:var(--space-4)">
             ${stk ? '<button class="tab-btn active" data-method="stk">M-PESA prompt (STK)</button>' : ''}
-            ${man ? `<button class="tab-btn ${stk ? '' : 'active'}" data-method="manual">Pay manually & paste the M-PESA message</button>` : ''}
+            ${man ? `<button class="tab-btn ${stk ? '' : 'active'}" data-method="manual">${tz ? 'Pay by mobile money / bank' : 'Pay manually & paste the M-PESA message'}</button>` : ''}
           </div>
 
           ${stk ? `
           <div id="bl-pane-stk">
             <div class="form-row">
               <div class="field"><label for="bl-stk-phone">M-PESA phone number</label><input class="input" id="bl-stk-phone" inputmode="tel" placeholder="07XXXXXXXX" value="${esc(savedPhone)}" /></div>
-              <div class="field"><label for="bl-stk-amount">Amount (KES, whole shillings)</label><input class="input" id="bl-stk-amount" type="number" inputmode="numeric" min="1" step="1" value="${dueKes}" /></div>
+              <div class="field"><label for="bl-stk-amount">Amount (KES, whole shillings)</label><input class="input" id="bl-stk-amount" type="number" inputmode="numeric" min="1" step="1" value="${dueAmt}" /></div>
             </div>
             <div class="bl-chips">${chips.join('')}</div>
             <button class="btn btn-success" id="bl-stk-send">Send payment prompt</button>
             <div id="bl-stk-status"></div>
           </div>` : ''}
 
-          ${man ? `
-          <div id="bl-pane-manual" style="${stk ? 'display:none' : ''}">
-            <div class="bl-instr">
-              <div><span>${esc(m.label || 'Pay to')}</span><strong>${esc(m.number || '-')}</strong></div>
-              ${m.accountName ? `<div><span>Name</span><strong>${esc(m.accountName)}</strong></div>` : ''}
-              ${m.accountReference ? `<div><span>Account / reference</span><strong>${esc(m.accountReference)}</strong></div>` : ''}
-              ${m.phone ? `<div><span>Phone</span><strong>${esc(m.phone)}</strong></div>` : ''}
-              ${m.instructions ? `<p>${esc(m.instructions)}</p>` : ''}
-            </div>
-            <div class="field"><label for="bl-man-msg">Paste the full M-PESA confirmation message</label>
-              <textarea class="textarea" id="bl-man-msg" rows="4" placeholder="e.g. UJK1A2B3C4 Confirmed. Ksh5,000.00 paid to ..."></textarea></div>
-            <div class="field" style="max-width:260px"><label for="bl-man-amount">Amount paid (KES) <span class="text-muted">(read from the message if possible)</span></label>
-              <input class="input" id="bl-man-amount" type="number" inputmode="decimal" min="1" step="0.01" /></div>
-            <div class="bl-chips">${chips.join('')}</div>
-            <button class="btn btn-primary" id="bl-man-send">Submit for verification</button>
-            <p class="bl-muted" style="margin-top:var(--space-2)">We check this against our M-PESA statement and credit your account once verified - usually within a few hours.</p>
-          </div>` : ''}
+          ${man ? `<div id="bl-pane-manual" style="${stk ? 'display:none' : ''}">${tz ? manualTz : manualKes}</div>` : ''}
         </div>
       </div>`;
   }
@@ -264,9 +303,9 @@
     const rows = list.map((p) => `
       <tr>
         <td class="text-sm">${window.UI.formatDateTime(p.createdAt)}</td>
-        <td class="text-sm">${esc(METHOD_LABEL[p.method] || p.method)}</td>
+        <td class="text-sm">${esc(methodLabel(p))}</td>
         <td class="text-sm">${esc(p.mpesaReceiptNumber || p.reference)}</td>
-        <td class="bl-right font-semibold">${fm(p.claimedAmount || p.amount)}</td>
+        <td class="bl-right font-semibold">${fm(p.claimedAmount || p.amount, p.currency)}</td>
         <td><span class="badge ${PAY_BADGE[p.status] || 'badge-neutral'}">${esc(PAY_LABEL[p.status] || p.status)}</span></td>
       </tr>`).join('');
     return card('Waiting for confirmation', `<div class="table-wrap flat"><table class="table"><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th class="bl-right">Amount</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`);
@@ -300,17 +339,24 @@
       if (!pay) return;
       const stkBtn = document.querySelector('#bl-methods [data-method="stk"]');
       if (stkBtn) stkBtn.click();
-      const input = $('bl-stk-amount') || $('bl-man-amount');
+      const manBtn = document.querySelector('#bl-methods [data-method="manual"]');
+      if (!stkBtn && manBtn) manBtn.click();
+      const input = (stkBtn && $('bl-stk-amount')) || $('bl-man-amount');
       if (input) input.value = b.dataset.payInvoice;
       pay.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }));
 
     $('bl-stk-send')?.addEventListener('click', sendStk);
 
+    document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copy); window.UI.toast.success('Copied'); }
+      catch { window.UI.toast.error('Could not copy - select the number and copy it'); }
+    }));
+
     const msg = $('bl-man-msg');
     msg?.addEventListener('input', () => {
       const amt = $('bl-man-amount');
-      const m = msg.value.match(/(?:Ksh|KES)\.?\s?([\d,]+(?:\.\d{1,2})?)/i);
+      const m = msg.value.match(isTz() ? /(?:TSh|TZS)\.?\s?([\d,]+(?:\.\d{1,2})?)/i : /(?:Ksh|KES)\.?\s?([\d,]+(?:\.\d{1,2})?)/i);
       if (m && amt && !amt.dataset.touched) amt.value = parseFloat(m[1].replace(/,/g, ''));
     });
     $('bl-man-amount')?.addEventListener('input', (e) => { e.target.dataset.touched = '1'; });
@@ -389,10 +435,23 @@
 
   /* ---------------------------- manual payment ---------------------------- */
   async function sendManual() {
+    const tz = isTz();
     const message = $('bl-man-msg').value.trim();
+    const code = $('bl-man-code') ? $('bl-man-code').value.trim() : '';
     const amt = $('bl-man-amount').value;
-    if (message.length < 20) return window.UI.toast.error('Paste the full M-PESA confirmation message');
-    const payload = { mpesaMessage: message };
+    const payload = {};
+    if (tz) {
+      // Tanzania: SMS formats differ per network, so the code OR the pasted message is enough.
+      if (!code && message.length < 20) return window.UI.toast.error('Enter the transaction code or paste the confirmation message');
+      if (!amt || Number(amt) <= 0) return window.UI.toast.error('Enter the amount you paid');
+      if (message) payload.mpesaMessage = message;
+      if (code) payload.transactionCode = code.toUpperCase();
+      const provider = $('bl-man-provider') && $('bl-man-provider').value;
+      if (provider) payload.provider = provider;
+    } else {
+      if (message.length < 20) return window.UI.toast.error('Paste the full M-PESA confirmation message');
+      payload.mpesaMessage = message;
+    }
     if (amt) payload.amountCents = Math.round(Number(amt) * 100);
     const btn = $('bl-man-send');
     window.UI.setButtonLoading(btn, true, 'Submitting…');
@@ -430,7 +489,7 @@
         const open = i.status === 'PENDING' || i.status === 'PARTIAL';
         const overdue = open && new Date(i.dueDate) <= now;
         return `<tr><td class="cell-primary">${esc(i.number)}</td><td class="text-sm">${esc(i.description)}</td><td class="text-sm">${fdate(i.dueDate)}</td>
-          <td class="bl-right">${fm(i.amount)}</td><td class="bl-right">${fm(i.amountPaid)}</td>
+          <td class="bl-right">${fm(i.amount, i.currency)}</td><td class="bl-right">${fm(i.amountPaid, i.currency)}</td>
           <td><span class="badge ${overdue ? 'badge-danger' : INV_BADGE[i.status] || 'badge-neutral'}">${overdue ? 'Overdue' : esc(INV_LABEL[i.status] || i.status)}</span></td></tr>`;
       }).join('')}</tbody></table></div>`;
   }
@@ -438,9 +497,9 @@
   function paymentTable(items) {
     if (!items.length) return window.UI.emptyStateHtml({ icon: 'reports', title: 'No payments yet' });
     return `<div class="table-wrap flat"><table class="table"><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th class="bl-right">Amount</th><th>Status</th></tr></thead><tbody>
-      ${items.map((p) => `<tr><td class="text-sm">${window.UI.formatDateTime(p.createdAt)}</td><td class="text-sm">${esc(METHOD_LABEL[p.method] || p.method)}</td>
+      ${items.map((p) => `<tr><td class="text-sm">${window.UI.formatDateTime(p.createdAt)}</td><td class="text-sm">${esc(methodLabel(p))}</td>
         <td class="text-sm">${esc(p.mpesaReceiptNumber || p.reference)}</td>
-        <td class="bl-right font-semibold">${fm(p.status === 'SUBMITTED' ? p.claimedAmount || p.amount : p.amount)}</td>
+        <td class="bl-right font-semibold">${fm(p.status === 'SUBMITTED' ? p.claimedAmount || p.amount : p.amount, p.currency)}</td>
         <td><span class="badge ${PAY_BADGE[p.status] || 'badge-neutral'}">${esc(PAY_LABEL[p.status] || p.status)}</span></td></tr>`).join('')}</tbody></table></div>`;
   }
 })();

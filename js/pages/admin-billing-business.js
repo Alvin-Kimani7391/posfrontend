@@ -4,10 +4,13 @@
  */
 (function () {
   const AB = window.AdminBilling;
-  const { esc, kes, kesToCents, centsToKes, fdate, formModal, val } = AB;
+  const { esc, kesToCents, centsToKes, fdate, formModal, val } = AB;
   const businessId = new URLSearchParams(window.location.search).get('id');
   let el;
   let data;
+  // Every amount on this page is in the business's own billing currency (KES or TZS) - never converted or mixed.
+  const curOf = () => (data && data.subscription && data.subscription.currency) || 'KES';
+  const K = (c) => AB.kes(c, curOf());
 
   document.addEventListener('DOMContentLoaded', () => {
     el = window.AdminShell.mount({ title: 'Business billing' });
@@ -31,12 +34,13 @@
   async function renderStart() {
     let name = 'this business';
     let plans = [];
-    try { const r = await window.Api.get(`/admin/businesses/${businessId}`); name = r.data.business.name; } catch { /* ignore */ }
-    try { plans = (await window.Api.get('/admin/billing/plans')).data.items.filter((p) => p.isActive); } catch { /* ignore */ }
+    let bcur = null;
+    try { const r = await window.Api.get(`/admin/businesses/${businessId}`); name = r.data.business.name; bcur = r.data.business.currency || null; } catch { /* ignore */ }
+    try { plans = (await window.Api.get('/admin/billing/plans')).data.items.filter((p) => p.isActive && (!bcur || (p.currency || 'KES') === bcur)); } catch { /* ignore */ }
     el.innerHTML = `
       <div class="page-header"><div><h1>${esc(name)}</h1><p>This business has no subscription yet.</p></div><div class="page-actions"><a class="btn btn-secondary btn-sm" href="admin-billing.html">Back</a></div></div>
       <div class="card"><div class="card-body" style="max-width:480px">
-        <div class="field"><label>Plan</label><select class="select" id="st-plan">${plans.map((p) => `<option value="${esc(p.key)}">${esc(p.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Plan</label><select class="select" id="st-plan">${plans.map((p) => `<option value="${esc(p.key)}">${esc(p.name)} (${esc(p.currency || 'KES')})</option>`).join('')}</select><span class="field-hint">The plan must be priced in the business's own currency.</span></div>
         <div class="field"><label>Start at phase</label><select class="select" id="st-phase"></select><span class="field-hint">Choose a later phase to skip the free trial.</span></div>
         <button class="btn btn-primary" id="st-go">Start subscription</button>
       </div></div>`;
@@ -67,7 +71,7 @@
       <div class="page-header">
         <div>
           <h1>${esc(b.name)} ${AB.badge(AB.SUB_BADGE, AB.SUB_LABEL, s.status)} ${locked ? `<span class="badge badge-danger">${s.lock.reason === 'ADMIN' ? 'Locked by admin' : 'Auto-locked'}</span>` : ''}</h1>
-          <p>${esc(b.phone || '')}${b.email ? ` · ${esc(b.email)}` : ''} · Business status: ${esc(b.status)}</p>
+          <p>${AB.curBadge(curOf())} ${esc(b.phone || '')}${b.email ? ` · ${esc(b.email)}` : ''} · Business status: ${esc(b.status)}</p>
         </div>
         <div class="page-actions"><a class="btn btn-secondary btn-sm" href="admin-billing.html">Back to billing</a></div>
       </div>
@@ -84,10 +88,10 @@
       </div>
 
       <div class="bl-stats">
-        ${AB.stat({ label: 'Overdue', value: kes(s.arrearsCents), tone: s.arrearsCents ? 'danger' : '', sub: s.oldestOverdueAt ? `Since ${fdate(s.oldestOverdueAt)}` : 'Nothing overdue' })}
-        ${AB.stat({ label: 'Open balance', value: kes(s.openBalanceCents) })}
-        ${AB.stat({ label: 'Credit', value: kes(s.creditCents), tone: s.creditCents ? 'success' : '' })}
-        ${AB.stat({ label: 'Total paid', value: kes(s.totalPaidCents), sub: s.lastPaymentAt ? `Last ${window.UI.timeAgo(s.lastPaymentAt)}` : 'No payments' })}
+        ${AB.stat({ label: 'Overdue', value: K(s.arrearsCents), tone: s.arrearsCents ? 'danger' : '', sub: s.oldestOverdueAt ? `Since ${fdate(s.oldestOverdueAt)}` : 'Nothing overdue' })}
+        ${AB.stat({ label: 'Open balance', value: K(s.openBalanceCents) })}
+        ${AB.stat({ label: 'Credit', value: K(s.creditCents), tone: s.creditCents ? 'success' : '' })}
+        ${AB.stat({ label: 'Total paid', value: K(s.totalPaidCents), sub: s.lastPaymentAt ? `Last ${window.UI.timeAgo(s.lastPaymentAt)}` : 'No payments' })}
         ${AB.stat({ label: locked ? 'Locked since' : 'Auto-lock on', value: locked ? fdate(s.lock.at) : data.lockAt ? fdate(data.lockAt) : '-', tone: locked ? 'danger' : '', sub: locked ? esc(s.lock.note || '') : `${data.graceDays} day grace${s.graceDaysOverride != null ? ' (override)' : ''}` })}
       </div>
 
@@ -98,7 +102,7 @@
           <div class="bl-kv"><span>Phase started</span><span>${fdate(s.phaseStartedAt)}</span></div>
           <div class="bl-kv"><span>Phase ends</span><span>${s.phaseEndsAt ? fdate(s.phaseEndsAt) : 'Ongoing'}</span></div>
           <div class="bl-kv"><span>Next action</span><span>${s.nextActionAt ? fdate(s.nextActionAt) : '-'}</span></div>
-          ${upcoming ? `<div class="bl-kv"><span>Upcoming</span><span>${upcoming.type === 'INVOICE' ? `${esc(upcoming.description)} · ${kes(upcoming.amountCents)}${upcoming.estimated ? ' (est.)' : ''} · due ${fdate(upcoming.at)}` : upcoming.type === 'TRIAL_END' ? `Trial ends ${fdate(upcoming.at)}` : `Next phase ${esc(upcoming.nextPhaseName || 'end')} on ${fdate(upcoming.at)}`}</span></div>` : ''}
+          ${upcoming ? `<div class="bl-kv"><span>Upcoming</span><span>${upcoming.type === 'INVOICE' ? `${esc(upcoming.description)} · ${K(upcoming.amountCents)}${upcoming.estimated ? ' (est.)' : ''} · due ${fdate(upcoming.at)}` : upcoming.type === 'TRIAL_END' ? `Trial ends ${fdate(upcoming.at)}` : `Next phase ${esc(upcoming.nextPhaseName || 'end')} on ${fdate(upcoming.at)}`}</span></div>` : ''}
           ${s.lockExemptUntil ? `<div class="bl-kv"><span>Lock exemption until</span><span>${fdate(s.lockExemptUntil)}</span></div>` : ''}
         </div></section>
         <section class="card"><div class="card-header"><h2>Activity</h2></div><div class="card-body">
@@ -111,7 +115,7 @@
           ${invoices.map((i) => {
             const open = i.status === 'PENDING' || i.status === 'PARTIAL';
             const overdue = open && new Date(i.dueDate) <= new Date();
-            return `<tr><td class="cell-primary">${esc(i.number)}</td><td class="text-sm">${esc(i.description)}${i.kind === 'ONE_OFF' ? ' <span class="badge badge-neutral">Manual</span>' : ''}</td><td class="text-sm">${fdate(i.dueDate)}</td><td class="bl-right">${kes(i.amount)}</td><td class="bl-right">${kes(i.amountPaid)}</td>
+            return `<tr><td class="cell-primary">${esc(i.number)}</td><td class="text-sm">${esc(i.description)}${i.kind === 'ONE_OFF' ? ' <span class="badge badge-neutral">Manual</span>' : ''}</td><td class="text-sm">${fdate(i.dueDate)}</td><td class="bl-right">${K(i.amount)}</td><td class="bl-right">${K(i.amountPaid)}</td>
               <td><span class="badge ${overdue ? 'badge-danger' : AB.INV_BADGE[i.status]}">${overdue ? 'Overdue' : esc(i.status)}</span></td>
               <td class="actions">${i.status !== 'VOID' ? `<button class="btn btn-secondary btn-sm" data-adj="${esc(i._id)}">Adjust</button><button class="btn btn-ghost btn-sm" data-void="${esc(i._id)}">Void</button>` : ''}</td></tr>`;
           }).join('') || '<tr><td colspan="7" class="text-muted">No invoices yet.</td></tr>'}
@@ -119,9 +123,9 @@
 
       <section class="card bl-card-gap"><div class="card-header"><h2>Payments</h2></div>
         <div class="table-wrap flat"><table class="table"><thead><tr><th>Date</th><th>Method</th><th>Code / reference</th><th class="bl-right">Amount</th><th>Status</th><th></th></tr></thead><tbody>
-          ${payments.map((p) => `<tr><td class="text-sm">${window.UI.formatDateTime(p.createdAt)}</td><td class="text-sm">${esc(AB.METHOD_LABEL[p.method] || p.method)}${p.source === 'ADMIN' ? ' <span class="badge badge-neutral">Admin</span>' : ''}</td>
+          ${payments.map((p) => `<tr><td class="text-sm">${window.UI.formatDateTime(p.createdAt)}</td><td class="text-sm">${esc(AB.methodText(p))}${p.source === 'ADMIN' ? ' <span class="badge badge-neutral">Admin</span>' : ''}</td>
             <td class="text-sm">${esc(p.mpesaReceiptNumber || '-')}<div class="bl-muted">${esc(p.reference)}</div></td>
-            <td class="bl-right font-semibold">${kes(p.status === 'SUBMITTED' ? p.claimedAmount : p.amount)}</td><td>${AB.badge(AB.PAY_BADGE, AB.PAY_LABEL, p.status)}</td>
+            <td class="bl-right font-semibold">${K(p.status === 'SUBMITTED' ? p.claimedAmount : p.amount)}</td><td>${AB.badge(AB.PAY_BADGE, AB.PAY_LABEL, p.status)}</td>
             <td class="actions"><button class="btn btn-secondary btn-sm" data-pay="${esc(p._id)}">${p.status === 'SUBMITTED' ? 'Review' : 'View'}</button></td></tr>`).join('') || '<tr><td colspan="6" class="text-muted">No payments yet.</td></tr>'}
         </tbody></table></div></section>`;
 
@@ -141,12 +145,12 @@
       formModal({
         title: 'Record a payment', submitText: 'Record payment',
         bodyHtml: `
-          <p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">Use this for cash, bank or M-PESA money you have already received outside the system. It is credited immediately.</p>
+          <p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">Use this for cash, bank or mobile-money money you have already received outside the system. It is credited immediately.</p>
           <div class="form-row">
-            <div class="field"><label>Amount (KES)</label><input class="input" name="amount" type="number" min="1" step="0.01" required /></div>
-            <div class="field"><label>Method</label><select class="select" name="method"><option value="MPESA_MANUAL">M-PESA</option><option value="CASH">Cash</option><option value="BANK">Bank</option><option value="OTHER">Other</option></select></div>
+            <div class="field"><label>Amount (${curOf()})</label><input class="input" name="amount" type="number" min="1" step="0.01" required /></div>
+            <div class="field"><label>Method</label><select class="select" name="method"><option value="MPESA_MANUAL">${curOf() === 'TZS' ? 'Mobile money' : 'M-PESA'}</option><option value="CASH">Cash</option><option value="BANK">Bank</option><option value="OTHER">Other</option></select></div>
           </div>
-          <div class="field"><label>M-PESA code <span class="text-muted">(optional, blocks the same code being used twice)</span></label><input class="input" name="receiptCode" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{9}" placeholder="UJK1A2B3C4" /></div>
+          <div class="field"><label>${curOf() === 'TZS' ? 'Transaction code' : 'M-PESA code'} <span class="text-muted">(optional, blocks the same code being used twice)</span></label><input class="input" name="receiptCode" maxlength="20" pattern="[A-Za-z0-9]{6,20}" placeholder="${curOf() === 'TZS' ? '8H3K2L9QXR' : 'UJK1A2B3C4'}" /></div>
           <div class="field"><label>Reference <span class="text-muted">(optional)</span></label><input class="input" name="reference" maxlength="120" /></div>
           <div class="field"><label>Note <span class="text-muted">(optional)</span></label><input class="input" name="note" maxlength="300" /></div>`,
         onSubmit: async (f) => {
@@ -163,7 +167,7 @@
         bodyHtml: `
           <div class="field"><label>Description</label><input class="input" name="description" required minlength="3" maxlength="200" placeholder="e.g. Extra branch set-up" /></div>
           <div class="form-row">
-            <div class="field"><label>Amount (KES, whole shillings)</label><input class="input" name="amount" type="number" min="1" step="1" required /></div>
+            <div class="field"><label>Amount (${curOf()}, whole shillings)</label><input class="input" name="amount" type="number" min="1" step="1" required /></div>
             <div class="field"><label>Due date</label><input class="input" name="due" type="date" /></div>
           </div>
           <p class="bl-muted">The owner is notified by email and in-app. Leave the date empty to make it due now.</p>`,
@@ -207,12 +211,12 @@
     },
     async plan() {
       let plans = [];
-      try { plans = (await window.Api.get('/admin/billing/plans')).data.items.filter((p) => p.isActive); } catch (err) { return window.UI.toast.error(err.message); }
+      try { plans = (await window.Api.get('/admin/billing/plans')).data.items.filter((p) => p.isActive && (p.currency || 'KES') === curOf()); } catch (err) { return window.UI.toast.error(err.message); }
       const cur = data.subscription.planKey;
       const modal = formModal({
         title: 'Change plan', submitText: 'Change plan', danger: true,
         bodyHtml: `
-          <div class="bl-alert warning"><div class="grow">The new plan starts <b>today</b> at the phase you choose. Unpaid invoices already issued stay as they are; only future invoices follow the new plan.</div></div>
+          <div class="bl-alert warning"><div class="grow">Only plans priced in <b>${curOf()}</b> are listed - a business can never be moved to a plan in another currency. The new plan starts <b>today</b> at the phase you choose. Unpaid invoices already issued stay as they are; only future invoices follow the new plan.</div></div>
           <div class="field"><label>Plan</label><select class="select" name="planKey">${plans.map((p) => `<option value="${esc(p.key)}" ${p.key === cur ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
           <div class="field"><label>Start at phase</label><select class="select" name="startPhaseKey"></select></div>`,
         onSubmit: async (f) => { await patch('plan', { planKey: val(f, 'planKey'), startPhaseKey: val(f, 'startPhaseKey') || undefined }); done('Plan changed'); },
@@ -266,10 +270,10 @@
     formModal({
       title: `Adjust ${inv.number}`, submitText: 'Save changes',
       bodyHtml: `
-        <p class="bl-muted" style="margin-bottom:var(--space-3)">Already paid on this invoice: ${kes(inv.amountPaid)}. The amount cannot go below that - void the invoice instead.</p>
+        <p class="bl-muted" style="margin-bottom:var(--space-3)">Already paid on this invoice: ${K(inv.amountPaid)}. The amount cannot go below that - void the invoice instead.</p>
         <div class="field"><label>Description</label><input class="input" name="description" value="${esc(inv.description)}" maxlength="200" /></div>
         <div class="form-row">
-          <div class="field"><label>Amount (KES, whole shillings)</label><input class="input" name="amount" type="number" min="1" step="1" value="${centsToKes(inv.amount)}" /></div>
+          <div class="field"><label>Amount (${curOf()}, whole shillings)</label><input class="input" name="amount" type="number" min="1" step="1" value="${centsToKes(inv.amount)}" /></div>
           <div class="field"><label>Due date</label><input class="input" name="due" type="date" value="${new Date(inv.dueDate).toISOString().slice(0, 10)}" /></div>
         </div>
         <div class="field"><label>Reason for the change</label><input class="input" name="reason" required minlength="3" maxlength="300" /></div>`,
@@ -289,7 +293,7 @@
   function voidInvoice(inv) {
     formModal({
       title: `Void ${inv.number}`, submitText: 'Void invoice', danger: true,
-      bodyHtml: `<p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">The invoice stops counting as owed.${inv.amountPaid ? ` The ${kes(inv.amountPaid)} already paid on it moves to the owner's account credit - it is never lost.` : ''}</p>
+      bodyHtml: `<p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">The invoice stops counting as owed.${inv.amountPaid ? ` The ${K(inv.amountPaid)} already paid on it moves to the owner's account credit - it is never lost.` : ''}</p>
         <div class="field"><label>Reason</label><input class="input" name="reason" required minlength="3" maxlength="300" /></div>`,
       onSubmit: async (f) => { await window.Api.post(`/admin/billing/invoices/${inv._id}/void`, { reason: val(f, 'reason') }); done('Invoice voided'); },
     });

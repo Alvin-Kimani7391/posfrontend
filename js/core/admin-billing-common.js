@@ -1,12 +1,21 @@
 /**
  * admin-billing-common.js - helpers shared by every admin billing page, plus the manual-payment review modal.
- * Money from the API is integer cents; admin inputs are KES and converted here.
+ * Money from the API is integer cents. Every business pays in its own currency (KES or TZS), so each amount is
+ * formatted with the currency of the record it belongs to - amounts of different currencies are never added together.
  */
 (function (window) {
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
-  const kes = (c) => window.UI.formatMoney((Number(c) || 0) / 100);
+  // `kes` keeps its old name (other admin files use it) but takes the record's currency: kes(cents, 'TZS').
+  const kes = (c, currency) => window.UI.formatMoney((Number(c) || 0) / 100, currency || 'KES');
   const kesToCents = (v) => Math.round(Number(v) * 100);
   const centsToKes = (c) => (Number(c) || 0) / 100;
+  const CURRENCIES = ['KES', 'TZS'];
+  const curBadge = (c) => `<span class="badge ${c === 'TZS' ? 'badge-info' : 'badge-neutral'}">${esc(c || 'KES')}</span>`;
+  /** Totals grouped by currency: "KES 1,200 · TZS 50,000". Zero-value currencies are skipped unless all are zero. */
+  const byCur = (map, key = 'totalCents') => {
+    const parts = CURRENCIES.filter((c) => map && map[c] && map[c][key]).map((c) => kes(map[c][key], c));
+    return parts.length ? parts.join(' · ') : kes(0, 'KES');
+  };
   const fdate = (d) => (d ? window.UI.formatDate(d) : '-');
 
   const SUB_BADGE = { TRIALING: 'badge-info', ACTIVE: 'badge-success', PAST_DUE: 'badge-warning', SUSPENDED: 'badge-danger', CANCELLED: 'badge-neutral' };
@@ -15,6 +24,10 @@
   const PAY_LABEL = { PENDING: 'Waiting', SUBMITTED: 'To verify', SUCCESS: 'Received', FAILED: 'Failed', REJECTED: 'Rejected', CANCELLED: 'Cancelled' };
   const INV_BADGE = { PENDING: 'badge-warning', PARTIAL: 'badge-warning', PAID: 'badge-success', VOID: 'badge-neutral' };
   const METHOD_LABEL = { STK: 'M-PESA prompt', MPESA_MANUAL: 'M-PESA manual', CASH: 'Cash', BANK: 'Bank', OTHER: 'Other' };
+  // Tanzanian payments are mobile money / bank, not M-PESA Kenya: label them by the network the owner chose.
+  const methodText = (p) => (p.currency === 'TZS' && p.method === 'MPESA_MANUAL' ? `Mobile money${p.provider ? ` · ${p.provider}` : ''}` : METHOD_LABEL[p.method] || p.method);
+  // Tanzania: SMS formats differ per network and the owner may have typed only the code.
+  const FLAG_TEXT_TZ = { RECIPIENT_NOT_FOUND: 'The Lipa Namba / account name was not found in the message (or only a code was typed). Check the statement carefully.' };
   const FLAG_TEXT = {
     AMOUNT_NOT_IN_MESSAGE: 'The amount could not be read from the message. Check the amount carefully.',
     RECIPIENT_NOT_FOUND: 'Your till / account name or number was not found in the message. It may have been paid somewhere else.',
@@ -77,30 +90,32 @@
     const sim = data.similarPayments || [];
     const acc = data.account || {};
     const review = p.status === 'SUBMITTED';
-    const flags = (p.flags || []).map((f) => `<div class="bl-flag">${esc(FLAG_TEXT[f] || f)}</div>`).join('');
-    const parsedAmt = p.parsed && p.parsed.amountCents != null ? kes(p.parsed.amountCents) : 'Not found';
+    const flags = (p.flags || []).map((f) => `<div class="bl-flag">${esc(((p.currency === 'TZS' && FLAG_TEXT_TZ[f]) || FLAG_TEXT[f]) || f)}</div>`).join('');
+    const cur = p.currency || 'KES';
+    const tz = cur === 'TZS';
+    const parsedAmt = p.parsed && p.parsed.amountCents != null ? kes(p.parsed.amountCents, cur) : 'Not found';
 
     const modal = window.UI.openModal({
       title: `Payment ${p.reference}`,
       maxWidth: '640px',
       bodyHtml: `
         <div class="bl-kv"><span>Business</span><span><a class="bl-link" href="admin-billing-business.html?id=${esc(p.businessId)}">${esc(p.businessName)}</a></span></div>
-        <div class="bl-kv"><span>Method</span><span>${esc(METHOD_LABEL[p.method] || p.method)}</span></div>
+        <div class="bl-kv"><span>Method</span><span>${esc(methodText(p))} ${curBadge(cur)}</span></div>
         <div class="bl-kv"><span>Status</span><span>${badge(PAY_BADGE, PAY_LABEL, p.status)}</span></div>
         <div class="bl-kv"><span>Submitted</span><span>${window.UI.formatDateTime(p.createdAt)}</span></div>
-        <div class="bl-kv"><span>Amount the owner claims</span><span>${kes(p.claimedAmount)}</span></div>
+        <div class="bl-kv"><span>Amount the owner claims</span><span>${kes(p.claimedAmount, cur)}</span></div>
         <div class="bl-kv"><span>Amount read from the message</span><span>${parsedAmt}</span></div>
-        <div class="bl-kv"><span>M-PESA code</span><span><strong>${esc(p.mpesaReceiptNumber || '-')}</strong></span></div>
-        ${p.status === 'SUCCESS' ? `<div class="bl-kv"><span>Credited</span><span>${kes(p.amount)}</span></div>` : ''}
-        <div class="bl-kv"><span>Account right now</span><span>Overdue ${kes(acc.arrearsCents)} · Open ${kes(acc.openBalanceCents)} · Credit ${kes(acc.creditCents)}</span></div>
+        <div class="bl-kv"><span>${tz ? 'Transaction code' : 'M-PESA code'}</span><span><strong>${esc(p.mpesaReceiptNumber || '-')}</strong></span></div>
+        ${p.status === 'SUCCESS' ? `<div class="bl-kv"><span>Credited</span><span>${kes(p.amount, cur)}</span></div>` : ''}
+        <div class="bl-kv"><span>Account right now</span><span>Overdue ${kes(acc.arrearsCents, cur)} · Open ${kes(acc.openBalanceCents, cur)} · Credit ${kes(acc.creditCents, cur)}</span></div>
         ${flags ? `<div style="margin-top:var(--space-3)">${flags}</div>` : ''}
         ${p.mpesaMessage ? `<div class="text-sm" style="margin:var(--space-4) 0 var(--space-2)"><strong>Message pasted by the owner</strong></div><div class="bl-pre">${esc(p.mpesaMessage)}</div>` : ''}
-        ${sim.length ? `<div class="bl-flag" style="margin-top:var(--space-3)">Similar payments from this business within 2 days: ${sim.map((s) => `${esc(s.mpesaReceiptNumber || s.reference)} (${kes(s.amount)})`).join(', ')}</div>` : ''}
+        ${sim.length ? `<div class="bl-flag" style="margin-top:var(--space-3)">Similar payments from this business within 2 days: ${sim.map((s) => `${esc(s.mpesaReceiptNumber || s.reference)} (${kes(s.amount, cur)})`).join(', ')}</div>` : ''}
         ${p.review && p.review.byName ? `<p class="bl-muted" style="margin-top:var(--space-3)">Reviewed by ${esc(p.review.byName)} on ${window.UI.formatDateTime(p.review.at)}${p.review.note ? `: ${esc(p.review.note)}` : ''}</p>` : ''}
         ${review ? `
           <hr style="margin:var(--space-4) 0;border-color:var(--color-border)" />
-          <p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">Before approving, confirm in your M-PESA statement that code <strong>${esc(p.mpesaReceiptNumber)}</strong> was received on your till for the amount below.</p>
-          <div class="field"><label for="rv-amount">Verified amount to credit (KES)</label><input class="input" id="rv-amount" type="number" min="1" step="0.01" value="${centsToKes(p.claimedAmount)}" /></div>
+          <p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">Before approving, confirm in your ${tz ? 'mobile money / bank statement' : 'M-PESA statement'} that code <strong>${esc(p.mpesaReceiptNumber)}</strong> was received ${tz ? 'on the Tanzanian payment number' : 'on your till'} for the amount below.</p>
+          <div class="field"><label for="rv-amount">Verified amount to credit (${cur})</label><input class="input" id="rv-amount" type="number" min="1" step="0.01" value="${centsToKes(p.claimedAmount)}" /></div>
           <div class="field"><label for="rv-note">Note / reason <span class="text-muted">(reason is required to reject)</span></label><textarea class="textarea" id="rv-note" rows="2" maxlength="300"></textarea></div>` : ''}`,
       footerHtml: review
         ? '<button class="btn btn-secondary" data-action="close">Close</button><button class="btn btn-danger" data-action="reject">Reject</button><button class="btn btn-success" data-action="approve">Approve & credit</button>'
@@ -116,7 +131,7 @@
       if (!(amount > 0)) return window.UI.toast.error('Enter the verified amount');
       const ok = await window.UI.confirmDialog({
         title: 'Credit this payment?',
-        message: `${kes(kesToCents(amount))} will be credited to ${p.businessName} and applied to their oldest invoices. This cannot be undone.`,
+        message: `${kes(kesToCents(amount), cur)} will be credited to ${p.businessName} and applied to their oldest invoices. This cannot be undone.`,
         confirmText: 'Approve & credit',
       });
       if (!ok) return;
@@ -144,7 +159,7 @@
   }
 
   window.AdminBilling = {
-    esc, kes, kesToCents, centsToKes, fdate, subnav, stat, badge, errText, formModal, val, openPaymentReview,
+    esc, kes, kesToCents, centsToKes, fdate, CURRENCIES, curBadge, byCur, methodText, subnav, stat, badge, errText, formModal, val, openPaymentReview,
     SUB_BADGE, SUB_LABEL, PAY_BADGE, PAY_LABEL, INV_BADGE, METHOD_LABEL,
   };
 })(window);

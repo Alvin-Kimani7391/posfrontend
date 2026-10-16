@@ -44,6 +44,11 @@
 
   const conn = () => window.Connectivity;
 
+  /** The screen language (en / sw) chosen by the person - sent on every call so receipts, notifications and error messages follow it. */
+  function langHeader() {
+    try { const l = localStorage.getItem('pos.lang'); return l === 'en' || l === 'sw' ? { 'X-Lang': l } : {}; } catch { return {}; }
+  }
+
   function networkError() {
     const deviceOffline = typeof window.navigator !== 'undefined' && window.navigator.onLine === false;
     return new ApiError(
@@ -74,7 +79,7 @@
 
     const res = await timedFetch(`${window.APP_CONFIG.API_BASE_URL}/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...langHeader() },
       body: JSON.stringify({ refreshToken }),
     }, 15000);
     const body = await res.json().catch(() => ({}));
@@ -97,7 +102,7 @@
   }
 
   async function request(method, path, { body, formData, query, isRetry, headers: extraHeaders, background, timeoutMs } = {}) {
-    const headers = { ...extraHeaders };
+    const headers = { ...langHeader(), ...extraHeaders };
     if (!formData) headers['Content-Type'] = 'application/json';
     const token = window.Storage.getAccessToken();
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -145,7 +150,7 @@
 
   /** GET that returns the response body as TEXT (e.g. the printable invoice HTML). Sends the token, retries once after a refresh. */
   async function requestText(path, query, isRetry) {
-    const headers = {};
+    const headers = { ...langHeader() };
     const token = window.Storage.getAccessToken();
     if (token) headers.Authorization = `Bearer ${token}`;
     const res = await timedFetch(buildUrl(path, query), { method: 'GET', headers }, 45000);

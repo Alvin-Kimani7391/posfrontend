@@ -4,13 +4,16 @@
  *   CashCount.openCountModal({...})  - the "count your drawer by note/coin" window used when closing a shift
  *   CashCount.breakdownHtml(list)    - read-only denomination table (shift summary, owner's shift detail)
  *
- * Denominations are whole KES values. Amounts from the API are already decimal KES.
+ * Denominations are whole major-unit values of the business's currency (KES or TZS). Amounts from the API are decimal.
  */
 (function (window) {
-  const DENOMINATIONS = [1000, 500, 200, 100, 50, 40, 20, 10, 5, 1];
+  // Notes/coins counted at shift close depend on the business currency (same sets as the backend's utils/denominations.js).
+  const DENOMS = { KES: [1000, 500, 200, 100, 50, 40, 20, 10, 5, 1], TZS: [10000, 5000, 2000, 1000, 500, 200, 100, 50] };
+  const currency = () => (window.UI && window.UI.activeCurrency ? window.UI.activeCurrency() : 'KES');
+  const denominations = () => DENOMS[currency()] || DENOMS.KES;
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
   const fm = (n) => window.UI.formatMoney(n);
-  const label = (d) => `KES ${Number(d).toLocaleString('en-KE')}`;
+  const label = (d) => `${currency()} ${Number(d).toLocaleString(currency() === 'TZS' ? 'en-TZ' : 'en-KE')}`;
 
   function totalOf(list) {
     return (list || []).reduce((s, l) => s + (Number(l.denomination) || 0) * (Number(l.count) || 0), 0);
@@ -48,7 +51,7 @@
       bodyHtml: `
         ${intro ? `<p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">${esc(intro)}</p>` : ''}
         <div class="cc-list" id="cc-list">
-          ${DENOMINATIONS.map((d) => `
+          ${denominations().map((d) => `
             <div class="cc-row">
               <label class="cc-label" for="cc-${d}">${label(d)}</label>
               <span class="cc-x" aria-hidden="true">×</span>
@@ -115,5 +118,5 @@
     return modal;
   }
 
-  window.CashCount = { DENOMINATIONS, totalOf, breakdownHtml, openCountModal };
+  window.CashCount = { get DENOMINATIONS() { return denominations(); }, totalOf, breakdownHtml, openCountModal };
 })(window);

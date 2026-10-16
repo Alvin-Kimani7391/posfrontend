@@ -236,9 +236,18 @@
   /* ------------------------------------------------------------------ *
    * Formatters
    * ------------------------------------------------------------------ */
-  function formatMoney(amount, currency = window.APP_CONFIG?.CURRENCY || 'KES') {
+  /** The signed-in business's currency: set by country-flag.js (cached for the next page load); KES for older accounts. */
+  function activeCurrency() {
+    let c = window.POS_COUNTRY_INFO && window.POS_COUNTRY_INFO.currency;
+    if (!c) { try { c = localStorage.getItem('pos.currency'); } catch { /* storage blocked */ } }
+    return c === 'TZS' || c === 'KES' ? c : window.APP_CONFIG?.CURRENCY || 'KES';
+  }
+
+  function formatMoney(amount, currency = activeCurrency()) {
     const value = Number(amount || 0);
-    return new Intl.NumberFormat('en-KE', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
+    // TZS: whole shillings show without ".00"; fractions (rare) still show.
+    const whole = currency === 'TZS' && Math.round(value * 100) % 100 === 0;
+    return new Intl.NumberFormat(currency === 'TZS' ? 'en-TZ' : 'en-KE', { style: 'currency', currency, minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 }).format(value);
   }
 
   function formatDate(dateLike, opts = { day: '2-digit', month: 'short', year: 'numeric' }) {
@@ -400,6 +409,7 @@
     showDrawerLock,
     setButtonLoading,
     formatMoney,
+    activeCurrency,
     formatDate,
     formatDateTime,
     formatDuration,

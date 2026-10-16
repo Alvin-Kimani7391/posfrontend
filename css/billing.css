@@ -103,3 +103,10 @@ a.bl-stat:hover { border-color: var(--color-primary); }
 .bl-phase .field { margin-bottom: var(--space-3); }
 .bl-plan-lines { margin: var(--space-2) 0 0; padding-left: 18px; font-size: var(--text-sm); color: var(--color-text-secondary); }
 .bl-plan-lines li { margin-bottom: 3px; }
+/* Tanzania / manual payment: numbered how-to, copy button, currency tag */
+.bl-steps { margin: 0 0 var(--space-4); padding-left: var(--space-5); font-size: var(--text-sm); color: var(--color-text-secondary); display: grid; gap: var(--space-1); }
+.bl-instr div { align-items: center; }
+.bl-instr div strong { margin-left: auto; text-align: right; word-break: break-word; }
+.bl-copy { margin-left: var(--space-3); border: 1px solid var(--color-border); background: var(--color-surface, #fff); color: var(--color-primary); border-radius: var(--radius-md); padding: 2px var(--space-3); font: inherit; font-size: var(--text-xs, 12px); font-weight: 600; cursor: pointer; }
+.bl-copy:hover { background: var(--color-bg); }
+.bl-cur { font-size: var(--text-xs, 12px); font-weight: 600; color: var(--color-text-secondary); }

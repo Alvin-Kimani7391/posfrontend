@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v2.9.0';
+const VERSION = 'v3.0.0';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -27,7 +27,7 @@ const PRECACHE = [
   'js/core/permissions.js', 'js/core/ui.js', 'js/core/ui-polish.js', 'js/core/notification-types.js', 'js/core/notifications.js',
   'js/core/app-shell.js', 'js/core/business-types.js', 'js/core/business-setup.js', 'js/core/barcode.js', 'js/core/barcode-labels.js', 'css/barcode-labels.css', 'css/onboarding.css', 'css/shelf-labels.css', 'js/pages/onboarding.js', 'js/pages/shelf-labels.js', 'js/core/module-kit.js', 'js/core/job-workflow.js', 'js/pages/batches.js', 'js/pages/stocktakes.js', 'js/pages/serials.js', 'js/pages/warranty.js', 'js/pages/repairs.js', 'js/pages/vehicles.js', 'js/pages/job-cards.js', 'js/core/sidebar-rail.js', 'js/core/charts.js', 'js/core/report-tools.js', 'js/core/product-picker.js',
   'js/core/customer-picker.js', 'js/core/receipt-view.js', 'js/core/barcode-scanner.js', 'js/core/cash-count.js',
-  'js/core/cash-drawer.js', 'js/core/tour.js', 'js/core/announcements.js', 'js/core/billing-banner.js', 'js/core/pwa.js',
+  'js/core/cash-drawer.js', 'js/core/tour.js', 'js/core/announcements.js', 'js/core/billing-banner.js', 'js/core/pwa.js', 'js/core/i18n.js', 'js/core/i18n-sw.js', 'js/core/country-flag.js', 'css/country-flag.css',
 
   'js/pages/dashboard.js', 'js/pages/login.js', 'js/pages/register.js', 'js/pages/sales.js', 'js/pages/products.js',
   'js/pages/inventory.js', 'js/pages/customers.js', 'js/pages/branches.js', 'js/pages/employees.js', 'js/pages/suppliers.js',
