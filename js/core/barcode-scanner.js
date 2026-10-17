@@ -126,7 +126,7 @@
   }
 
   /* -------------------- Camera scanning modal -------------------- */
-  function openCameraModal({ title = 'Scan barcode', onDetect, onCancel } = {}) {
+  function openCameraModal({ title = 'Scan barcode', onDetect, onCancel, qr = false, hint: hintText = qr ? 'Point the camera at the QR code on the receipt' : 'Point the camera at a barcode' } = {}) {
     if (paused) {
       window.UI?.toast?.error('Close the cash drawer before scanning the next sale.');
       return null;
@@ -145,9 +145,9 @@
           <button type="button" class="scanner-close" aria-label="Close scanner">${window.Icons?.get ? window.Icons.get('close') : '&times;'}</button>
         </div>
         <div class="scanner-viewport" id="scanner-video-region">
-          <div class="scanner-frame"></div>
+          <div class="scanner-frame"${qr ? ' style="width:64%;height:auto;aspect-ratio:1/1"' : ''}></div>
         </div>
-        <div class="scanner-hint" id="scanner-hint">Point the camera at a barcode</div>
+        <div class="scanner-hint" id="scanner-hint">${hintText}</div>
       </div>
     `;
     document.body.appendChild(overlay);
@@ -193,7 +193,7 @@
         video.srcObject = nativeStream;
         await video.play();
 
-        const detector = new window.BarcodeDetector({ formats: SUPPORTED_FORMATS_NATIVE });
+        const detector = new window.BarcodeDetector({ formats: qr ? ['qr_code'] : SUPPORTED_FORMATS_NATIVE });
 
         const tick = async () => {
           if (stopped) return;
@@ -223,7 +223,7 @@
         return;
       }
       if (stopped) return;
-      hint.textContent = 'Point the camera at a barcode';
+      hint.textContent = hintText;
 
       const region = overlay.querySelector('#scanner-video-region');
       const innerId = 'scanner-html5-inner';
@@ -236,7 +236,7 @@
 
       const Formats = window.Html5QrcodeSupportedFormats;
       html5Instance = new window.Html5Qrcode(innerId, {
-        formatsToSupport: [
+        formatsToSupport: qr ? [Formats.QR_CODE] : [
           Formats.EAN_13, Formats.EAN_8, Formats.UPC_A, Formats.UPC_E,
           Formats.CODE_128, Formats.CODE_39, Formats.CODABAR, Formats.ITF, Formats.QR_CODE,
         ],
@@ -246,7 +246,7 @@
       try {
         await html5Instance.start(
           { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 260, height: 160 } },
+          { fps: 10, qrbox: qr ? { width: 240, height: 240 } : { width: 260, height: 160 } },
           (decodedText) => handleDetected(decodedText),
           () => {} // per-frame decode failure - expected constantly, ignore
         );

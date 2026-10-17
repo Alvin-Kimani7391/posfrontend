@@ -138,6 +138,7 @@
       const cashDue = body.payments.filter((p) => p.method === 'CASH').reduce((a, p) => a + p.amountCents, 0);
       return {
         receiptNumber, invoiceNumber: invoiceNumber || null, createdAt: body.soldAt, saleId: null, offline: true, status,
+        verifyToken: body.clientTransactionId, // printed in the receipt's QR; the server adopts it when the sale syncs
         receiptData: {
           business: {
             name: b.name, address: b.address, phone: b.phone, kraPin: b.kraPin, headerMessage: rs.headerMessage, footerMessage: rs.footerMessage,

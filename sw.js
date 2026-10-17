@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v3.1.3';
+const VERSION = 'v3.1.4';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -12,6 +12,7 @@ const CDN_HOSTS = /^(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|fonts\
 
 // Missing files are skipped (allSettled), so listing a file that does not exist is harmless.
 const PRECACHE = [
+  'verify.html', 'css/verify.css', 'js/pages/verify.js', 'js/core/qr-encoder.js',
   'offline.html', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'alerts.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'index.html', 'login.html', 'register.html', 'dashboard.html', 'sales.html',
   'products.html', 'inventory.html', 'customers.html', 'branches.html', 'employees.html', 'suppliers.html',
   'purchases.html', 'expenses.html', 'refunds.html', 'reports.html', 'audit-logs.html', 'settings.html',

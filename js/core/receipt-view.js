@@ -36,6 +36,10 @@
  * carry everything it needs - that also guarantees the on-screen receipt and
  * the printed one match. No app CSS file needs to change for the receipt.
  *
+ * QR VERIFICATION: every receipt with a verifyToken prints a QR code at the bottom. Scanning it opens verify.html, where
+ * staff sign in and see the sale straight from the server - a QR that matches no sale means a FAKE receipt.
+ * The QR is drawn locally (js/core/qr-encoder.js, no network), so a till that is OFFLINE still prints it.
+ *
  * PRINTING: printReceipt() prints through a hidden iframe (no pop-up window, so
  * pop-up blockers can't stop it and it can run automatically after a sale).
  * showReceiptModal(receipt, { autoPrint: true }) opens the receipt and prints it
@@ -94,6 +98,11 @@
     #receipt-print-area .rcpt-owed { color: #b91c1c; font-weight: 600; }
     #receipt-print-area .rcpt-custom { text-align: center; margin-top: 4px; color: #666; font-size: 12px; }
     #receipt-print-area .rcpt-footer-msg { text-align: center; margin-top: 10px; color: #666; }
+    #receipt-print-area .rcpt-qr { text-align: center; margin-top: 12px; padding-top: 8px; border-top: 1px dashed #999; }
+    #receipt-print-area .rcpt-qr svg { display: block; width: 132px; height: 132px; margin: 0 auto 4px; }
+    #receipt-print-area.rcpt-58 .rcpt-qr svg { width: 108px; height: 108px; }
+    #receipt-print-area .rcpt-qr-note { font-size: 11px; font-weight: 700; }
+    #receipt-print-area .rcpt-qr-no { font-size: 10px; color: #666; word-break: break-all; }
     #receipt-print-area .rcpt-prov { text-align: center; font-weight: 700; border: 2px solid #111; padding: 4px 6px; margin-bottom: 8px; }
   `;
 
@@ -162,6 +171,24 @@
     `;
   }
 
+  /** The link a receipt's QR code opens: PUBLIC_APP_URL (config.js) if set, else verify.html next to the current page. */
+  function verifyUrl(token) {
+    if (!token) return '';
+    try {
+      const configured = window.APP_CONFIG && window.APP_CONFIG.PUBLIC_APP_URL;
+      const page = configured ? `${String(configured).replace(/\/+$/, '')}/verify.html` : new URL('verify.html', window.location.href).toString().split(/[?#]/)[0];
+      return `${page}?t=${encodeURIComponent(token)}`;
+    } catch { return ''; }
+  }
+
+  function qrBlock(receipt) {
+    const url = verifyUrl(receipt.verifyToken);
+    if (!url || !window.QREncoder) return '';
+    try {
+      return `<div class="rcpt-qr">${window.QREncoder.toSvg(url, { ecl: 'M', border: 1, title: 'Receipt verification code' })}<div class="rcpt-qr-note">Scan to verify this receipt</div><div class="rcpt-qr-no">${esc(receipt.receiptNumber || '')}</div></div>`;
+    } catch { return ''; }
+  }
+
   function renderReceiptHtml(receipt) {
     const d = receipt.receiptData;
     const b = d.business || {};
@@ -211,6 +238,7 @@
         </div>
         ${(b.customLines || []).map((line) => `<div class="rcpt-custom">${esc(line)}</div>`).join('')}
         ${b.footerMessage ? `<div class="rcpt-footer-msg">${esc(b.footerMessage)}</div>` : ''}
+        ${qrBlock(receipt)}
       </div>
     `;
   }

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#ff6600" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Verify receipt · Six Star POS</title>
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/verify.css" />
+</head>
+<body class="vf-body">
+  <header class="vf-top">
+    <div class="vf-brand"><span class="logo-mark" id="vf-logo"></span><span>Six Star POS</span></div>
+    <div class="vf-session hidden" id="vf-session"></div>
+  </header>
+
+  <main class="vf-main">
+    <div class="vf-intro">
+      <h1>Verify receipt</h1>
+      <p>Confirm a receipt is genuine before goods leave the shop. Scan the QR code printed on it.</p>
+    </div>
+
+    <div class="vf-loading" id="vf-loading"><span class="spinner"></span></div>
+
+    <!-- Not signed in: the same details used for the POS -->
+    <section class="vf-card hidden" id="vf-login">
+      <h2>Sign in to continue</h2>
+      <p class="vf-note">Use the same details you use to sign in to the POS.</p>
+      <div id="vf-login-alert"></div>
+      <div class="tabs" style="margin-bottom: var(--space-4)">
+        <button class="tab-btn active" data-tab="password" type="button">Email / phone</button>
+        <button class="tab-btn" data-tab="pin" type="button">Employee PIN</button>
+      </div>
+      <form id="vf-pw-form" novalidate>
+        <div class="field"><label for="vf-identifier">Email or phone number</label>
+          <input class="input" type="text" id="vf-identifier" name="identifier" required autocomplete="username" autocapitalize="off" /></div>
+        <div class="field"><label for="vf-password">Password</label>
+          <input class="input" type="password" id="vf-password" name="password" required autocomplete="current-password" /></div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="vf-pw-btn">Sign in</button>
+      </form>
+      <form id="vf-pin-form" class="hidden" novalidate>
+        <div class="field"><label for="vf-biz">Business ID</label>
+          <input class="input" type="text" id="vf-biz" name="businessId" required autocomplete="off" autocapitalize="off" spellcheck="false" /></div>
+        <div class="form-row">
+          <div class="field"><label for="vf-code">Employee code</label>
+            <input class="input" type="text" id="vf-code" name="employeeCode" required autocomplete="off" autocapitalize="off" spellcheck="false" /></div>
+          <div class="field"><label for="vf-pin">PIN</label>
+            <input class="input" type="password" id="vf-pin" name="pin" inputmode="numeric" maxlength="8" required autocomplete="off" /></div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="vf-pin-btn">Sign in</button>
+      </form>
+    </section>
+
+    <!-- Signed in: scan or type -->
+    <section class="vf-card hidden" id="vf-scan">
+      <div class="vf-actions">
+        <button type="button" class="btn btn-primary btn-block btn-lg" id="vf-scan-btn">Scan receipt QR code</button>
+      </div>
+      <div class="vf-or">QR will not scan? Type the receipt number</div>
+      <form class="vf-row" id="vf-manual-form" novalidate>
+        <input class="input" type="text" id="vf-manual" placeholder="e.g. RCT-MAIN-000123" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+        <button type="submit" class="btn btn-secondary" id="vf-manual-btn">Check</button>
+      </form>
+    </section>
+  </main>
+
+  <div id="vf-result-root"></div>
+
+  <script src="js/core/config.js"></script>
+  <script src="js/core/icons.js"></script>
+  <script src="js/core/storage.js"></script>
+  <script src="js/core/api.js"></script>
+  <script src="js/core/ui.js"></script>
+  <script src="js/core/barcode-scanner.js"></script>
+  <script src="js/core/password-toggle.js"></script>
+  <script src="js/pages/verify.js"></script>
+</body>
+</html>

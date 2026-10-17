@@ -33,6 +33,8 @@
     // Setup guide: owner only (it edits business settings). Always reachable so the owner can resume it any time.
     { key: 'onboarding',    label: 'Setup guide',        icon: 'rocket',    href: 'onboarding.html',    permission: 'settings.update', ownerOnly: true, badge: 'setup' },
     { key: 'sales',         label: 'Sales',              icon: 'sales',     href: 'sales.html',         permission: 'sales.view' },
+    // Anti-fraud: scan a receipt's QR to confirm it is a real sale. Open to every signed-in staff member (no permission).
+    { key: 'verify',        label: 'Verify receipt',     icon: 'shield',    href: 'verify.html' },
     { key: 'products',      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
     { key: 'inventory',     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view', wsLabel: 'Wholesale inventory' },
     // Wholesale is no longer a separate section. For businesses with warehouses (feature multiWarehouse) the normal pages
