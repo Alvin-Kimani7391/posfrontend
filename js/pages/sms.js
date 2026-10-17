@@ -81,7 +81,7 @@
       <div class="kpi-grid">
         ${RT.kpi({ label: 'SMS credits', value: num(w.availableCredits), icon: 'wallet', tone: w.availableCredits ? 'success' : 'warning', sub: '1 credit = one 160-character SMS' })}
         ${RT.kpi({ label: 'Messages sent', value: num(w.totalSent), icon: 'check', tone: 'primary' })}
-        ${RT.kpi({ label: 'Approved Sender IDs', value: num(sids.length), icon: 'tag', tone: sids.length ? 'primary' : 'warning', sub: sids.join(', ') || 'Apply for one first' })}
+        ${RT.kpi({ label: 'Approved Sender IDs', value: num(sids.length), icon: 'tag', tone: sids.length || (d.defaultSender && d.defaultSender.enabled) ? 'primary' : 'warning', sub: sids.join(', ') || (d.defaultSender && d.defaultSender.enabled ? `Alerts send as ${d.defaultSender.senderId} until you get your own` : 'Apply for one first') })}
       </div>
       <div class="card bl-card-gap"><div class="card-header"><h2>Get started</h2></div><div class="card-body">
         ${step(1, sids.length > 0, 'Register your Sender ID', 'The name customers see as the sender.', 'senderid')}

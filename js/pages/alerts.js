@@ -18,7 +18,13 @@
   const feat = (...k) => !!(window.AppShell.hasFeature && window.AppShell.hasFeature(...k));
 
   let root;
-  const S = { prefs: null, sms: null, smsError: '', editable: false };
+  const S = { prefs: null, sms: null, smsError: '', editable: false, recent: null };
+  const BLOCKER_TEXT = {
+    NO_CREDITS: 'You have no SMS credits, so texts will not send. Buy credits on the SMS page.',
+    NO_SENDER_ID: 'No Sender ID is available yet. Apply for your own on the SMS page or contact support.',
+    ALERTS_PAUSED: 'SMS alerts are temporarily paused by the platform. They will resume automatically.',
+  };
+  const PURPOSE = { READY: 'Ready for collection', READY_REMINDER: 'Not collected', SERVICE_DUE: 'Service due', SERVICE_OVERDUE: 'Service overdue', WARRANTY_EXPIRING: 'Warranty ending', INSURANCE_EXPIRING: 'Insurance ending', LAYAWAY_DUE: 'Layaway due', LAYAWAY_OVERDUE: 'Layaway overdue', EXPIRY_DIGEST: 'Expiry text', LOW_STOCK_DIGEST: 'Low stock text', OWNER_TEST: 'Test text' };
 
   /* --------------------------- what exists, and who it applies to --------------------------- */
   // Text alerts. `fields` drive both the form and the save payload. `tpl` fields get a live preview.
@@ -115,6 +121,8 @@
       .al-prev{white-space:pre-wrap;word-break:break-word}
       .al-savebar{position:sticky;bottom:0;z-index:5;display:flex;gap:var(--space-3);align-items:center;justify-content:space-between;flex-wrap:wrap;padding:var(--space-3) var(--space-4);margin-top:var(--space-6);background:var(--color-surface,var(--color-bg));border-top:1px solid var(--color-border)}
       .al-strip{display:flex;flex-wrap:wrap;gap:var(--space-4);align-items:center;justify-content:space-between}
+      .al-actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}
+      .al-recent td,.al-recent th{font-size:var(--text-sm);vertical-align:top}
       @media (max-width:640px){.al-head{align-items:flex-start}}`;
     document.head.appendChild(st);
   }
@@ -125,6 +133,13 @@
     S.sms = sms.status === 'fulfilled' ? sms.value.data : null;
     S.smsError = sms.status === 'rejected' ? (sms.reason && sms.reason.code === 'COUNTRY_NOT_SUPPORTED' ? 'Text (SMS) alerts are available for businesses in Kenya.' : (sms.reason && sms.reason.message) || 'Text alerts could not be loaded.') : '';
     S.loadError = prefs.status === 'rejected' ? (prefs.reason && prefs.reason.message) || 'Could not load your alert settings.' : '';
+    await loadRecent();
+  }
+
+  async function loadRecent() {
+    S.recent = null;
+    if (!S.sms) return;
+    try { S.recent = (await window.Api.get('/sms-alerts/messages', { limit: 10 })).data.items || []; } catch (e) { S.recent = null; /* no permission to view: hide the list */ }
   }
 
   /* --------------------------- rendering --------------------------- */
@@ -174,11 +189,18 @@
     const ownerSms = sms ? SMS_ITEMS.filter((i) => i.group === 'owner' && i.show()) : [];
     const custSms = sms ? SMS_ITEMS.filter((i) => i.group === 'customer' && i.show()) : [];
 
+    const senderLine = sms && sms.approvedSenderIds && sms.approvedSenderIds.length ? esc(sms.approvedSenderIds.join(', '))
+      : sms && sms.defaultSenderId ? `${esc(sms.defaultSenderId)} <span class="text-muted">(shared, free)</span>`
+        : '<span style="color:var(--color-warning)">none available yet</span>';
     const strip = sms ? `
       <div class="card" style="margin-bottom:var(--space-4)"><div class="card-body al-strip">
-        <div class="text-sm"><strong>SMS credits:</strong> ${esc(String(sms.credits))} &nbsp;&middot;&nbsp; <strong>Sender ID:</strong> ${sms.approvedSenderIds && sms.approvedSenderIds.length ? esc(sms.approvedSenderIds.join(', ')) : '<span style="color:var(--color-warning)">none approved yet</span>'}
-          ${sms.ready ? '' : '<div class="text-xs" style="color:var(--color-warning);margin-top:4px">Texts will not send until you have an approved Sender ID and credits.</div>'}</div>
-        <a class="btn btn-secondary btn-sm" href="sms.html">SMS credits &amp; Sender ID</a>
+        <div class="text-sm"><strong>SMS credits:</strong> ${esc(String(sms.credits))} &nbsp;&middot;&nbsp; <strong>Texts are sent as:</strong> ${senderLine}
+          ${sms.ready ? '<div class="text-xs" style="color:var(--color-success);margin-top:4px">Everything is in place. Alerts you switch on will be sent.</div>'
+    : (sms.blockers || []).map((k) => `<div class="text-xs" style="color:var(--color-warning);margin-top:4px">${esc(BLOCKER_TEXT[k] || k)}</div>`).join('')}</div>
+        <div class="al-actions">
+          ${S.editable && sms.ready ? '<button type="button" class="btn btn-secondary btn-sm" data-action="send-test">Send me a test text</button>' : ''}
+          <a class="btn btn-secondary btn-sm" href="sms.html">SMS credits &amp; Sender ID</a>
+        </div>
       </div></div>` : '';
 
     const inApp = `
@@ -207,7 +229,7 @@
       <div class="card"><div class="card-body">
         <div class="field"><label>Send texts as (Sender ID)</label>
           <select class="select" name="delivery.senderId" style="max-width:260px" ${S.editable ? '' : 'disabled'}>
-            <option value="">First approved Sender ID</option>
+            <option value="">${sms.approvedSenderIds && sms.approvedSenderIds.length ? 'First approved Sender ID' : sms.defaultSenderId ? `Shared Sender ID (${esc(sms.defaultSenderId)})` : 'Automatic'}</option>
             ${(sms.approvedSenderIds || []).map((s) => `<option value="${esc(s)}" ${s === sms.settings.senderId ? 'selected' : ''}>${esc(s)}</option>`).join('')}
           </select></div>
         <div class="field"><label class="checkbox-row"><input type="checkbox" name="delivery.quiet" ${q.enabled ? 'checked' : ''} ${S.editable ? '' : 'disabled'} /> <span class="text-sm">Quiet hours: hold texts outside these hours until morning (Nairobi time)</span></label></div>
@@ -221,13 +243,32 @@
 
     host.innerHTML = `
       <form id="al-form" novalidate>
-        ${strip}${inApp}${ownerCard}${custCard}${delivery}${smsNote}
+        ${strip}${inApp}${ownerCard}${custCard}${delivery}<div id="al-recent">${recentHtml()}</div>${smsNote}
         <div class="al-savebar">
           <span class="text-sm text-secondary">${S.editable ? 'Changes apply after you press Save.' : 'Only the owner can change alert settings.'}</span>
           ${S.editable ? '<button type="submit" class="btn btn-primary" id="al-save">Save alerts</button>' : ''}
         </div>
       </form>`;
     bind(host);
+  }
+
+  function recentHtml() {
+    return S.recent ? `
+      <h3 class="al-group-title">Recent texts</h3>
+      <div class="card"><div class="table-wrap flat al-recent"><table class="table"><thead><tr><th>When</th><th>Alert</th><th>To</th><th>Status</th></tr></thead><tbody>
+        ${S.recent.map((m) => {
+    const held = m.status === 'queued' && m.nextAttemptAt && new Date(m.nextAttemptAt).getTime() > Date.now() + 60000;
+    const cls = /^(sent|delivered)$/.test(m.status) ? 'badge-success' : m.status === 'failed' ? 'badge-danger' : 'badge-warning';
+    const label = held ? `waiting until ${window.UI.formatDateTime(m.nextAttemptAt)} (quiet hours)` : m.status === 'queued' ? 'sending soon' : m.status;
+    return `<tr><td>${esc(window.UI.formatDateTime(m.createdAt))}</td><td>${esc(PURPOSE[m.purpose] || m.purpose)}</td><td>${esc(m.name || '')} ${esc(m.phone || '')}</td><td><span class="badge ${cls}">${esc(label)}</span>${m.status === 'failed' ? `<div class="text-xs text-muted">${esc(m.error || 'Not delivered. Your credits were refunded.')}</div>` : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="text-muted">No texts yet. They appear here once an alert goes out.</td></tr>'}
+      </tbody></table></div></div>` : '';
+  }
+
+  async function refreshRecent() {
+    await loadRecent();
+    const box = document.getElementById('al-recent');
+    if (box) box.innerHTML = recentHtml();
   }
 
   /* --------------------------- behaviour --------------------------- */
@@ -246,6 +287,7 @@
     form.addEventListener('submit', (e) => { e.preventDefault(); save(form); });
     host.querySelector('[data-action="run-expiry"]')?.addEventListener('click', (e) => runExpiry(e.currentTarget));
     host.querySelector('[data-action="send-lowstock"]')?.addEventListener('click', (e) => sendLowStock(e.currentTarget));
+    host.querySelector('[data-action="send-test"]')?.addEventListener('click', (e) => sendTest(e.currentTarget));
   }
 
   function previewAll(item) { item.querySelectorAll('textarea[data-kind]').forEach(preview); }
@@ -306,9 +348,11 @@
       }
       await window.Api.put('/alert-prefs', prefs);
       if (S.sms) await window.Api.put('/sms-alerts/settings', collectSms(form));
-      window.UI.toast.success('Alert settings saved');
       await load();
       render();
+      const anyOn = S.sms && SMS_ITEMS.some((i) => i.show() && S.sms.settings[i.key] && S.sms.settings[i.key].enabled);
+      if (anyOn && S.sms && !S.sms.ready) window.UI.toast.warning(`Saved, but texts will not send yet: ${(S.sms.blockers || []).map((k) => BLOCKER_TEXT[k] || k).join(' ')}`);
+      else window.UI.toast.success('Alert settings saved');
     } catch (err) {
       window.UI.toast.error(err.message || 'Could not save');
       window.UI.setButtonLoading(btn, false);
@@ -321,7 +365,10 @@
       const { data } = await window.Api.post('/batches/alerts/run', {});
       const s = data.summary || {};
       const total = (s.expired || 0) + (s.critical || 0) + (s.warning || 0);
-      window.UI.toast.success(total ? `${s.expired || 0} expired, ${s.critical || 0} expiring soon, ${s.warning || 0} later.` : 'Nothing is expired or about to expire.');
+      const t = data.sms;
+      const smsNote = !t ? '' : t.queued ? ' A text is on its way to you.' : t.reason === 'DUPLICATE' ? ' (You already got this period\'s text.)' : t.reason === 'NO_CREDITS' ? ' No text sent: you have no SMS credits.' : t.reason === 'NO_SENDER_ID' ? ' No text sent: no Sender ID available.' : t.reason === 'ALERTS_PAUSED' ? ' No text sent: SMS alerts are paused by the platform.' : '';
+      window.UI.toast.success((total ? `${s.expired || 0} expired, ${s.critical || 0} expiring soon, ${s.warning || 0} later.` : 'Nothing is expired or about to expire.') + smsNote);
+      refreshRecent();
     } catch (e) { window.UI.toast.error(e.message); } finally { window.UI.setButtonLoading(btn, false); }
   }
 
@@ -334,8 +381,21 @@
       else if (r.reason === 'DISABLED') window.UI.toast.error('Switch this alert on and save it first.');
       else if (r.reason === 'NOTHING') window.UI.toast.success('Nothing is low or out of stock right now.');
       else if (r.reason === 'NO_CREDITS') window.UI.toast.error('Not enough SMS credits. Top up on the SMS page.');
-      else if (r.reason === 'NO_SENDER_ID') window.UI.toast.error('No approved Sender ID yet. Set one up on the SMS page.');
-      else window.UI.toast.warning('No text was sent (already sent this hour, or the owner phone is invalid).');
+      else if (r.reason === 'NO_SENDER_ID') window.UI.toast.error(BLOCKER_TEXT.NO_SENDER_ID);
+      else if (r.reason === 'ALERTS_PAUSED') window.UI.toast.error(BLOCKER_TEXT.ALERTS_PAUSED);
+      else if (r.reason === 'DUPLICATE') window.UI.toast.warning('A text was already sent in the last hour. Try again later.');
+      else if (r.reason === 'BAD_PHONE' || r.reason === 'NO_OWNER') window.UI.toast.error('No valid owner phone number found. Update the owner phone in Employees.');
+      else window.UI.toast.warning('No text was sent. Please try again.');
+      if (r.queued) refreshRecent();
+    } catch (e) { window.UI.toast.error(e.message); } finally { window.UI.setButtonLoading(btn, false); }
+  }
+
+  async function sendTest(btn) {
+    window.UI.setButtonLoading(btn, true, 'Sending…');
+    try {
+      const { data } = await window.Api.post('/sms-alerts/test', {});
+      if (data.sent) window.UI.toast.success(data.message); else window.UI.toast.error(data.message);
+      refreshRecent();
     } catch (e) { window.UI.toast.error(e.message); } finally { window.UI.setButtonLoading(btn, false); }
   }
 })();

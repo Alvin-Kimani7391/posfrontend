@@ -16,7 +16,7 @@
     { key: 'audit', label: 'Audit log', icon: 'settings', href: 'admin-audit.html' },
     { key: 'tickets', label: 'Tickets', icon: 'alert', href: 'admin-tickets.html' },
     { key: 'billing', label: 'Billing', icon: 'wallet', href: 'admin-billing.html' },
-        { key: 'sms', label: 'SMS', icon: 'bell', href: 'admin-sms.html' },
+        { key: 'sms', label: 'Alerts & SMS', icon: 'bell', href: 'admin-sms.html' },
     { key: 'announcements', label: 'Announcements', icon: 'bell', href: 'admin-announcements.html' },
   ];
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));

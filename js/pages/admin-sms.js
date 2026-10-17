@@ -1,6 +1,6 @@
 /**
  * admin-sms.js - Six Star Technologies SMS admin.
- * Tabs: Overview | Sender ID applications | Payments | SMS offers | Pricing & settings | Wallets
+ * Tabs: Alerts & SMS | Overview | Sender ID applications | Payments | SMS offers | Pricing & settings | Wallets
  * PayHero credentials are NOT here: they live in Admin > Billing > Settings and are shared.
  */
 (function () {
@@ -14,17 +14,17 @@
   const GOOD = /approved|paid|active/i; const BAD = /reject|fail|cancel|revoked/i;
   const badge = (s) => `<span class="badge ${GOOD.test(s) ? 'badge-success' : BAD.test(s) ? 'badge-danger' : 'badge-warning'}">${esc(String(s).replace(/_/g, ' '))}</span>`;
   const toastErr = (e) => window.UI.toast.error((e && e.message) || 'Something went wrong');
-  const TABS = [['overview', 'Overview'], ['apps', 'Sender ID applications'], ['payments', 'Payments'], ['offers', 'SMS offers'], ['settings', 'Pricing & settings'], ['wallets', 'Wallets']];
-  const S = { tab: 'overview', appFilter: '', payFilter: 'AWAITING_VERIFICATION' };
+  const TABS = [['alerts', 'Alerts & SMS'], ['overview', 'Overview'], ['apps', 'Sender ID applications'], ['payments', 'Payments'], ['offers', 'SMS offers'], ['settings', 'Pricing & settings'], ['wallets', 'Wallets']];
+  const S = { tab: 'alerts', appFilter: '', payFilter: 'AWAITING_VERIFICATION', msgFilter: '' };
   let el;
 
   document.addEventListener('DOMContentLoaded', () => {
-    el = window.AdminShell.mount({ title: 'SMS' });
+    el = window.AdminShell.mount({ title: 'Alerts & SMS' });
     if (!el) return;
     const w = new URLSearchParams(window.location.search).get('tab');
     if (TABS.some((t) => t[0] === w)) S.tab = w;
     el.innerHTML = `
-      <div class="page-header"><div><h1>SMS Marketing</h1><p>Sender ID registrations, SMS credit sales and shop wallets.</p></div></div>
+      <div class="page-header"><div><h1>Alerts &amp; SMS</h1><p>Alert delivery to shop owners and customers, Sender ID registrations, SMS credit sales and shop wallets.</p></div></div>
       <div class="tabs" id="as-tabs" style="margin-bottom:var(--space-5)">${TABS.map(([k, l]) => `<button class="tab-btn" data-tab="${k}">${l}</button>`).join('')}</div>
       <div id="as-body"></div>`;
     $('as-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) show(b.dataset.tab); });
@@ -35,9 +35,88 @@
     S.tab = t;
     document.querySelectorAll('#as-tabs .tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
     const body = $('as-body'); body.innerHTML = window.UI.skeletonRows(3, 1);
-    ({ overview, apps, payments, offers, settings, wallets }[t])(body).catch((err) => {
+    ({ alerts, overview, apps, payments, offers, settings, wallets }[t])(body).catch((err) => {
       body.innerHTML = `<div class="card">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load this section', message: err.message })}</div>`;
     });
+  }
+
+
+  /* ------------------------------ alerts & sms (delivery setup) ------------------------------ */
+  const MSG_LABEL = { READY: 'Ready for collection', READY_REMINDER: 'Not collected', SERVICE_DUE: 'Service due', SERVICE_OVERDUE: 'Service overdue', WARRANTY_EXPIRING: 'Warranty ending', INSURANCE_EXPIRING: 'Insurance ending', LAYAWAY_DUE: 'Layaway due', LAYAWAY_OVERDUE: 'Layaway overdue', EXPIRY_DIGEST: 'Expiry (owner)', LOW_STOCK_DIGEST: 'Low stock (owner)', OWNER_TEST: 'Owner test' };
+  const mask = (p) => { const s = String(p || ''); return s.length > 6 ? `${s.slice(0, 5)}***${s.slice(-3)}` : s; };
+
+  async function alerts(b) {
+    const [{ data: h }, { data: s }] = await Promise.all([Api.get('/admin/sms/alerts/health'), Api.get('/admin/sms/settings')]);
+    const ok = (v) => (v ? '<span class="badge badge-success">Ready</span>' : '<span class="badge badge-danger">Needs action</span>');
+    const step = (n, done, title, text) => `<div class="bl-kv"><span><b>${done ? '✓' : n}.</b> ${esc(title)}<div class="bl-muted">${text}</div></span><span>${ok(done)}</span></div>`;
+    const d = h.defaultSender; const t = h.last24h;
+    const allGood = h.provider.configured && d.enabled && h.alertsEnabled;
+    b.innerHTML = `
+      <div class="kpi-grid">
+        ${RT.kpi({ label: 'Alert texts, last 24h', value: num(t.sent + t.delivered), icon: 'check', tone: 'success', sub: `${num(t.delivered)} confirmed delivered` })}
+        ${RT.kpi({ label: 'Waiting to send', value: num(h.waiting), icon: 'bell', tone: h.waiting ? 'warning' : 'neutral', sub: 'Includes texts held for quiet hours' })}
+        ${RT.kpi({ label: 'Failed, last 24h', value: num(t.failed), icon: 'alert', tone: t.failed ? 'danger' : 'neutral', sub: t.failed ? 'Credits were refunded to the shop' : 'None' })}
+        ${RT.kpi({ label: 'Shops with alerts on', value: num(h.shops.alertsOn), icon: 'store', tone: 'primary', sub: `${num(h.shops.withCredits)} have SMS credits` })}
+      </div>
+
+      <div class="card bl-card-gap"><div class="card-header"><div><h2>Setup checklist</h2><p class="text-sm text-muted">Alert texts only go out when all of these are green.</p></div>${allGood ? '<span class="badge badge-success">Alerts are live</span>' : '<span class="badge badge-warning">Not fully set up</span>'}</div><div class="card-body">
+        ${step(1, h.provider.configured, 'TalkSasa API token', h.provider.configured ? 'TALKSASA_API_TOKEN is set on the server.' : 'Add <b>TALKSASA_API_TOKEN</b> to the backend environment (Render > Environment) and redeploy. Until then every text waits in the queue; nothing is lost or charged.')}
+        ${step(2, d.enabled, 'Default Sender ID', d.enabled ? `Shops without their own approved Sender ID send as <b>${esc(d.senderId)}</b>.` : 'Type the Sender ID below (the free TalkSasa one for now) and save.')}
+        ${step(3, h.alertsEnabled, 'Alerts switched on', h.alertsEnabled ? 'Automatic alert texts are enabled platform-wide.' : 'The master switch below is OFF, so no alert text will be sent to anyone.')}
+        <div class="bl-kv"><span>${h.webhookSecretSet ? '✓' : '4.'} Delivery reports <span class="text-muted">(optional)</span><div class="bl-muted">${h.webhookSecretSet ? 'SMS_WEBHOOK_SECRET is set. In TalkSasa, point delivery reports to <code>/api/v1/sms-hooks/talksasa?s=YOUR_SECRET</code>.' : 'Set SMS_WEBHOOK_SECRET to see "delivered" instead of just "sent".'}</div></span><span></span></div>
+      </div></div>
+
+      <div class="card bl-card-gap"><div class="card-header"><div><h2>Default Sender ID</h2><p class="text-sm text-muted">Used for alert texts (low stock, expiry, ready for collection, reminders) by every shop that has no approved Sender ID of its own. When you later register a custom one, just change it here. Shops that have their own approved Sender ID always use theirs.</p></div></div><div class="card-body">
+        <div class="form-row">
+          <div class="field"><label>Default Sender ID</label><input class="input" id="al-sid" maxlength="11" placeholder="Exactly as shown in your TalkSasa account" value="${esc(s.defaultSenderId || '')}" />
+            <div class="field-hint">${h.defaultSender.source === 'env' ? `Currently using <b>${esc(d.senderId)}</b> from the server setting SMS_DEFAULT_SENDER_ID. Saving here overrides it.` : 'Up to 11 characters. It must be a Sender ID your TalkSasa account is allowed to send from.'}</div></div>
+          <div class="field"><label>Use it for shops without their own</label><select class="select" id="al-use"><option value="1" ${s.useDefaultSender !== false ? 'selected' : ''}>Yes (recommended)</option><option value="0" ${s.useDefaultSender === false ? 'selected' : ''}>No: only shops with an approved Sender ID get alerts</option></select></div>
+          <div class="field"><label>Alert texts (master switch)</label><select class="select" id="al-on"><option value="1" ${s.alertsEnabled !== false ? 'selected' : ''}>On</option><option value="0" ${s.alertsEnabled === false ? 'selected' : ''}>Paused for everyone</option></select></div>
+        </div>
+      </div><div class="card-footer" style="display:flex;justify-content:flex-end"><button class="btn btn-primary btn-sm" id="al-save">Save</button></div></div>
+
+      <div class="card bl-card-gap"><div class="card-header"><div><h2>Send a test SMS</h2><p class="text-sm text-muted">Sends straight through TalkSasa with the sender below (uses your TalkSasa balance, not a shop's credits). Use it to confirm the token and Sender ID work before shops depend on them.</p></div></div><div class="card-body">
+        <div class="form-row">
+          <div class="field"><label>Phone number</label><input class="input" id="at-ph" inputmode="tel" placeholder="0712345678" /></div>
+          <div class="field"><label>Sender ID <span class="text-muted">(blank = default)</span></label><input class="input" id="at-sid" maxlength="11" placeholder="${esc(d.senderId || '')}" /></div>
+        </div>
+        <div class="field"><label>Message</label><input class="input" id="at-msg" maxlength="300" value="Six Star POS test: SMS alerts are working." /></div>
+        <div id="at-out" class="text-sm" style="margin-top:8px"></div>
+      </div><div class="card-footer" style="display:flex;justify-content:flex-end"><button class="btn btn-secondary btn-sm" id="at-go">Send test</button></div></div>
+
+      <div class="card"><div class="card-header"><div><h2>Recent alert texts</h2><p class="text-sm text-muted">Every automatic text to owners and customers, newest first${h.lastError ? ` · last failure: <b>${esc(h.lastError.error || 'unknown')}</b> (${window.UI.timeAgo(h.lastError.at)})` : ''}.</p></div>
+        <select class="select" id="am-f" style="max-width:190px">${[['', 'All'], ['queued', 'Waiting'], ['sent', 'Sent'], ['delivered', 'Delivered'], ['failed', 'Failed']].map(([v, l]) => `<option value="${v}" ${S.msgFilter === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="table-wrap flat"><table class="table"><thead><tr><th>When</th><th>Shop</th><th>Alert</th><th>To</th><th>Sender</th><th>Status</th></tr></thead><tbody id="am-body"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody></table></div></div>`;
+
+    $('al-save').addEventListener('click', async (ev) => {
+      window.UI.setButtonLoading(ev.currentTarget, true, 'Saving…');
+      try {
+        await Api.put('/admin/sms/settings', { defaultSenderId: $('al-sid').value.trim(), useDefaultSender: $('al-use').value === '1', alertsEnabled: $('al-on').value === '1' });
+        window.UI.toast.success('Saved. Alerts will use this Sender ID from now on.'); show('alerts');
+      } catch (err) { toastErr(err); window.UI.setButtonLoading($('al-save'), false); }
+    });
+    $('at-go').addEventListener('click', async (ev) => {
+      const out = $('at-out'); out.textContent = '';
+      window.UI.setButtonLoading(ev.currentTarget, true, 'Sending…');
+      try {
+        const { data: r } = await Api.post('/admin/sms/alerts/test', { phone: $('at-ph').value, message: $('at-msg').value, senderId: $('at-sid').value.trim() || undefined });
+        out.innerHTML = r.ok ? `<span style="color:var(--color-success)">✓ Accepted by TalkSasa for ${esc(r.to)} as <b>${esc(r.senderId)}</b>. It should arrive within a minute.</span>` : `<span style="color:var(--color-danger)">✗ TalkSasa said: ${esc(r.error || 'unknown error')}. Sender used: <b>${esc(r.senderId)}</b>.</span>`;
+      } catch (err) { out.innerHTML = `<span style="color:var(--color-danger)">✗ ${esc(err.message)}</span>`; } finally { window.UI.setButtonLoading($('at-go'), false); }
+    });
+    $('am-f').addEventListener('change', (e) => { S.msgFilter = e.target.value; loadMsgs(); });
+    loadMsgs();
+  }
+
+  async function loadMsgs() {
+    const body = $('am-body'); if (!body) return;
+    try {
+      const { data: list } = await Api.get('/admin/sms/alerts/messages', S.msgFilter ? { status: S.msgFilter } : {});
+      body.innerHTML = list.map((m) => {
+        const held = m.status === 'queued' && m.nextAttemptAt && new Date(m.nextAttemptAt).getTime() > Date.now() + 60000;
+        const st = held ? `<span class="badge badge-warning">held until ${window.UI.formatDateTime(m.nextAttemptAt)}</span>` : badge(m.status);
+        return `<tr><td class="text-sm">${when(m.createdAt)}</td><td class="cell-primary">${esc(m.businessName || '-')}</td><td class="text-sm">${esc(MSG_LABEL[m.purpose] || m.purpose)}</td><td class="text-sm">${esc(mask(m.phone))}</td><td class="text-sm">${esc(m.senderId || '-')}${m.senderSource === 'DEFAULT' ? ' <span class="badge badge-neutral">shared</span>' : ''}</td><td>${st}${m.error ? `<div class="bl-muted">${esc(m.error)}</div>` : ''}</td></tr>`;
+      }).join('') || '<tr><td colspan="6" class="text-muted">No alert texts yet. They appear here as soon as a shop owner switches an alert on.</td></tr>';
+    } catch (err) { body.innerHTML = `<tr><td colspan="6" class="text-muted">${esc(err.message)}</td></tr>`; }
   }
 
   /* ------------------------------ overview ------------------------------ */
