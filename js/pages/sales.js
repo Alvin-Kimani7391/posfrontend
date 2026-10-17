@@ -1212,7 +1212,7 @@
       if (state.cart.length) {
         const ok = await window.UI.confirmDialog({ title: 'Change warehouse?', message: 'The invoice lines are cleared because stock is counted per warehouse.', confirmText: 'Change warehouse', danger: true });
         if (!ok) { e.target.value = ws.whId; return; }
-        state.cart = []; state.lastAdded = null; checkoutKey = window.Api.newIdempotencyKey();
+        state.cart = []; state.lastAdded = null; checkoutKey = window.Api.newIdempotencyKey(); if (window.BatchTill) window.BatchTill.clear();
         renderCart();
       }
       ws.whId = e.target.value;
@@ -1452,6 +1452,8 @@
     }
     state.lastAdded = key;
     renderCart(key); // scrolls the new / updated row into view
+    // Batch / expiry tracked products: show which batch will be sold (earliest expiry first). Display only.
+    if (window.BatchTill) window.BatchTill.ensure(state.cart).then(() => { if (state.view === 'new-sale') renderCart(); }).catch(() => {});
     // Pharmacy: learn whether this product is a medicine (class, recall status) and repaint the tags.
     if (window.PharmacyTill && window.PharmacyTill.active()) window.PharmacyTill.ensure([product]).then(() => { if (state.view === 'new-sale') renderCart(); });
   }
@@ -1538,6 +1540,7 @@
       } else {
         const info = priceInfoOf(item);
         if (window.PharmacyTill) nameExtra = window.PharmacyTill.tag(item.product._id, state.pharmacy);
+        if (window.BatchTill) nameExtra += window.BatchTill.tag(item, i);
         const wholesaleHint = info.priceType === 'WHOLESALE'
           ? 'wholesale price'
           : (info.wholesale !== null && info.moq ? `wholesale ${fm(info.wholesale)} from ${info.moq}` : '');
@@ -1609,6 +1612,12 @@
     });
 
     el.addEventListener('change', (e) => {
+      const bsel = e.target.closest('select[data-action="batch"]');
+      if (bsel) {
+        const line = state.cart[Number(bsel.dataset.idx)];
+        if (line) { line.batchId = bsel.value || undefined; renderCart(); }
+        return;
+      }
       const sel = e.target.closest('select[data-action="unit"]');
       if (sel) {
         const line = state.cart[Number(sel.dataset.idx)];
@@ -2380,6 +2389,7 @@
    * ================================================================== */
   function resetCart() {
     state.cart = [];
+    if (window.BatchTill) window.BatchTill.clear();
     state.pharmacy = {};
     state.customer = null;
     state.cartDiscount = 0;
@@ -2443,6 +2453,7 @@
       items: state.cart.map((item) => ({
         productId: item.product._id, variantId: item.variantId || item.variant?._id, quantity: item.quantity,
         ...(wholesale && item.unitId ? { unitId: item.unitId } : {}),
+        ...(!wholesale && item.batchId ? { batchId: item.batchId } : {}),
         discount: item.discount || 0, overridePrice: item.overridePriceEnabled ? item.overridePrice : undefined,
       })),
       payments: state.payments.map((p) => ({

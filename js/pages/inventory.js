@@ -96,6 +96,7 @@
           <button class="btn btn-secondary" id="adjust-stock-btn" data-requires-permission="inventory.adjust">${window.Icons.get('edit')} Adjust</button>
           <button class="btn btn-secondary" id="receive-stock-btn" data-requires-permission="inventory.receive">${window.Icons.get('plus')} Receive stock</button>
           ${wh() ? `<button class="btn btn-secondary" id="move-stock-btn" data-requires-permission="inventory.transfer">${window.Icons.get('truck')} Move stock</button>` : ''}
+          <button class="btn btn-secondary" id="low-sms-btn" data-requires-permission="settings.update">${window.Icons.get('bell')} Low stock SMS</button>
           <button class="btn btn-primary" id="new-transfer-btn" data-requires-permission="inventory.transfer">${window.Icons.get('branches')} New transfer</button>
         </div>
       </div>
@@ -123,6 +124,7 @@
     window.AppShell.runUrlAction?.('receive-stock-btn'); // opened from the setup guide
     document.getElementById('new-transfer-btn').addEventListener('click', openTransferModal);
     document.getElementById('move-stock-btn')?.addEventListener('click', openMoveModal);
+    document.getElementById('low-sms-btn')?.addEventListener('click', openLowStockSmsModal);
   }
 
   function bindTabs() {
@@ -500,6 +502,84 @@
   /* ------------------------------------------------------------------ *
    * Receive stock modal
    * ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------ *
+   * Low stock SMS (opt-in, paid from SMS credits): text the owner which products are running low
+   * ------------------------------------------------------------------ */
+  async function openLowStockSmsModal() {
+    const esc = window.UI.escapeHtml;
+    let s;
+    try { s = (await window.Api.get('/sms-alerts/settings')).data; }
+    catch (e) { return window.UI.toast.error(e.code === 'COUNTRY_NOT_SUPPORTED' || e.status === 403 ? 'Low stock texts are not available for this account.' : e.message); }
+    const d = s.settings.lowStockDigest;
+
+    const modal = window.UI.openModal({
+      title: 'Low stock SMS',
+      maxWidth: '560px',
+      bodyHtml: `
+        <p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">
+          Get a text on your phone when products are running low or out of stock. <strong>This is optional and paid:</strong>
+          each text uses SMS credits from your balance (${esc(String(s.credits))} credit${s.credits === 1 ? '' : 's'} now; a short text is 1 credit per owner).
+          ${s.ready ? '' : '<br><span style="color:var(--color-warning)">Texts will not send until you have an approved Sender ID and SMS credits (SMS page).</span>'}
+        </p>
+        <form id="lsms-form">
+          <div class="field"><label class="checkbox-row"><input type="checkbox" name="enabled" ${d.enabled ? 'checked' : ''} /> <span class="text-sm">Text the owner about low stock</span></label></div>
+          <div class="field"><label>How often</label>
+            <select class="select" name="frequency">
+              <option value="weekly" ${d.frequency === 'weekly' ? 'selected' : ''}>Weekly summary (cheapest)</option>
+              <option value="daily" ${d.frequency === 'daily' ? 'selected' : ''}>Every day something is low</option>
+            </select></div>
+          <div class="field"><label class="checkbox-row"><input type="checkbox" name="includeOutOfStock" ${d.includeOutOfStock ? 'checked' : ''} /> <span class="text-sm">Include products that are out of stock</span></label></div>
+          <div class="field"><label>Message <span class="text-muted">(leave empty for the default)</span></label>
+            <textarea class="textarea" name="template" rows="3" placeholder="${esc(s.defaults.lowStockDigest)}">${esc(d.template || '')}</textarea>
+            <div class="field-hint">You can use {shop} {low} {out} {items}. Plain characters only. Preview: <span id="lsms-prev" class="text-muted">...</span></div></div>
+        </form>`,
+      footerHtml: `
+        <button class="btn btn-secondary" data-action="cancel">Cancel</button>
+        <button class="btn btn-secondary" data-action="send">Save &amp; send now</button>
+        <button class="btn btn-primary" data-action="save">Save</button>`,
+    });
+    const form = modal.querySelector('#lsms-form');
+    const read = () => ({
+      enabled: form.elements.enabled.checked, frequency: form.elements.frequency.value,
+      includeOutOfStock: form.elements.includeOutOfStock.checked, template: form.elements.template.value.trim(),
+    });
+
+    const prev = modal.querySelector('#lsms-prev');
+    const refreshPreview = window.UI.debounce(async () => {
+      try {
+        const r = (await window.Api.post('/sms-alerts/preview', { kind: 'lowStockDigest', template: form.elements.template.value.trim() || undefined })).data;
+        prev.textContent = `"${r.text}" (${r.characters} characters, ${r.credits} credit${r.credits === 1 ? '' : 's'} per text)`;
+      } catch (e) { prev.textContent = e.message; }
+    }, 300);
+    form.elements.template.addEventListener('input', refreshPreview);
+    refreshPreview();
+
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
+    const save = async () => { await window.Api.put('/sms-alerts/settings', { lowStockDigest: read() }); };
+
+    modal.querySelector('[data-action="save"]').addEventListener('click', async (e) => {
+      window.UI.setButtonLoading(e.currentTarget, true, 'Saving…');
+      try { await save(); window.UI.toast.success(read().enabled ? 'Low stock texts are on' : 'Low stock texts are off'); window.UI.closeModal(); }
+      catch (err) { window.UI.toast.error(err.message); window.UI.setButtonLoading(e.currentTarget, false); }
+    });
+
+    modal.querySelector('[data-action="send"]').addEventListener('click', async (e) => {
+      if (!read().enabled) return window.UI.toast.error('Switch the texts on first');
+      window.UI.setButtonLoading(e.currentTarget, true, 'Sending…');
+      try {
+        await save();
+        const r = (await window.Api.post('/sms-alerts/low-stock/send-now', {})).data;
+        const { low, out } = r.summary || {};
+        if (r.sms && r.sms.queued) window.UI.toast.success(`Text queued: ${low} low, ${out} out of stock.`);
+        else if (r.sms && r.sms.reason === 'NOTHING') window.UI.toast.success('Nothing is low or out of stock right now.');
+        else if (r.sms && r.sms.reason === 'NO_CREDITS') window.UI.toast.error('Not enough SMS credits. Top up on the SMS page.');
+        else if (r.sms && r.sms.reason === 'NO_SENDER_ID') window.UI.toast.error('No approved Sender ID yet. Set one up on the SMS page.');
+        else window.UI.toast.warning('No text was sent (already sent this hour, or the owner phone is invalid).');
+        window.UI.closeModal();
+      } catch (err) { window.UI.toast.error(err.message); window.UI.setButtonLoading(e.currentTarget, false); }
+    });
+  }
+
   function openReceiveModal() {
     const branchId = window.AppShell.getActiveBranchId();
     if (!branchId) return window.UI.toast.error('Select a branch first');

@@ -2,18 +2,22 @@
 (function () {
   const K = window.ModuleKit;
   let contentEl, view = 'batches', list = null, days = 30;
+  let thr = { criticalDays: 30, warningDays: 90 };
 
   document.addEventListener('DOMContentLoaded', () => {
     contentEl = window.AppShell.mount({ title: 'Batches & expiry' });
     if (!contentEl) return;
     contentEl.innerHTML = `
       <div class="page-header"><div><h1>Batches &amp; expiry</h1><p>Stock by batch, what is about to expire, and recalls.</p></div>
-        <div class="flex gap-2"><button class="btn btn-secondary" id="recall-btn" data-requires-permission="batches.manage">Recall a batch</button></div></div>
+        <div class="flex gap-2" style="flex-wrap:wrap"><button class="btn btn-secondary" id="check-btn" data-requires-permission="batches.manage">Check now</button><button class="btn btn-secondary" id="alerts-btn" data-requires-permission="batches.manage">Alert settings</button><button class="btn btn-secondary" id="recall-btn" data-requires-permission="batches.manage">Recall a batch</button></div></div>
       <div id="exp-banner"></div>
       <div class="tabs" style="margin-bottom:var(--space-4);overflow-x:auto;white-space:nowrap"><button class="tab-btn active" data-v="batches">All batches</button><button class="tab-btn" data-v="expiry">Expiry watch</button><button class="tab-btn" data-v="unbatched">No expiry recorded <span class="badge badge-warning" id="unb-count" style="display:none"></span></button></div>
       <div id="mk-root"></div>`;
     contentEl.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => setView(b.dataset.v)));
     document.getElementById('recall-btn').addEventListener('click', recall);
+    document.getElementById('alerts-btn').addEventListener('click', alertSettings);
+    document.getElementById('check-btn').addEventListener('click', checkNow);
+    window.Api.get('/batches/alert-settings').then(({ data }) => { thr = { criticalDays: data.criticalDays, warningDays: data.warningDays }; show(); }).catch(() => {});
     window.AppShell.onBranchChange?.(() => { show(); loadBanner(); });
     window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
     show();
@@ -38,7 +42,7 @@
     const d = daysLeft(v);
     if (d < 0) return `<span class="badge badge-danger">Expired ${-d} day${d === -1 ? '' : 's'} ago</span>`;
     if (d === 0) return '<span class="badge badge-danger">Expires today</span>';
-    return `<span class="badge ${d <= 7 ? 'badge-danger' : d <= 30 ? 'badge-warning' : 'badge-neutral'}">${d} day${d === 1 ? '' : 's'} left</span>`;
+    return `<span class="badge ${d <= thr.criticalDays ? 'badge-danger' : d <= thr.warningDays ? 'badge-warning' : 'badge-neutral'}">${d} day${d === 1 ? '' : 's'} left</span>`;
   }
   const actions = (b) => (K.can('batches.manage') ? [
     b.status === 'active' ? K.btn('quarantine', 'Quarantine') : '',
@@ -153,6 +157,62 @@
         fields: [{ name: 'reason', label: 'Reason', required: true }],
         onSubmit: async (d) => { await window.Api.post(`/batches/${b._id}/${a}`, d); done(`Batch ${a === 'quarantine' ? 'quarantined' : 'released'}`); } });
     }
+  }
+
+  /** Thresholds, the daily in-app notification, and (Kenya) the optional SMS to the owner. */
+  async function alertSettings() {
+    let cur; let sms = null;
+    try { cur = (await window.Api.get('/batches/alert-settings')).data; } catch (e) { window.UI.toast.error(e.message); return; }
+    try { sms = (await window.Api.get('/sms-alerts/settings')).data; } catch { /* no permission / not Kenya: in-app alerts only */ }
+    const dg = sms && sms.settings && sms.settings.expiryDigest;
+    const fields = [
+      { name: 'criticalDays', label: 'Red alert: expires within (days)', type: 'number', min: 1, required: true },
+      { name: 'warningDays', label: 'Orange alert: expires within (days)', type: 'number', min: 1, required: true },
+      { name: 'notifyEnabled', label: 'Send a notification every morning when stock is expired or about to expire', type: 'checkbox' },
+    ];
+    if (dg) {
+      fields.push(
+        { name: 'smsEnabled', label: 'Also text the shop owner (uses SMS credits)', type: 'checkbox' },
+        { name: 'smsFrequency', label: 'How often to text', type: 'select', options: [['weekly', 'Weekly summary'], ['daily', 'Every day there is something to report']] },
+        { name: 'smsDays', label: 'Text about stock expiring within (days)', type: 'number', min: 1 },
+        { name: 'smsTemplate', label: 'Message (empty = default)', type: 'textarea', hint: 'You can use {shop} {expired} {expiring} {days} {items}. Plain characters only.' },
+      );
+    }
+    const smsNote = dg
+      ? `<br>Texts need an approved Sender ID and SMS credits${sms.ready ? ` (you have ${K.esc(String(sms.credits))}).` : ' &mdash; set these up on the SMS page first.'}`
+      : '';
+    K.formModal({
+      title: 'Expiry alert settings', submitLabel: 'Save',
+      intro: `Management gets an in-app notification each morning (6:00) listing expired and expiring stock. Nothing is written off automatically.${smsNote}`,
+      values: {
+        criticalDays: cur.criticalDays, warningDays: cur.warningDays, notifyEnabled: cur.notifyEnabled,
+        ...(dg ? { smsEnabled: dg.enabled, smsFrequency: dg.frequency, smsDays: dg.daysBefore, smsTemplate: dg.template } : {}),
+      },
+      fields,
+      onSubmit: async (d) => {
+        const saved = (await window.Api.put('/batches/alert-settings', { criticalDays: Number(d.criticalDays), warningDays: Number(d.warningDays), notifyEnabled: !!d.notifyEnabled })).data;
+        if (dg) {
+          try {
+            await window.Api.put('/sms-alerts/settings', { expiryDigest: { enabled: !!d.smsEnabled, frequency: d.smsFrequency || 'weekly', daysBefore: Number(d.smsDays) || 30, template: d.smsTemplate || '' } });
+          } catch (e) { window.UI.toast.warning(`Alert settings saved, but the SMS part was not: ${e.message}`); }
+        }
+        thr = { criticalDays: saved.criticalDays, warningDays: saved.warningDays };
+        window.UI.toast.success('Expiry alert settings saved');
+        show(); loadBanner();
+      },
+    });
+  }
+
+  /** Run the daily check right now (also sends today's notification). */
+  async function checkNow() {
+    const btn = document.getElementById('check-btn');
+    window.UI.setButtonLoading(btn, true, 'Checking…');
+    try {
+      const { data } = await window.Api.post('/batches/alerts/run', {});
+      const s = data.summary || {};
+      const total = (s.expired || 0) + (s.critical || 0) + (s.warning || 0);
+      window.UI.toast.success(total ? `${s.expired || 0} expired, ${s.critical || 0} expiring soon, ${s.warning || 0} later. Management was notified.` : 'Nothing is expired or about to expire.');
+    } catch (e) { window.UI.toast.error(e.message); } finally { window.UI.setButtonLoading(btn, false); }
   }
 
   function recall() {

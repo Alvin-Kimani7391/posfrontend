@@ -72,6 +72,7 @@
     { key: 'sms',           label: 'SMS',                icon: 'message',    href: 'sms.html',           permission: 'reports.view' },
     { key: 'tickets',       label: 'Tickets',            icon: 'ticket',    href: 'tickets.html',       permission: 'tickets.view' },
     { key: 'notifications', label: 'Notifications',      icon: 'bell',      href: 'notifications.html', permission: 'notifications.view' },
+    { key: 'alerts',        label: 'Alerts',             icon: 'sliders',   href: 'alerts.html',        permission: 'settings.view' },
     { key: 'billing',       label: 'Billing',            icon: 'card',    href: 'billing.html',       permission: 'billing.view' },
     { key: 'settings',      label: 'Settings',           icon: 'settings',  href: 'settings.html',      permission: 'settings.view' },
   ];

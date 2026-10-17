@@ -35,6 +35,7 @@ BILLING_TRIAL: { label: 'Free trial', icon: 'bell', severity: 'warning' },
 BILLING_NOTICE: { label: 'Billing notice', icon: 'bell', severity: 'warning' },
 
 OFFLINE_REVIEW: { label: 'Offline review', icon: 'alert', severity: 'warning' },
+    EXPIRY_ALERT: { label: 'Expiry alert', icon: 'alert', severity: 'warning' },
   };
 
   // Same subset the backend's POST /notifications/alert accepts.
@@ -43,7 +44,7 @@ OFFLINE_REVIEW: { label: 'Offline review', icon: 'alert', severity: 'warning' },
   const QUICK_FILTERS = [
     ['', 'All'], ['CASH_SHORTAGE', 'Cash shortage'], ['SHIFT_CLOSED', 'Shifts'],
     ['SHORTAGE_PAYMENT', 'Shortage payments'], ['SHORTAGE_CLEARED', 'Shortages cleared'],
-    ['LOW_STOCK', 'Stock'], ['SALE_CANCELLED', 'Sales'], ['REFUND_REQUEST', 'Refunds'],
+    ['LOW_STOCK', 'Stock'], ['EXPIRY_ALERT', 'Expiry'], ['SALE_CANCELLED', 'Sales'], ['REFUND_REQUEST', 'Refunds'],
     ['TRANSFER_REQUESTED', 'Transfers'], ['PAYMENT_FAILED', 'Payments'],
     ['CREDIT_DUE', 'Credit due'], ['CREDIT_SALE', 'Credit sales'], ['CUSTOMER_PAYMENT', 'Payments received'],
     ['BILLING_DUE', 'Billing due'], ['BILLING_PAYMENT', 'Billing payments'],

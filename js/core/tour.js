@@ -154,11 +154,12 @@
     },
 
     sales: {
-      label: 'Sales', href: 'sales.html', version: 1, permission: 'sales.view', ready: '#pos-search',
+      label: 'Sales', href: 'sales.html', version: 2, permission: 'sales.view', ready: '#pos-search',
       steps: [
         { target: '.pz-tabs', title: 'Sell or look back', body: '<b>New sale</b> is your till. <b>Sales history</b> lists past receipts, where you can reprint, refund or cancel a sale.' },
         { target: '#shift-banner', title: 'Open a shift first', body: 'A shift tracks the cash in your drawer. Open one before taking cash. At the end of the day, close it by counting your notes and coins.' },
         { target: '#pos-search', advanceOn: 'input', tryText: 'Type two letters of a product name, or press Next.', title: 'Scan or search', body: 'Scan a barcode with a handheld scanner or the camera button, or type a product name or SKU. Pick a result and it goes straight onto the ticket.' },
+        { target: '#ph-till-bar', since: 2, title: 'Pharmacy bar', body: 'Shown only in pharmacies. It tells you when the cart holds medicines that need a <b>prescription</b>, a <b>countersignature</b> or a <b>Poisons Book</b> entry. Tap <b>Attach</b> to choose the prescription before you take payment. Recalled or quarantined medicines cannot be sold.' },
         { target: '#pz-ticket', title: 'Your ticket', body: 'Every product sits on one line with its quantity, discount and subtotal. Use the arrows to change quantity, or tap the discount number to adjust a line.' },
         { target: '#pick-customer-btn', title: 'Walk-in or named customer', body: 'Leave it as walk-in for normal sales. Choose a customer when the sale is on credit.' },
         { target: '#cart-discount-input', title: 'Discount the whole sale', body: 'Type an amount in KES to take it off the entire cart.' },
@@ -384,9 +385,125 @@
         { target: cardOf('#etims-form'), late: true, title: 'Send sales to KRA', body: 'Connect eTIMS through DigiTax to transmit every sale automatically.' },
       ],
     },
+
+    /* ---------------- Pharmacy module (only for businesses with the Dispensing feature) ---------------- */
+    pharmacy: {
+      label: 'Pharmacy desk', href: 'pharmacy.html', version: 1, permission: 'pharmacy.reports', feature: 'pharmacyDispensing', ready: '.page-header',
+      steps: [
+        { target: '.page-header', title: 'Your pharmacy desk', body: 'This is the first page to open each morning. It shows what needs attention <b>today</b> for the branch selected at the top. Nothing here changes stock: it only points you to the right page.' },
+        { target: '#ph-setup .card', late: true, title: 'Finish setting up first', body: 'Until the <b>required</b> items are ticked, dispensing is blocked. Typical items: a pharmacist confirms the medicine classes, staff get verified credentials and medicines are set up. Each line has a button that takes you to the right place. The card disappears when everything is done.' },
+        { target: '.ph-grid', late: true, title: 'Today in numbers', body: 'Dispensings and sales so far today, prescriptions <b>awaiting pharmacist review</b> and open <b>recalls</b>. Tap a tile that has a link to open it.' },
+        { target: cardOf('.ph-two .ph-task'), late: true, title: 'Needs attention', body: 'Prescriptions waiting for a pharmacist, open recalls, temperature exceptions, purchase orders to receive and controlled medicines to reconcile. Aim to keep every number at <b>0</b>.' },
+        { target: function () { var t = document.querySelectorAll('.ph-two .card'); return t[1] || null; }, late: true, title: 'Stock health', body: 'Expired batches still holding stock, batches expiring within 30 days, quarantined or recalled batches and medicines that are low or out of stock. Red numbers need action today.' },
+        { target: '.page-header .btn-primary', title: 'Straight to the till', body: 'Dispensing happens at the till, as a normal sale that carries the prescription. <b>Open till</b> takes you there.' },
+      ],
+    },
+
+    prescriptions: {
+      label: 'Prescriptions', href: 'prescriptions.html', version: 1, permission: 'prescriptions.view', feature: 'pharmacyDispensing', ready: '.tabs',
+      steps: [
+        { target: '.ph-tabs', title: 'Three lists', body: '<b>Prescriptions</b> is everything received. <b>Awaiting review</b> is the pharmacist queue. <b>Dispensing register</b> is the permanent record of every supply, with labels and reversals.' },
+        { target: '#ph-new-rx', title: '1. Record the prescription', body: 'When a patient brings a prescription, record it here: the patient, the prescriber, the date and each medicine with its quantity and directions. A reception or dispenser can do this.' },
+        { target: '[data-tab="review"]', title: '2. A pharmacist reviews it', body: 'Only a pharmacist with a <b>verified credential</b> can validate or reject. They check the allergy box, the doses and interactions, and record any intervention. Rejecting needs a reason.' },
+        { target: '[data-tab="dispensings"]', title: '3. Dispense at the till', body: 'A validated prescription is attached to a sale at the till. Every supply lands in this register with the batch, the dispenser and the patient. From here you can print the label or <b>reverse</b> a dispensing (stock returns to quarantine, never to sellable shelves).' },
+        { target: '#ph-host .table-wrap, #ph-host .card', late: true, title: 'Open any prescription', body: 'Tap a row to see its items, how much has been dispensed (the bar), the interventions and the history. Partly dispensed prescriptions stay open until finished, expired or cancelled.' },
+      ],
+      modals: [
+        {
+          id: 'prescriptions.form', detect: '#rx-form',
+          steps: [
+            { target: '#rx-pick', title: 'Choose the patient', body: 'Search an existing patient or add a new one. Allergies on the patient record are shown to the pharmacist at review.' },
+            { target: '#rx-lines', title: 'What was prescribed', body: 'One line per medicine: the medicine, the quantity and the directions printed on the label. A controlled drug must be on its own prescription and cannot be refilled.' },
+            { target: '#rx-add-line', title: 'More medicines', body: 'Add another line if the prescription has more than one medicine.' },
+            { target: '#rx-allergy', title: 'Allergy check', body: 'The pharmacist confirms the allergy check when validating. A prescription is only valid for the number of days set for your country in Pharmacy settings.' },
+          ],
+        },
+      ],
+    },
+
+    medicines: {
+      label: 'Medicines', href: 'medicines.html', version: 1, permission: 'medicines.view', feature: 'pharmacyDispensing', ready: '#mk-root',
+      steps: [
+        { target: '#ph-add-med', title: 'Turn a product into a medicine', body: 'Pick an existing product (create it in <b>Products</b> first), then add the generic name, strength, form, <b>class</b> and storage. Medicines are always tracked by batch and expiry.' },
+        { target: '#mk-search', title: 'Find a medicine', body: 'Search by generic or brand name or by strength.' },
+        { target: '[data-filter="classification"]', title: 'Filter by class', body: 'The class decides the rules at the till: over the counter, pharmacy only, prescription only, controlled and so on.' },
+        { target: '.table-wrap', late: true, title: 'Class, storage and status', body: 'Each medicine shows its class, storage range (❄ means cold chain) and status. <b>Status</b> lets you mark a medicine discontinued, quarantined or recalled. Quarantined and recalled medicines cannot be sold. <b>Alternatives</b> links substitutes you can offer.' },
+        { target: '.page-header .btn-secondary', title: 'Many medicines at once', body: '<b>Bulk import</b> takes you to Pharmacy settings, where you can upload a spreadsheet of medicines instead of typing them one by one.' },
+      ],
+      modals: [
+        {
+          id: 'medicines.form', detect: '#mk-form [name="genericName"]',
+          steps: [
+            { target: '#mk-form [name="genericName"]', title: 'Generic name', body: 'The active ingredient, for example Amoxicillin. Add the brand name below if it has one.' },
+            { target: '#mk-form [name="classification"]', title: 'Class: the most important box', body: 'This controls who may sell it and what is needed (prescription, countersignature, Poisons Book). If unsure, ask your pharmacist. When in doubt choose the stricter class.' },
+            { target: '#mk-form [name="storageMinC"]', title: 'Storage range', body: 'The temperature range in °C. The storage log warns you when a reading falls outside it. Tick <b>Cold chain</b> for fridge items.' },
+          ],
+        },
+      ],
+    },
+
+    patients: {
+      label: 'Patients', href: 'patients.html', version: 1, permission: 'patients.view', feature: 'pharmacyDispensing', ready: '#mk-root',
+      steps: [
+        { target: '#ph-new-patient', title: 'Register a patient', body: 'Name, phone, date of birth, ID and <b>allergies</b>. The allergies are shown to the pharmacist whenever a prescription is reviewed.' },
+        { target: '#mk-search', title: 'Search', body: 'Find a patient by name, phone or ID number.' },
+        { target: '.table-wrap', late: true, title: 'Patient records', body: 'Open a patient to see their prescriptions and dispensing history. <b>Edit</b> keeps the details up to date. <b>Erase</b> (managers only) removes a patient when the law allows. Records inside the retention period you set cannot be erased.' },
+      ],
+      modals: [
+        {
+          id: 'patients.form', detect: '#mk-form [name="allergies"]',
+          steps: [
+            { target: '#mk-form [name="allergies"]', title: 'Allergies', body: 'Separate with commas, for example <i>Penicillin, aspirin</i>. These warn the pharmacist at review.' },
+            { target: '#mk-form [name="consentBasis"]', title: 'Why you keep their details', body: 'Patient information is private health data. Record the consent or lawful basis for keeping it. Only collect what you need.' },
+          ],
+        },
+      ],
+    },
+
+    'pharmacy-compliance': {
+      label: 'Recalls & registers', href: 'pharmacy-compliance.html', version: 1, permission: 'pharmacy.reports', feature: 'pharmacyDispensing', ready: '.tabs',
+      steps: [
+        { target: '.ph-tabs', title: 'Everything the inspector may ask for', body: 'Recalls, the temperature log, expiry, reorder suggestions, the controlled-drugs register, the Poisons Book, supplier licences and reports each have their own tab. The tab you are on is remembered in the address.' },
+        { target: '[data-tab="recalls"]', title: 'Recalls', body: 'When a regulator, manufacturer or supplier recalls a batch, <b>start a recall</b> with the batch number. Matching batches are held at once so they cannot be sold. <b>Trace</b> shows which patients received it, and you record each action until you close the recall.' },
+        { target: '[data-tab="storage"]', title: 'Storage and temperature', body: 'Log fridge and room temperatures each day. A reading outside the range raises an exception and can put stock on hold until a pharmacist assesses it.' },
+        { target: '[data-tab="expiry"]', title: 'Expiry watch', body: 'Batches that are expired or about to expire (30, 60 and 90 days by default). Act early: return to the supplier, discount or dispose.' },
+        { target: '[data-tab="replenish"]', title: 'Reorder suggestions', body: 'Based on how fast each medicine sells, how long your supplier takes and a safety margin. Change those three numbers to suit you, then raise purchase orders.' },
+        { target: '[data-tab="controlled"]', title: 'Controlled drugs', body: 'The controlled-drugs register and the <b>period return</b>: prepare it, enter the counted stock, and a pharmacist signs it. A signed return is locked and cannot be edited.' },
+        { target: '[data-tab="poisons"]', title: 'Poisons Book', body: 'Entries made when a restricted poison is sold without a prescription: purchaser, address, purpose and signature.' },
+        { target: '[data-tab="suppliers"]', title: 'Suppliers and returns', body: 'Keep each supplier\'s licence current. Medicines can only be bought from approved suppliers with a valid licence. Record returns to suppliers here.' },
+        { target: '[data-tab="reports"]', title: 'Reports and exports', body: 'Dispensing, exceptions, expiry and access reports. Download as CSV for an inspection or your accountant.' },
+      ],
+      modals: [
+        {
+          id: 'compliance.recall', detect: '#rc-form',
+          steps: [
+            { target: '#rc-form [name="batchNumber"]', title: 'Batch number', body: 'Type it exactly as printed on the pack. All stock with this batch number is held immediately.' },
+            { target: '#rc-form [name="reason"]', title: 'Reason', body: 'Say what the notice says and quote its reference. This is saved for audit.' },
+          ],
+        },
+        {
+          id: 'compliance.storage', detect: '#st-form',
+          steps: [
+            { target: '#st-form [name="readingC"]', title: 'Temperature reading', body: 'Enter what the thermometer shows in °C. Out-of-range readings are flagged automatically.' },
+          ],
+        },
+      ],
+    },
+
+    'pharmacy-settings': {
+      label: 'Pharmacy settings', href: 'pharmacy-settings.html', version: 1, permission: 'pharmacy.settings', feature: 'pharmacyDispensing', ready: '.tabs',
+      steps: [
+        { target: '.ph-tabs', title: 'Your pharmacy\'s rules', body: 'Everything here is a <b>starting point</b> for your country. You and your pharmacist are responsible for checking it against the regulator\'s current rules.' },
+        { target: '[data-tab="classes"]', title: '1. Medicine classes', body: 'Each class says whether it needs a prescription, is dispenser-only, is controlled, needs a Poisons Book entry and has a quantity limit. Keep the <b>OTC</b> class. Changing a class cancels the pharmacist\'s sign-off.' },
+        { target: '#cl-confirm', late: true, title: '2. Pharmacist sign-off', body: 'A registered pharmacist with a verified credential confirms the classes match the regulator\'s current lists. Their name and registration number are recorded. <b>Dispensing stays blocked until this is done.</b>' },
+        { target: '[data-tab="rules"]', title: '3. Rules and storage places', body: 'Prescription validity, refills, countersignature, record retention, expiry warnings and whether offline selling of over-the-counter medicines is allowed. Add each fridge and shelf with its temperature range.' },
+        { target: '[data-tab="staff"]', title: '4. Staff credentials', body: 'Nobody can dispense without a current, <b>verified</b> credential. Enter each pharmacist\'s or dispenser\'s registration number and expiry date after checking it against the regulator\'s register. Revoke it when someone leaves.' },
+        { target: '[data-tab="import"]', title: '5. Import medicines', body: 'Download the template, fill in your medicines (the product must exist), then <b>check</b> the file before importing. Errors are listed row by row.' },
+      ],
+    },
   };
 
-  var ORDER = ['dashboard', 'sales', 'products', 'inventory', 'customers', 'suppliers', 'purchases', 'expenses', 'refunds', 'reports', 'cash', 'branches', 'employees', 'audit', 'notifications', 'tickets', 'settings'];
+  var ORDER = ['dashboard', 'sales', 'products', 'inventory', 'customers', 'suppliers', 'purchases', 'expenses', 'refunds', 'reports', 'cash', 'branches', 'employees', 'audit', 'notifications', 'tickets', 'settings', 'pharmacy', 'prescriptions', 'medicines', 'patients', 'pharmacy-compliance', 'pharmacy-settings'];
 
   /* ================================================================== *
    * Engine
@@ -711,6 +828,9 @@
   function allowed(key) {
     var cfg = PAGES[key];
     if (!cfg) return false;
+    if (cfg.feature) {
+      try { if (!(window.AppShell.hasFeature && window.AppShell.hasFeature(cfg.feature))) return false; } catch (e) { return false; }
+    }
     if (!cfg.permission) return true;
     try { return window.Permissions.can(window.AppShell.getUser(), cfg.permission); } catch (e) { return false; }
   }

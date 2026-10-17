@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v3.1.0';
+const VERSION = 'v3.1.3';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -12,7 +12,7 @@ const CDN_HOSTS = /^(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|fonts\
 
 // Missing files are skipped (allSettled), so listing a file that does not exist is harmless.
 const PRECACHE = [
-  'offline.html', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'index.html', 'login.html', 'register.html', 'dashboard.html', 'sales.html',
+  'offline.html', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'alerts.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'index.html', 'login.html', 'register.html', 'dashboard.html', 'sales.html',
   'products.html', 'inventory.html', 'customers.html', 'branches.html', 'employees.html', 'suppliers.html',
   'purchases.html', 'expenses.html', 'refunds.html', 'reports.html', 'audit-logs.html', 'settings.html',
   'cash-register.html', 'notifications.html', 'offline-review.html', 'billing.html', 'crm.html',
@@ -25,7 +25,7 @@ const PRECACHE = [
   'js/core/offline-db.js', 'js/core/offline-sync.js', 'js/core/offline-shifts.js', 'js/core/offline-auth.js',
   'js/core/offline-sale.js', 'js/core/wholesale.js', 'js/core/password-toggle.js', 'js/core/offline-ui.js', 'js/core/offline-settings.js',
   'js/core/permissions.js', 'js/core/ui.js', 'js/core/ui-polish.js', 'js/core/notification-types.js', 'js/core/notifications.js',
-  'js/core/app-shell.js', 'js/core/pharmacy-kit.js', 'js/core/pharmacy-till.js', 'css/pharmacy.css', 'js/pages/pharmacy.js', 'js/pages/medicines.js', 'js/pages/patients.js', 'js/pages/prescriptions.js', 'js/pages/pharmacy-compliance.js', 'js/pages/pharmacy-settings.js', 'js/core/business-types.js', 'js/core/business-setup.js', 'js/core/barcode.js', 'js/core/barcode-labels.js', 'css/barcode-labels.css', 'css/onboarding.css', 'css/shelf-labels.css', 'js/pages/onboarding.js', 'js/pages/shelf-labels.js', 'js/core/module-kit.js', 'js/core/job-workflow.js', 'js/pages/batches.js', 'js/pages/stocktakes.js', 'js/pages/serials.js', 'js/pages/warranty.js', 'js/pages/repairs.js', 'js/pages/vehicles.js', 'js/pages/job-cards.js', 'js/core/sidebar-rail.js', 'js/core/charts.js', 'js/core/report-tools.js', 'js/core/product-picker.js',
+  'js/core/app-shell.js', 'js/core/pharmacy-kit.js', 'js/core/pharmacy-till.js', 'js/core/batch-till.js', 'css/pharmacy.css', 'js/pages/pharmacy.js', 'js/pages/medicines.js', 'js/pages/patients.js', 'js/pages/prescriptions.js', 'js/pages/pharmacy-compliance.js', 'js/pages/pharmacy-settings.js', 'js/core/business-types.js', 'js/core/business-setup.js', 'js/core/barcode.js', 'js/core/barcode-labels.js', 'css/barcode-labels.css', 'css/onboarding.css', 'css/shelf-labels.css', 'js/pages/onboarding.js', 'js/pages/shelf-labels.js', 'js/core/module-kit.js', 'js/core/job-workflow.js', 'js/pages/batches.js', 'js/pages/alerts.js', 'js/pages/stocktakes.js', 'js/pages/serials.js', 'js/pages/warranty.js', 'js/pages/repairs.js', 'js/pages/vehicles.js', 'js/pages/job-cards.js', 'js/core/sidebar-rail.js', 'js/core/charts.js', 'js/core/report-tools.js', 'js/core/product-picker.js',
   'js/core/customer-picker.js', 'js/core/receipt-view.js', 'js/core/barcode-scanner.js', 'js/core/cash-count.js',
   'js/core/cash-drawer.js', 'js/core/tour.js', 'js/core/announcements.js', 'js/core/billing-banner.js', 'js/core/pwa.js', 'js/core/i18n.js', 'js/core/i18n-sw.js', 'js/core/country-flag.js', 'css/country-flag.css',
 

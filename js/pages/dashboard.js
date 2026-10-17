@@ -43,6 +43,24 @@
   let canSelfShift = false;
   let token = 0;
   let timer = null;
+  /** Expiry summary from the server: only shown when the shop uses expiry / batches, or something is already flagged. */
+  function expiryOn(ex) {
+    if (!ex) return false;
+    const flagged = (ex.expired?.batches || 0) + (ex.critical?.batches || 0) + (ex.warning?.batches || 0) > 0;
+    const feature = !!(window.AppShell.hasFeature && window.AppShell.hasFeature('expiryTracking', 'batchTracking'));
+    return flagged || feature;
+  }
+  function expiryTilesHtml(ex) {
+    if (!expiryOn(ex)) return '';
+    const n = (k) => (ex[k] && ex[k].batches) || 0;
+    const money = (k) => (ex[k] && ex[k].costValue ? ` &middot; ${RT.money0(ex[k].costValue / 100)}` : '');
+    return `<div class="tile-row" style="margin-top: var(--space-3)">
+      <div class="tile ${n('expired') ? 'bad' : 'good'}"><b>${RT.fmtNum(n('expired'))}</b><span>Expired, still in stock${money('expired')}</span></div>
+      <div class="tile ${n('critical') ? 'warn' : 'good'}"><b>${RT.fmtNum(n('critical'))}</b><span>Expire within ${ex.criticalDays} days${money('critical')}</span></div>
+      <div class="tile"><b>${RT.fmtNum(n('warning'))}</b><span>Expire within ${ex.warningDays} days</span></div>
+    </div>`;
+  }
+
   const wsOn = () => !!(window.WholesaleDashboard && window.WS && window.AppShell.hasFeature && window.AppShell.hasFeature('multiWarehouse'));
 
   document.addEventListener('DOMContentLoaded', init);
@@ -244,7 +262,8 @@
               <div class="tile ${inv.outOfStockCount ? 'bad' : 'good'}"><b>${RT.fmtNum(inv.outOfStockCount)}</b><span>Out of stock</span></div>
               <div class="tile"><b>${RT.money0(inv.inventoryValuation)}</b><span>Stock value at cost</span></div>
             </div>
-            <div style="margin-top: var(--space-4)"><a class="btn btn-secondary btn-sm" href="inventory.html" data-requires-permission="inventory.view">Open inventory</a></div>
+            ${expiryTilesHtml(inv.expiry)}
+            <div style="margin-top: var(--space-4); display:flex; gap:var(--space-2); flex-wrap:wrap"><a class="btn btn-secondary btn-sm" href="inventory.html" data-requires-permission="inventory.view">Open inventory</a>${expiryOn(inv.expiry) ? '<a class="btn btn-secondary btn-sm" href="batches.html" data-requires-permission="batches.view">Expiry watch</a>' : ''}</div>
           </div>
         </section>
       </div>`;
@@ -363,6 +382,10 @@
     if (inv) {
       tiles.push(RT.kpi({ label: 'Running low', value: RT.fmtNum(inv.lowStockCount || 0), icon: 'inventory', tone: inv.lowStockCount ? 'warning' : 'success' }));
       tiles.push(RT.kpi({ label: 'Out of stock', value: RT.fmtNum(inv.outOfStockCount || 0), tone: inv.outOfStockCount ? 'danger' : 'success' }));
+      if (expiryOn(inv.expiry)) {
+        tiles.push(RT.kpi({ label: 'Expired in stock', value: RT.fmtNum(inv.expiry.expired.batches || 0), tone: inv.expiry.expired.batches ? 'danger' : 'success' }));
+        tiles.push(RT.kpi({ label: `Expiring in ${inv.expiry.criticalDays} days`, value: RT.fmtNum(inv.expiry.critical.batches || 0), tone: inv.expiry.critical.batches ? 'warning' : 'success' }));
+      }
     }
 
     body.innerHTML = `
