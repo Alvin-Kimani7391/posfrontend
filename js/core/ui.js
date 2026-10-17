@@ -250,14 +250,22 @@
     return new Intl.NumberFormat(currency === 'TZS' ? 'en-TZ' : 'en-KE', { style: 'currency', currency, minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 }).format(value);
   }
 
+  /** Locale for dates and times: Kiswahili month/day names when the screen language is Kiswahili. */
+  function dateLocale() {
+    let l = null;
+    try { l = localStorage.getItem('pos.lang'); } catch { /* storage blocked */ }
+    if (l === 'sw') return activeCurrency() === 'TZS' ? 'sw-TZ' : 'sw-KE';
+    return 'en-KE';
+  }
+
   function formatDate(dateLike, opts = { day: '2-digit', month: 'short', year: 'numeric' }) {
     if (!dateLike) return '—';
-    return new Intl.DateTimeFormat('en-KE', opts).format(new Date(dateLike));
+    return new Intl.DateTimeFormat(dateLocale(), opts).format(new Date(dateLike));
   }
 
   function formatDateTime(dateLike) {
     if (!dateLike) return '—';
-    return new Intl.DateTimeFormat('en-KE', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(dateLike));
+    return new Intl.DateTimeFormat(dateLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(dateLike));
   }
 
   /** 75 -> "1m 15s", 8 -> "8s" */
@@ -410,6 +418,7 @@
     setButtonLoading,
     formatMoney,
     activeCurrency,
+    dateLocale,
     formatDate,
     formatDateTime,
     formatDuration,

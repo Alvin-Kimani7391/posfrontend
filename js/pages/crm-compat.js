@@ -20,11 +20,11 @@
   }
 
   if (!UI.formatDate) {
-    UI.formatDate = (d) => (d ? toDate(d).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+    UI.formatDate = (d) => (d ? toDate(d).toLocaleDateString((window.UI && window.UI.dateLocale ? window.UI.dateLocale() : 'en-KE'), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
   }
 
   if (!UI.formatDateTime) {
-    UI.formatDateTime = (d) => (d ? toDate(d).toLocaleString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+    UI.formatDateTime = (d) => (d ? toDate(d).toLocaleString((window.UI && window.UI.dateLocale ? window.UI.dateLocale() : 'en-KE'), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
   }
 
   if (!UI.timeAgo) {

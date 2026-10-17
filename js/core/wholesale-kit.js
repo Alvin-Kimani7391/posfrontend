@@ -81,7 +81,7 @@
     { id: 'TO_WAREHOUSE', ico: 'inventory', title: 'Shop floor → Warehouse', sub: 'Return unsold stock to the warehouse' },
     { id: 'WH_TO_WH', ico: 'truck', title: 'Warehouse → Warehouse', sub: 'Transfer between two warehouses' },
   ];
-  async function openTransferModal({ warehouseId, mode = 'TO_RETAIL', onDone } = {}) {
+  async function openTransferModal({ warehouseId, mode = 'TO_RETAIL', onDone, preselect } = {}) {
     const whs = (await warehouses()).filter((w) => w.status !== 'inactive');
     if (!whs.length) return window.UI.toast.error('Create a warehouse first');
     const lines = [];
@@ -130,6 +130,16 @@
       if (!(q > 0)) return '';
       return u.isBase ? '' : `= ${num(q * u.factor)} ${l.baseUnit}`;
     };
+    /** Adds a product line (unit defaults to the wholesale unit). false when it is already in the list. */
+    function addLine(product, variant) {
+      const key = `${product._id}:${variant?._id || ''}`;
+      if (lines.some((l) => l.key === key)) return false;
+      const units = unitsOf(product);
+      const def = units.find((u) => !u.isBase && product.units?.find((x) => String(x._id) === String(u._id))?.isWholesaleDefault);
+      lines.push({ key, productId: product._id, variantId: variant?._id, name: product.name + (variant ? ` (${Object.values(variant.attributes || {}).join(', ')})` : ''),
+        sku: variant?.sku || product.sku, units, unitId: def ? def._id : null, baseUnit: product.unit || 'piece', qty: '', all: false, price: undefined });
+      return true;
+    }
     function stepWhat() {
       root.innerHTML = `${stepper()}
         <div class="ws-section-title"><h3 class="mv-q" style="margin:0">What are you moving?</h3><button type="button" class="btn btn-secondary btn-sm" id="tf-add">${icon('plus')} Add product</button></div>
@@ -161,12 +171,7 @@
       root.querySelector('#tf-notes').addEventListener('input', (e) => { st.notes = e.target.value; });
       root.querySelector('#tf-add').addEventListener('click', () => {
         window.ProductPicker.open({ onSelect: ({ product, variant }) => {
-          const key = `${product._id}:${variant?._id || ''}`;
-          if (lines.some((l) => l.key === key)) return window.UI.toast.info?.('Already in the list');
-          const units = unitsOf(product);
-          const def = units.find((u) => !u.isBase && product.units?.find((x) => String(x._id) === String(u._id))?.isWholesaleDefault);
-          lines.push({ key, productId: product._id, variantId: variant?._id, name: product.name + (variant ? ` (${Object.values(variant.attributes || {}).join(', ')})` : ''),
-            sku: variant?.sku || product.sku, units, unitId: def ? def._id : null, baseUnit: product.unit || 'piece', qty: '', all: false, price: undefined });
+          if (!addLine(product, variant)) return window.UI.toast.info?.('Already in the list');
           st.preview = null; draw();
         } });
       });
@@ -251,6 +256,8 @@
       st.step += 1; render();
     }
     function render() { (st.step === 1 ? stepWhere : st.step === 2 ? stepWhat : stepConfirm)(); }
+    // Opened from the till for ONE product ("not on the shop floor yet"): start at "What", product already listed.
+    if (preselect && preselect.product) { addLine(preselect.product, preselect.variant || null); st.step = 2; }
     render();
   }
 

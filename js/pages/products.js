@@ -248,6 +248,17 @@
     }
   }
 
+  /** Price cell for a wholesale-first product: the wholesale price leads, retail (if any) follows. */
+  function wholesalePriceCell(p) {
+    const s = window.WholesaleProductForm.summarize(p);
+    const esc = window.UI.escapeHtml;
+    return `
+          <div class="cell-primary">${window.UI.formatMoney(s.wholesale)} <span class="text-xs text-muted">/ ${esc(s.unit || '')} wholesale</span></div>
+          ${s.retailOn
+            ? `<div class="text-xs text-muted">Retail ${window.UI.formatMoney(s.retail)} / ${esc(s.retailUnit || '')}</div>`
+            : '<div class="text-xs text-muted">Wholesale only</div>'}`;
+  }
+
   function renderRows(items) {
     const tbody = document.getElementById('products-tbody');
 
@@ -275,9 +286,10 @@
         </td>
         <td class="text-sm">${p.categoryId ? window.UI.escapeHtml(p.categoryId.name) : '<span class="text-muted">Uncategorized</span>'}</td>
         <td>
+          ${p.pricingMode === 'WHOLESALE_FIRST' ? wholesalePriceCell(p) : `
           <div class="cell-primary">${p.hasVariants ? 'Varies' : window.UI.formatMoney(p.sellingPrice)}</div>
           ${discount > 0 ? `<div class="text-xs text-muted">${window.UI.formatMoney(discount)} off / unit</div>` : ''}
-          ${p.wholesaleEnabled && p.moq ? `<div class="text-xs text-muted">${p.wholesalePrice ? window.UI.formatMoney(p.wholesalePrice) : 'Per variant'} wholesale from ${p.moq} ${window.UI.escapeHtml(p.unit || '')}</div>` : ''}
+          ${p.wholesaleEnabled && p.moq ? `<div class="text-xs text-muted">${p.wholesalePrice ? window.UI.formatMoney(p.wholesalePrice) : 'Per variant'} wholesale from ${p.moq} ${window.UI.escapeHtml(p.unit || '')}</div>` : ''}`}
         </td>
         <td><span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-neutral'}">${p.status}</span></td>
         <td class="actions">
@@ -504,6 +516,8 @@
     variantRowCount = 0;
 
     const existingDiscount = isEdit ? Number(product.defaultDiscount) || 0 : 0;
+    // Wholesale businesses enter products wholesale-first (retail + unit conversion are optional extras).
+    const wf = !!(window.WholesaleProductForm && window.WholesaleProductForm.applies(isEdit ? product : null));
 
     const bodyHtml = `
       <form id="product-form">
@@ -542,6 +556,7 @@
           </div>
         </div>
 
+        ${wf ? window.WholesaleProductForm.html(isEdit ? product : null) : `
         ${!isEdit ? `
         <div class="form-row">
           <div class="field">
@@ -574,18 +589,19 @@
         </div>
 
         ${wholesaleAllowed(isEdit ? product : null) ? wholesaleSectionHtml(isEdit ? product : null) : ''}
+        `}
 
         <div class="form-row">
           <div class="field">
             <label for="p-taxrate">Tax rate (%)</label>
             <input class="input" id="p-taxrate" name="taxRate" type="number" step="0.01" min="0" max="100" value="${isEdit ? product.taxRate : 16}" />
           </div>
-          <div class="field">
+          ${wf ? '' : `<div class="field">
             <label for="p-unit">Unit</label>
             <select class="select" id="p-unit" name="unit">
               ${['piece', 'kg', 'g', 'litre', 'ml', 'metre', 'box', 'packet', 'service'].map((u) => `<option value="${u}" ${isEdit && product.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
             </select>
-          </div>
+          </div>`}
         </div>
 
         <div class="field">
@@ -608,7 +624,7 @@
           <textarea class="textarea" id="p-description" name="description">${isEdit ? window.UI.escapeHtml(product.description || '') : ''}</textarea>
         </div>
 
-        ${!isEdit ? `
+        ${!isEdit && !wf ? `
         <div class="field">
           <label>Variants <span class="text-muted">(optional - leave empty for a simple product)</span></label>
           <div id="variants-container"></div>
@@ -621,7 +637,7 @@
     const modal = window.UI.openModal({
       title: isEdit ? 'Edit product' : 'Add product',
       bodyHtml,
-      maxWidth: '640px',
+      maxWidth: wf ? '720px' : '640px',
       footerHtml: `
         <button class="btn btn-secondary" data-action="cancel">Cancel</button>
         <button class="btn btn-primary" data-action="save" id="product-save-btn">${isEdit ? 'Save changes' : 'Add product'}</button>
@@ -633,6 +649,8 @@
     bindBarcodeScanButton(modal.querySelector('#p-barcode-scan-btn'), modal.querySelector('#p-barcode'));
     bindGenerateButton(modal.querySelector('#p-barcode-gen-btn'), modal.querySelector('#p-barcode'));
 
+    if (wf) window.WholesaleProductForm.bind(modal, { product: isEdit ? product : null });
+
     const wsToggle = modal.querySelector('#p-wholesale-on');
     if (wsToggle) {
       wsToggle.addEventListener('change', () => {
@@ -642,8 +660,11 @@
       });
     }
 
-    if (!isEdit) {
-      modal.querySelector('#add-variant-row-btn').addEventListener('click', () => {
+    // The variants block does not exist in the wholesale-first form: a missing button must never abort the setup
+    // (it used to throw here, so the Save listener below was never attached and "Add product" did nothing).
+    const addVariantBtn = modal.querySelector('#add-variant-row-btn');
+    if (!isEdit && addVariantBtn) {
+      addVariantBtn.addEventListener('click', () => {
         const container = modal.querySelector('#variants-container');
         const idx = variantRowCount++;
         container.insertAdjacentHTML('beforeend', variantRowHtml(idx));
@@ -661,6 +682,17 @@
       if (!form.reportValidity()) return;
 
       const raw = window.UI.serializeForm(form);
+
+      // Wholesale-first form: validate + build the pricing / unit fields (the backend re-checks all of it).
+      let wfRes = null;
+      if (wf) {
+        wfRes = window.WholesaleProductForm.collect(modal, { product: isEdit ? product : null });
+        if (wfRes.error) {
+          window.UI.toast.error(wfRes.error);
+          if (wfRes.focus) wfRes.focus.focus();
+          return;
+        }
+      }
 
       // Discount sanity check (the backend enforces the same rule). Skipped for
       // variant products, whose prices are per variant. serializeForm drops
@@ -697,6 +729,12 @@
         trackInventory: !!raw.trackInventory, trackSerialNumber: !!raw.trackSerialNumber,
         trackBatch: !!raw.trackBatch, trackExpiry: !!raw.trackExpiry,
       };
+      if (wfRes) {
+        // Pricing, base unit and unit conversions come from the wholesale-first form; the discount box does not exist there.
+        delete payload.costPrice; delete payload.sellingPrice; delete payload.unit;
+        if (isEdit) delete payload.defaultDiscount;
+        Object.assign(payload, wfRes.payload);
+      }
       if (wsToggle) {
         payload.wholesaleEnabled = wholesaleOn;
         // When on: null clears an emptied price (e.g. variants carry their own). When off the saved values are left untouched.
@@ -754,7 +792,7 @@
                   const attrs = Object.values(v.attributes || {}).join(' / ');
                   return { name: attrs ? `${payload.name} (${attrs})` : payload.name, barcode: v.barcode, price: Number(v.sellingPrice) || 0, copies };
                 })
-              : [{ name: payload.name, barcode: payload.barcode, price: Number(payload.sellingPrice) || 0, copies }];
+              : [{ name: payload.name, barcode: payload.barcode, price: Number(wfRes ? wfRes.display.price : payload.sellingPrice) || 0, copies }];
             window.UI.closeModal();
             fetchAndRender();
             window.BarcodeLabels.printItems(stickerItems);
@@ -766,6 +804,9 @@
       } catch (err) {
         if (err.code === 'VALIDATION_ERROR' && err.errors?.length) {
           window.UI.applyFormErrors(form, err.errors);
+          // Errors for fields without a form name (wholesale / retail / unit prices) have nowhere to render: say it.
+          const unmatched = err.errors.filter((e) => !form.querySelector(`[name="${e.field}"]`));
+          if (unmatched.length) window.UI.toast.error(unmatched.map((e) => e.message).slice(0, 2).join('. '));
         } else {
           window.UI.toast.error(err.message);
         }

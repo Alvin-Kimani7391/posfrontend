@@ -84,7 +84,7 @@
         grid.querySelectorAll('.ws-prod').forEach((b) => b.addEventListener('click', () => addWholesale(state.items[Number(b.dataset.n)])));
         W.pager(contentEl.querySelector('#s-pg'), data, (p) => { state.page = p; loadCatalog(); });
       } else {
-        const { data } = await window.Api.get('/products', { search: state.search, page: state.page, limit: 24, status: 'active', branchId: window.AppShell.getActiveBranchId() });
+        const { data } = await window.Api.get('/products', { search: state.search, page: state.page, limit: 24, status: 'active', channel: 'retail', branchId: window.AppShell.getActiveBranchId() });
         state.items = data.items;
         grid.innerHTML = data.items.length ? `<div class="ws-cat-grid">${data.items.map((p, n) => `<button class="ws-prod" data-n="${n}">
           <span class="nm">${W.esc(p.name)}</span><span class="sk">${W.esc(p.sku || '')}</span><span class="pr">${window.UI.formatMoney(p.sellingPrice)}${p.hasVariants ? ' <small class="text-muted">+ variants</small>' : ''}</span></button>`).join('')}</div>`

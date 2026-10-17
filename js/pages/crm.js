@@ -81,7 +81,7 @@
     `<span class="crm-avatar${big ? ' lg' : ''}" style="--c:${(STAGES[stage] || STAGES.prospect).color}">${esc(window.UI.initials(name) || '?')}</span>`;
   const monthLabel = (ym) => {
     const [y, m] = String(ym).split('-').map(Number);
-    return new Date(y, m - 1, 1).toLocaleString('en-KE', { month: 'short' });
+    return new Date(y, m - 1, 1).toLocaleString((window.UI && window.UI.dateLocale ? window.UI.dateLocale() : 'en-KE'), { month: 'short' });
   };
   const phoneText = (c) => c.phone || c.phoneNormalized || '';
   const errorCard = (err, retryId) => `<div class="card">${window.UI.emptyStateHtml({

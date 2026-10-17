@@ -164,7 +164,7 @@
   Offline.lookup = {
     async search(term) {
       if (window.Connectivity.isOnline()) {
-        try { const { data } = await window.Api.get('/products', { search: term, limit: 15, status: 'active' }); return data.items || []; }
+        try { const { data } = await window.Api.get('/products', { search: term, limit: 15, status: 'active', channel: 'retail', branchId: (window.AppShell && window.AppShell.getActiveBranchId && window.AppShell.getActiveBranchId()) || undefined }); return data.items || []; }
         catch (e) { if (!goLocal(e) || !Offline.catalog.isReady()) throw e; }
       }
       if (!Offline.catalog.isReady()) fail('No product list is saved on this till yet. Connect to the internet once and let it download.');

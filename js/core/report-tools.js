@@ -84,11 +84,11 @@
     const diff = Math.round((today - d) / 86400000);
     if (diff === 0) return 'Today';
     if (diff === 1) return 'Yesterday';
-    return new Intl.DateTimeFormat('en-KE', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }).format(d);
+    return new Intl.DateTimeFormat((window.UI && window.UI.dateLocale ? window.UI.dateLocale() : 'en-KE'), { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }).format(d);
   }
 
   function timeOnly(dateLike) {
-    return new Intl.DateTimeFormat('en-KE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(dateLike));
+    return new Intl.DateTimeFormat((window.UI && window.UI.dateLocale ? window.UI.dateLocale() : 'en-KE'), { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(dateLike));
   }
 
   /**
@@ -98,8 +98,8 @@
    */
   function trendLabel(dateStr, rangeDays) {
     const d = new Date(`${dateStr}T00:00:00`);
-    if (rangeDays <= 7) return new Intl.DateTimeFormat('en-KE', { weekday: 'short' }).format(d);
-    return new Intl.DateTimeFormat('en-KE', { day: '2-digit', month: 'short' }).format(d);
+    if (rangeDays <= 7) return new Intl.DateTimeFormat((window.UI && window.UI.dateLocale ? window.UI.dateLocale() : 'en-KE'), { weekday: 'short' }).format(d);
+    return new Intl.DateTimeFormat((window.UI && window.UI.dateLocale ? window.UI.dateLocale() : 'en-KE'), { day: '2-digit', month: 'short' }).format(d);
   }
 
   /* ------------------------------------------------------------------ *

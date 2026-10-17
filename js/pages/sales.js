@@ -246,6 +246,7 @@
     const { data } = await window.Api.get('/warehouse/catalog', {
       warehouseId: ws.whId, branchId: WSK().branchOf(wh) || undefined, search: term, page: 1, limit: 15, inStockOnly: 'false',
     });
+    ws.elsewhere = data.elsewhere || []; // same product stocked in another warehouse (shown when this one has no match)
     return data.items || [];
   }
 
@@ -325,7 +326,7 @@
 
   const lookupSearch = (t) => (window.Offline && window.Offline.lookup
     ? window.Offline.lookup.search(t)
-    : window.Api.get('/products', { search: t, limit: 15, status: 'active' }).then((r) => r.data.items || []));
+    : window.Api.get('/products', { search: t, limit: 15, status: 'active', channel: 'retail', branchId: window.AppShell.getActiveBranchId() || undefined }).then((r) => r.data.items || []));
   const lookupBarcode = (c) => (window.Offline && window.Offline.lookup
     ? window.Offline.lookup.barcode(c)
     : window.Api.get(`/products/barcode/${encodeURIComponent(c.trim())}`).then((r) => r.data));
@@ -815,7 +816,7 @@
       if (isWs()) await addWholesaleByCode(code);
       else {
         const data = await lookupBarcode(code);
-        addToCart(data.product, data.variant);
+        if (await ensureRetailStock(data.product, data.variant)) addToCart(data.product, data.variant);
       }
     } catch (err) {
       window.UI.toast.error(err.code === 'BARCODE_NOT_FOUND' ? `No product found for barcode "${code}"` : err.message);
@@ -1249,6 +1250,14 @@
     });
   }
 
+  /** Search-row note for a retail product that is still only in a warehouse. */
+  function retailStockNote(product) {
+    const h = product && product.stockHint;
+    if (!isWsBiz() || !h || h.retailQuantity > 0 || !h.warehouses || !h.warehouses.length || product.trackInventory === false) return '';
+    const where = h.warehouses.map((w) => `${w.quantity} in ${w.name}`).join(', ');
+    return `<small style="color:var(--color-warning)">Not on the shop floor yet · ${esc(where)} · move it to sell at retail</small>`;
+  }
+
   /** One result row for a warehouse (wholesale) product: price shown for its default unit. */
   function wsResultRow(item, i, active) {
     const d = wsDefaultUnit(item);
@@ -1282,7 +1291,21 @@
     function render(term, loading) {
       dd.classList.add('open');
       if (loading) { dd.innerHTML = '<div class="pz-dd-msg">Searching…</div>'; return; }
-      if (!rows.length) { dd.innerHTML = `<div class="pz-dd-msg">No product found for “${esc(term)}”</div>`; return; }
+      if (!rows.length) {
+        const here = isWs() ? wsWarehouse() : null;
+        const other = isWs() ? (ws.elsewhere || []) : [];
+        dd.innerHTML = `<div class="pz-dd-msg">No product found for “${esc(term)}”${here ? ` in <b>${esc(here.name)}</b>` : ''}</div>` + other.map((o) => `
+          <div class="pz-dd-msg" style="padding-top:0">${esc(o.name)}: ${esc(String(o.quantity))} in <b>${esc(o.warehouseName)}</b>${o.allowSales
+            ? ` - <button type="button" class="pz-linkbtn" data-switch-wh="${esc(String(o.warehouseId))}">Sell from ${esc(o.warehouseName)}</button>`
+            : ' (storage only: switch on "Can sell" for that warehouse, or move the stock to a selling warehouse)'}</div>`).join('');
+        dd.querySelectorAll('[data-switch-wh]').forEach((b) => b.addEventListener('click', () => {
+          const sel = $('pz-wh');
+          if (!sel) return;
+          sel.value = b.dataset.switchWh;
+          sel.dispatchEvent(new Event('change')); // same path as picking it from the list (clears the cart after a confirm)
+        }));
+        return;
+      }
       dd.innerHTML = `
         <div class="pz-dd-head"><span>Barcode</span><span>Product name</span><span class="pz-right">Price per unit</span></div>
         ${rows.map((r, i) => {
@@ -1291,7 +1314,7 @@
           return `
           <div class="pz-dd-row ${i === active ? 'active' : ''}" data-idx="${i}" role="option">
             <span class="pz-mono">${esc(barcodeOf(r.product, r.variant)) || '-'}</span>
-            <span class="pz-name">${esc(nameOf(r.product, r.variant))}<small>SKU ${esc(r.variant ? r.variant.sku : r.product.sku)}</small></span>
+            <span class="pz-name">${esc(nameOf(r.product, r.variant))}<small>SKU ${esc(r.variant ? r.variant.sku : r.product.sku)}</small>${retailStockNote(r.product)}</span>
             <span class="pz-price">${fm(r.variant ? r.variant.sellingPrice : r.product.sellingPrice)}${off ? `<small>${fm(off)} off</small>` : ''}${wholesaleSearchHint(r)}</span>
           </div>`;
         }).join('')}
@@ -1302,13 +1325,16 @@
       });
     }
 
-    function pick(i) {
+    async function pick(i) {
       const r = rows[i];
       if (!r) return;
       if (r.ws) {
         if (!wsSellable(r.item)) { window.UI.toast.error(r.item.trackSerialNumber ? 'Serial-tracked products are sold in retail mode' : 'Out of stock in this warehouse'); return; }
         addWholesale(r.item);
-      } else addToCart(r.product, r.variant);
+      } else {
+        if (!(await ensureRetailStock(r.product, r.variant))) { clearSearch(); return; }
+        addToCart(r.product, r.variant);
+      }
       clearSearch();
       input.focus();
     }
@@ -1366,6 +1392,41 @@
 
   /* ---- Cart operations ---- */
   function keyOf(item) { return item.key || (item.variant ? item.variant._id : item.product._id); }
+
+  /**
+   * Wholesale businesses keep bulk stock in warehouses. A product that is still ONLY in a warehouse has no shop-floor
+   * stock, so it cannot be sold at retail yet: say where it is and offer to move it (owner / managers), or ask the
+   * cashier to get the owner to move it. Resolves true when the product can go in the cart.
+   */
+  async function ensureRetailStock(product, variant) {
+    try {
+      if (!isWsBiz() || isOfflineNow() || product.trackInventory === false) return true;
+      let hint = product.stockHint;
+      if (!hint) {
+        const { data } = await window.Api.get(`/products/${product._id}`, { branchId: window.AppShell.getActiveBranchId() || undefined });
+        hint = data.product && data.product.stockHint;
+      }
+      if (!hint || hint.retailQuantity > 0 || !hint.warehouses || !hint.warehouses.length) return true;
+      const best = hint.warehouses.slice().sort((a, b) => b.quantity - a.quantity)[0];
+      const where = hint.warehouses.map((w) => `${w.quantity} in ${w.name}`).join(', ');
+      if (!WSK().can('inventory.transfer')) {
+        window.UI.toast.error(`${product.name} is not on the shop floor yet (${where}). Ask the owner or a manager to move it from the warehouse to the shop floor so it can be sold at retail.`);
+        return false;
+      }
+      const go = await window.UI.confirmDialog({
+        title: 'Not on the shop floor yet',
+        message: `${product.name} has no shop-floor stock; it is still in the warehouse (${where}). Move it from the warehouse to the shop floor to sell it at retail.`,
+        confirmText: `Move from ${best.name}`,
+      });
+      if (go) {
+        WSK().openTransferModal({
+          mode: 'TO_RETAIL', warehouseId: best._id, preselect: { product, variant },
+          onDone: () => window.UI.toast.success('Stock moved to the shop floor. Search the product again to sell it.'),
+        });
+      }
+      return false;
+    } catch { return true; } // never block a sale just because the hint could not be loaded
+  }
 
   function addToCart(product, variant) {
     if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before starting the next sale'); return; }

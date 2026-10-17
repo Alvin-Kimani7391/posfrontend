@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v3.0.0';
+const VERSION = 'v3.0.2';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -29,7 +29,7 @@ const PRECACHE = [
   'js/core/customer-picker.js', 'js/core/receipt-view.js', 'js/core/barcode-scanner.js', 'js/core/cash-count.js',
   'js/core/cash-drawer.js', 'js/core/tour.js', 'js/core/announcements.js', 'js/core/billing-banner.js', 'js/core/pwa.js', 'js/core/i18n.js', 'js/core/i18n-sw.js', 'js/core/country-flag.js', 'css/country-flag.css',
 
-  'js/pages/dashboard.js', 'js/pages/login.js', 'js/pages/register.js', 'js/pages/sales.js', 'js/pages/products.js',
+  'js/pages/dashboard.js', 'js/pages/login.js', 'js/pages/register.js', 'js/pages/sales.js', 'js/pages/products.js', 'js/core/wholesale-product-form.js',
   'js/pages/inventory.js', 'js/pages/customers.js', 'js/pages/branches.js', 'js/pages/employees.js', 'js/pages/suppliers.js',
   'js/pages/purchases.js', 'js/pages/expenses.js', 'js/pages/refunds.js', 'js/pages/reports.js', 'js/pages/audit-logs.js',
   'js/pages/settings.js', 'js/pages/cash-register.js', 'js/pages/notifications.js', 'js/pages/offline-review.js',

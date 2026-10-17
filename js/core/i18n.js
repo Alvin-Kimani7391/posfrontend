@@ -75,6 +75,15 @@
   }
   function norm(s) { return String(s).replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim(); }
 
+  /** Exact dictionary lookup only (no rules, no "missing" logging). Returns null when there is no entry. */
+  function sub(x) {
+    if (!dict) return null;
+    var k = norm(x);
+    var h = dict.exact[k];
+    if (h === undefined) h = dict.lower[k.toLowerCase()];
+    return h === undefined ? null : h;
+  }
+
   function swahili(core) {
     if (!dict) return core;
     var k = norm(core);
@@ -86,7 +95,20 @@
     }
     if (hit !== undefined) return hit;
     for (var i = 0; i < dict.rules.length; i++) {
-      if (dict.rules[i][0].test(k)) return k.replace(dict.rules[i][0], dict.rules[i][1]);
+      var rm = k.match(dict.rules[i][0]);
+      if (!rm) continue;
+      var rep = dict.rules[i][1];
+      // A rule can be a function (match, sub): sub(x) translates a smaller piece, or returns null when it has no entry.
+      if (typeof rep === 'function') { var r = rep(rm, sub); if (r) return r; continue; }
+      return k.replace(dict.rules[i][0], rep);
+    }
+    // "A · B", "A - B", "A / B", "A, B": translate each part, when at least one part is known
+    var seps = [' \u00b7 ', ' - ', ' / ', ', '];
+    for (var si = 0; si < seps.length; si++) {
+      if (k.indexOf(seps[si]) < 1) continue;
+      var parts = k.split(seps[si]); var any = false;
+      var tr = parts.map(function (pt) { var t = sub(pt); if (t != null) { any = true; return t; } return pt; });
+      if (any) return tr.join(seps[si]);
     }
     var colon = k.match(/^([^:]{2,40}):\s*([\s\S]*)$/);                 // "Label: value"
     if (colon && dict.exact[colon[1]] !== undefined) return dict.exact[colon[1]] + ': ' + swahili(colon[2]);

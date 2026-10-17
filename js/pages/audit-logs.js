@@ -270,7 +270,7 @@
 
   function openDetail(log) {
     const u = log.userId;
-    const when = new Intl.DateTimeFormat('en-KE', { dateStyle: 'full', timeStyle: 'medium' }).format(new Date(log.timestamp));
+    const when = new Intl.DateTimeFormat((window.UI && window.UI.dateLocale ? window.UI.dateLocale() : 'en-KE'), { dateStyle: 'full', timeStyle: 'medium' }).format(new Date(log.timestamp));
     const extras = Object.entries(log).filter(([k]) => !KNOWN.has(k));
     const hasDiff = log.before && log.after && typeof log.before === 'object' && typeof log.after === 'object';
 

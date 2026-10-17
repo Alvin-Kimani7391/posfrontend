@@ -366,7 +366,7 @@
 
   function openDetail(n) {
     const meta = NT.meta(n.type);
-    const when = new Intl.DateTimeFormat('en-KE', { dateStyle: 'full', timeStyle: 'medium' }).format(new Date(n.createdAt));
+    const when = new Intl.DateTimeFormat((window.UI && window.UI.dateLocale ? window.UI.dateLocale() : 'en-KE'), { dateStyle: 'full', timeStyle: 'medium' }).format(new Date(n.createdAt));
 
     const modal = window.UI.openModal({
       title: n.title,
