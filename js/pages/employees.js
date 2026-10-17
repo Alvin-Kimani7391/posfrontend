@@ -15,7 +15,9 @@
  *      Business ID already filled in.
  */
 (function () {
-  const ROLES = ['ADMIN', 'MANAGER', 'CASHIER', 'STOREKEEPER', 'ACCOUNTANT'];
+  const BASE_ROLES = ['ADMIN', 'MANAGER', 'CASHIER', 'STOREKEEPER', 'ACCOUNTANT'];
+  // Pharmacies also get the Pharmacist role. It still needs a verified credential (Pharmacy settings -> Staff credentials).
+  const rolesNow = () => (window.AppShell.hasFeature && window.AppShell.hasFeature('pharmacyDispensing') ? [...BASE_ROLES, 'PHARMACIST'] : BASE_ROLES);
   const DEFAULT_NEW_ROLE = 'CASHIER';
   const state = { page: 1, limit: 10, search: '', total: 0, pages: 1 };
   let contentEl;
@@ -478,7 +480,7 @@
           <div class="field">
             <label for="e-role">Role</label>
             <select class="select" id="e-role" name="role" required>
-              ${ROLES.map((r) => {
+              ${rolesNow().map((r) => {
                 const selected = isEdit ? employee.role === r : r === DEFAULT_NEW_ROLE;
                 return `<option value="${r}" ${selected ? 'selected' : ''}>${r.charAt(0)}${r.slice(1).toLowerCase()}</option>`;
               }).join('')}

@@ -404,7 +404,7 @@
     await Promise.all([...new Set(lines.map((i) => String(i.productId)))].map(async (pid) => {
       try { const { data } = await window.Api.get(`/products/${pid}`); flags[pid] = data.product; } catch { flags[pid] = {}; }
     }));
-    const needsBatch = (i) => !!flags[String(i.productId)]?.trackBatch;
+    const needsBatch = (i) => !!(flags[String(i.productId)]?.trackBatch || flags[String(i.productId)]?.trackExpiry);
     const needsExpiry = (i) => !!flags[String(i.productId)]?.trackExpiry;
     const needsSerial = (i) => !!flags[String(i.productId)]?.trackSerialNumber;
     const wantsBatchRows = (i) => needsBatch(i) && (strictBatches() || needsExpiry(i));

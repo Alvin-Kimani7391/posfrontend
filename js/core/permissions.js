@@ -12,6 +12,7 @@
     MANAGER: 'MANAGER',
     CASHIER: 'CASHIER',
     STOREKEEPER: 'STOREKEEPER',
+    PHARMACIST: 'PHARMACIST',
     ACCOUNTANT: 'ACCOUNTANT',
   });
 
@@ -32,6 +33,7 @@
       'serials.view', 'serials.manage', 'warranty.view', 'warranty.manage', 'warranty.decide',
       'repairs.view', 'repairs.manage', 'repairs.approve',
       'vehicles.view', 'vehicles.manage', 'jobcards.view', 'jobcards.manage', 'jobcards.work', 'jobcards.approve',
+      'medicines.view', 'medicines.manage', 'pharmacy.recall', 'pharmacy.storage', 'pharmacy.reports', // clinical + patient permissions are granted per person, never by role
       'sales.create', 'sales.view', 'sales.cancel', 'sales.price_override',
       'refunds.view', 'refunds.create', 'refunds.approve',
       'expenses.create', 'expenses.view', 'expenses.approve',
@@ -53,6 +55,7 @@
     ],
     CASHIER: [
       'categories.view',
+      'medicines.view',
       'products.view',
       'inventory.view',
       'batches.view',
@@ -69,6 +72,7 @@
       'tickets.view', 'tickets.create',
     ],
     STOREKEEPER: [
+      'medicines.view', 'pharmacy.storage',
       'categories.view', 'categories.create', 'categories.update',
       'products.view', 'products.create', 'products.update',
       'inventory.view', 'inventory.adjust', 'inventory.receive', 'inventory.transfer',
@@ -78,6 +82,17 @@
       'purchases.view', 'purchases.create', 'purchases.receive',
       'notifications.view', 'notifications.send',
       'tickets.view', 'tickets.create',
+    ],
+    PHARMACIST: [
+      'categories.view', 'products.view', 'inventory.view', 'inventory.receive', 'batches.view', 'batches.manage',
+      'medicines.view', 'medicines.manage', 'patients.view', 'patients.manage',
+      'prescriptions.view', 'prescriptions.intake', 'prescriptions.review',
+      'pharmacy.dispense', 'pharmacy.restricted', 'pharmacy.reverse', 'pharmacy.recall', 'pharmacy.storage', 'pharmacy.reports', 'pharmacy.settings',
+      'sales.create', 'sales.view', 'refunds.view', 'refunds.create', 'payments.view',
+      'customers.view', 'customers.create',
+      'suppliers.view', 'purchases.view', 'purchases.create', 'purchases.receive',
+      'registers.view', 'shifts.open', 'shifts.close', 'shifts.view',
+      'notifications.view', 'tickets.view', 'tickets.create',
     ],
     ACCOUNTANT: [
       'categories.view', 'products.view',

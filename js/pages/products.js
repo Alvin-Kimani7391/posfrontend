@@ -646,6 +646,18 @@
 
     modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
 
+    // An expiry date is stored on a batch, so tracking expiry always means tracking batches too.
+    const expiryBox = modal.querySelector('input[name="trackExpiry"]');
+    const batchBox = modal.querySelector('input[name="trackBatch"]');
+    if (expiryBox && batchBox) {
+      const syncExpiryBatch = () => {
+        if (expiryBox.checked) { batchBox.checked = true; batchBox.disabled = true; batchBox.title = 'Required while expiry dates are tracked'; }
+        else { batchBox.disabled = false; batchBox.title = ''; }
+      };
+      expiryBox.addEventListener('change', syncExpiryBatch);
+      syncExpiryBatch();
+    }
+
     bindBarcodeScanButton(modal.querySelector('#p-barcode-scan-btn'), modal.querySelector('#p-barcode'));
     bindGenerateButton(modal.querySelector('#p-barcode-gen-btn'), modal.querySelector('#p-barcode'));
 
@@ -727,7 +739,7 @@
         taxRate: raw.taxRate, unit: raw.unit, lowStockThreshold: raw.lowStockThreshold,
         description: raw.description,
         trackInventory: !!raw.trackInventory, trackSerialNumber: !!raw.trackSerialNumber,
-        trackBatch: !!raw.trackBatch, trackExpiry: !!raw.trackExpiry,
+        trackBatch: !!raw.trackBatch || !!raw.trackExpiry, trackExpiry: !!raw.trackExpiry,
       };
       if (wfRes) {
         // Pricing, base unit and unit conversions come from the wholesale-first form; the discount box does not exist there.

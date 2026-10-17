@@ -139,6 +139,7 @@
     history: { page: 1, limit: 10, search: '', from: '', to: '', channel: '' },
     mode: 'RETAIL', // 'RETAIL' | 'WHOLESALE' (wholesale only exists for businesses with warehouses)
     dueDate: '', // wholesale: when the credit part of an invoice is due (YYYY-MM-DD)
+    pharmacy: {}, // pharmacy: { sig, rx, countersign, poisonsBook } collected before payment (see js/core/pharmacy-till.js)
   };
 
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
@@ -1153,6 +1154,7 @@
             <span><kbd class="kbd">F9</kbd> payment</span>
           </div>
         </div>
+        <div class="ph-till" id="ph-till-bar" style="display:none"></div>
       </div>
 
       <div class="pz-main">
@@ -1216,6 +1218,10 @@
       ws.whId = e.target.value;
       clearSearch();
       $('pos-search')?.focus();
+    });
+
+    $('ph-till-bar')?.addEventListener('ph-attach', () => {
+      window.PharmacyTill.prepare(state.cart, (r) => { state.pharmacy = r; renderCart(); }, state.pharmacy);
     });
 
     attachHardwareScanner();
@@ -1446,6 +1452,8 @@
     }
     state.lastAdded = key;
     renderCart(key); // scrolls the new / updated row into view
+    // Pharmacy: learn whether this product is a medicine (class, recall status) and repaint the tags.
+    if (window.PharmacyTill && window.PharmacyTill.active()) window.PharmacyTill.ensure([product]).then(() => { if (state.view === 'new-sale') renderCart(); });
   }
 
   /** Wholesale: add a warehouse product (a second tap adds one more of the same unit). */
@@ -1486,6 +1494,7 @@
     renderTicket(flashKey);
     renderCustomerButton();
     renderTotals();
+    if (window.PharmacyTill) window.PharmacyTill.paintBar($('ph-till-bar'), state.pharmacy, state.cart);
   }
 
   /* One row per product: Products half (# | Barcode | Name | Price) and Cart half (Qty | Discount | Subtotal | x) */
@@ -1528,6 +1537,7 @@
         unitCell = `<select class="pz-c-unit pz-unit" data-action="unit" data-idx="${i}" aria-label="Unit">${item.catalog.units.map((x) => `<option value="${esc(x.unitId || '')}" ${String(x.unitId || '') === String(item.unitId || '') ? 'selected' : ''}>${esc(WSK().unitLabel(x))}</option>`).join('')}</select>`;
       } else {
         const info = priceInfoOf(item);
+        if (window.PharmacyTill) nameExtra = window.PharmacyTill.tag(item.product._id, state.pharmacy);
         const wholesaleHint = info.priceType === 'WHOLESALE'
           ? 'wholesale price'
           : (info.wholesale !== null && info.moq ? `wholesale ${fm(info.wholesale)} from ${info.moq}` : '');
@@ -1765,6 +1775,17 @@
       if (ws.settings.requireCustomerForWholesale && !state.customer) {
         window.UI.toast.error('Choose a customer for a wholesale sale');
         window.CustomerPicker.open({ onSelect: (c) => { state.customer = c; renderCustomerButton(); openPaymentModal(initialMethod, carry); } });
+        return;
+      }
+    }
+    // Pharmacy: medicines that need a prescription / countersignature / Poisons Book entry are sorted out BEFORE money is taken.
+    const PT = window.PharmacyTill;
+    if (PT && PT.active() && !wholesale) {
+      if (isOfflineNow()) {
+        const issue = PT.offlineIssue(state.cart);
+        if (issue) return window.UI.toast.error(issue);
+      } else if (state.pharmacy.sig !== PT.sig(state.cart)) {
+        PT.prepare(state.cart, (r) => { state.pharmacy = r; renderCart(); openPaymentModal(initialMethod, carry); }, state.pharmacy).catch((e) => window.UI.toast.error(e.message));
         return;
       }
     }
@@ -2359,6 +2380,7 @@
    * ================================================================== */
   function resetCart() {
     state.cart = [];
+    state.pharmacy = {};
     state.customer = null;
     state.cartDiscount = 0;
     state.payments = [];
@@ -2389,7 +2411,10 @@
     const wholesale = isWs();
     const off = window.Offline;
     const offlineNow = isOfflineNow();
-    const canOffline = !wholesale && !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
+    const PT = window.PharmacyTill;
+    const pharmacyOffline = PT && PT.active() ? PT.offlineIssue(state.cart) : '';
+    if (PT && PT.active() && !wholesale && !offlineNow && state.pharmacy.sig !== PT.sig(state.cart)) { window.UI.toast.error('The cart changed. Review the pharmacy details and try again.'); return false; }
+    const canOffline = !wholesale && !pharmacyOffline && !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
     let onCredit = false;
     if (wholesale) {
       if (offlineNow) { window.UI.toast.error('Wholesale sales need an internet connection.'); return false; }
@@ -2413,6 +2438,7 @@
         ? { channel: 'WHOLESALE', warehouseId: ws.whId, dueDate: onCredit && state.dueDate ? state.dueDate : undefined }
         : (isWsBiz() ? { channel: 'RETAIL' } : {})),
       customerId: state.customer?._id,
+      ...(PT && PT.active() ? PT.payload(state.pharmacy) : {}),
       cartDiscount: state.cartDiscount || 0,
       items: state.cart.map((item) => ({
         productId: item.product._id, variantId: item.variantId || item.variant?._id, quantity: item.quantity,
@@ -2431,6 +2457,7 @@
     try {
       let data;
       if (offlineNow) {
+        if (pharmacyOffline) throw new Error(pharmacyOffline);
         if (!canOffline) throw new Error('You are offline and offline selling is not set up on this till.');
         data = await saveOffline(ctid);
       } else {
@@ -2462,6 +2489,7 @@
       } catch (receiptErr) {
         window.UI.toast.error(`Sale saved, but the receipt could not be shown: ${receiptErr.message}`);
       }
+      if (PT && PT.active()) PT.afterSale(data);
       return true;
     } catch (err) {
       window.UI.toast.error(err.message);

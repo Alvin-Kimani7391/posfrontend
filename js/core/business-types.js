@@ -46,9 +46,9 @@
     tableManagement:       { label: 'Tables',                   group: 'Restaurant', ready: false, desc: 'Open orders against tables.' },
     kitchenDisplay:        { label: 'Kitchen screen',           group: 'Restaurant', ready: false, desc: 'Send orders to a kitchen display.' },
     recipeManagement:      { label: 'Recipes',                  group: 'Restaurant', ready: false, desc: 'Deduct ingredients when a dish is sold.' },
-    pharmacyDispensing:    { label: 'Dispensing',               group: 'Pharmacy',   ready: false, desc: 'Dispensing workflow for medicines.' },
-    prescriptionManagement:{ label: 'Prescriptions',            group: 'Pharmacy',   ready: false, desc: 'Record and attach prescriptions.' },
-    restrictedProductControl:{ label: 'Restricted products',    group: 'Pharmacy',   ready: false, desc: 'Control who may sell restricted medicines.' },
+    pharmacyDispensing:    { label: 'Dispensing',               group: 'Pharmacy',   ready: true,  desc: 'Medicine records, patients, prescriptions, the dispensing register, labels and the pharmacy desk. Switching this on opens the whole pharmacy module.' },
+    prescriptionManagement:{ label: 'Prescriptions',            group: 'Pharmacy',   ready: true,  desc: 'Record prescriptions, have a pharmacist review them, and dispense against them at the till.' },
+    restrictedProductControl:{ label: 'Restricted products',    group: 'Pharmacy',   ready: true,  desc: 'Control who may sell prescription-only and controlled medicines (credentials, countersign, Poisons Book).' },
     recallManagement:      { label: 'Recalls',                  group: 'Quality',    ready: true,  desc: 'Recall a batch and find where it went.' },
     quarantineManagement:  { label: 'Quarantine',               group: 'Quality',    ready: true,  desc: 'Hold suspect stock so it cannot be sold.' },
   };

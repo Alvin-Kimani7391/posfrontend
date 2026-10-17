@@ -95,11 +95,11 @@
       const body = root.querySelector('#mk-body');
       try {
         const params = { page: state.page, limit: state.limit, ...(cfg.query ? cfg.query() : {}), ...state.filters };
-        if (state.search) params.search = state.search;
+        if (state.search) params[cfg.searchParam || 'search'] = state.search;
         Object.keys(params).forEach((k) => (params[k] === '' || params[k] == null) && delete params[k]);
         const { data } = await window.Api.get(cfg.endpoint, params);
         const items = data[cfg.itemsKey || 'items'] || [];
-        state.pages = data.pages || 1; state.total = data.total || items.length;
+        state.total = data.total || items.length; state.pages = data.pages || Math.max(1, Math.ceil(state.total / state.limit));
         body.innerHTML = items.length ? items.map((row, i) => `<tr data-i="${i}">${cfg.columns.map((c) => `<td ${c.align ? `style="text-align:${c.align}"` : ''}>${c.render(row)}</td>`).join('')}${cfg.rowActions ? `<td style="text-align:right;white-space:nowrap">${cfg.rowActions(row)}</td>` : ''}</tr>`).join('')
           : `<tr><td colspan="${cfg.columns.length + 1}">${window.UI.emptyStateHtml({ icon: cfg.emptyIcon || 'box', title: cfg.emptyText || 'Nothing here yet', message: cfg.emptyMessage || '' })}</td></tr>`;
         body.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {

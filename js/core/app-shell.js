@@ -41,6 +41,13 @@
     // Specialised screens: shown only when the business has the matching feature switched on
     // (feature = ANY of the listed flags) AND the user holds the permission.
     { key: 'batches',       label: 'Batches & expiry',   icon: 'layers',    href: 'batches.html',       permission: 'batches.view',   feature: ['batchTracking', 'expiryTracking'] },
+    // Pharmacy module: appears when the business has the Dispensing feature (business type Pharmacy switches it on).
+    { key: 'pharmacy',      label: 'Pharmacy desk',      icon: 'pulse',     href: 'pharmacy.html',      permission: 'pharmacy.reports', feature: ['pharmacyDispensing'] },
+    { key: 'prescriptions', label: 'Prescriptions',      icon: 'clipboard', href: 'prescriptions.html', permission: 'prescriptions.view', feature: ['pharmacyDispensing'] },
+    { key: 'medicines',     label: 'Medicines',          icon: 'pill',      href: 'medicines.html',     permission: 'medicines.view', feature: ['pharmacyDispensing'] },
+    { key: 'patients',      label: 'Patients',           icon: 'patient',   href: 'patients.html',      permission: 'patients.view',  feature: ['pharmacyDispensing'] },
+    { key: 'pharmacy-compliance', label: 'Recalls & registers', icon: 'shield', href: 'pharmacy-compliance.html', permission: 'pharmacy.reports', feature: ['pharmacyDispensing'] },
+    { key: 'pharmacy-settings', label: 'Pharmacy settings', icon: 'sliders', href: 'pharmacy-settings.html', permission: 'pharmacy.settings', feature: ['pharmacyDispensing'] },
     { key: 'stocktakes',    label: 'Stocktake',          icon: 'clipboard', href: 'stocktakes.html',    permission: 'stocktake.view' },
     { key: 'serials',       label: 'Serial numbers',     icon: 'hash',      href: 'serials.html',       permission: 'serials.view',   feature: ['serialNumberTracking'] },
     { key: 'warranty',      label: 'Warranty claims',    icon: 'shield',    href: 'warranty.html',      permission: 'warranty.view',  feature: ['warrantyManagement'] },

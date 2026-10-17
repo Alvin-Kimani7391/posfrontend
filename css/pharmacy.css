@@ -1,0 +1,52 @@
+/* pharmacy.css - pharmacy module screens + till additions. Uses the app's design tokens only. */
+.ph-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: var(--space-4); }
+.ph-two { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start; }
+.ph-card-pad { padding: var(--space-4); }
+.ph-h { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin: 0 0 var(--space-3); flex-wrap: wrap; }
+.ph-h h3 { font-size: var(--text-base); margin: 0; }
+.ph-tabs { margin-bottom: var(--space-4); }
+.ph-task { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border); font-size: var(--text-sm); }
+.ph-task:last-child { border-bottom: 0; }
+.ph-task a { white-space: nowrap; }
+.ph-num { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ph-num.warn { color: var(--color-warning); }
+.ph-num.bad { color: var(--color-danger); }
+.ph-check { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border); }
+.ph-check:last-child { border-bottom: 0; }
+.ph-check .ph-dot { width: 22px; height: 22px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 12px; font-weight: 700; margin-top: 2px; }
+.ph-check .ph-dot.ok { background: var(--color-success-bg); color: var(--color-success); }
+.ph-check .ph-dot.no { background: var(--color-danger-bg); color: var(--color-danger); }
+.ph-check .ph-dot.opt { background: var(--color-warning-bg); color: var(--color-warning); }
+.ph-rx-items { margin: 0; padding: 0; list-style: none; font-size: var(--text-sm); }
+.ph-rx-items li { padding: var(--space-2) 0; border-bottom: 1px dashed var(--color-border); }
+.ph-rx-items li:last-child { border-bottom: 0; }
+.ph-bar { height: 6px; background: var(--color-border); border-radius: 99px; overflow: hidden; margin-top: 4px; }
+.ph-bar > i { display: block; height: 100%; background: var(--color-primary); }
+.ph-note { font-size: var(--text-xs); color: var(--color-text-muted); margin-top: var(--space-1); }
+.ph-warn-box { border: 1px solid var(--color-warning); background: var(--color-warning-bg); color: var(--color-text); border-radius: var(--radius-md); padding: var(--space-3); font-size: var(--text-sm); margin-bottom: var(--space-3); }
+.ph-danger-box { border: 1px solid var(--color-danger); background: var(--color-danger-bg); border-radius: var(--radius-md); padding: var(--space-3); font-size: var(--text-sm); margin-bottom: var(--space-3); }
+.ph-picker-list { max-height: 260px; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); margin-top: var(--space-2); }
+.ph-picker-list button { display: block; width: 100%; text-align: left; padding: var(--space-2) var(--space-3); border: 0; background: transparent; cursor: pointer; font: inherit; color: inherit; border-bottom: 1px solid var(--color-border); }
+.ph-picker-list button:hover, .ph-picker-list button:focus { background: var(--color-bg); outline: none; }
+.ph-picker-list button:last-child { border-bottom: 0; }
+.ph-lines { display: grid; gap: var(--space-2); }
+.ph-line { display: grid; grid-template-columns: 1fr 110px 1fr auto; gap: var(--space-2); align-items: end; }
+@media (max-width: 640px) { .ph-line { grid-template-columns: 1fr 1fr; } .ph-line .ph-line-med { grid-column: 1 / -1; } }
+.ph-class-row { display: grid; grid-template-columns: 110px 1fr; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); margin-bottom: var(--space-2); }
+.ph-class-row .ph-flags { display: flex; gap: var(--space-4); flex-wrap: wrap; }
+@media (max-width: 640px) { .ph-class-row { grid-template-columns: 1fr; } }
+
+/* ---- till: the pharmacy bar above the cart ---- */
+.ph-till { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); background: var(--color-bg); font-size: var(--text-sm); }
+.ph-till .ph-till-title { font-weight: 700; display: inline-flex; gap: 6px; align-items: center; }
+.ph-till .ph-till-title svg { width: 16px; height: 16px; }
+.ph-till .ph-chip { display: inline-flex; gap: 6px; align-items: center; padding: 2px 10px; border-radius: 99px; background: var(--color-info-bg); color: var(--color-primary); font-weight: 600; }
+.ph-till .ph-chip.warn { background: var(--color-warning-bg); color: var(--color-warning); }
+.ph-till .ph-chip.bad { background: var(--color-danger-bg); color: var(--color-danger); }
+.ph-till .ph-chip.ok { background: var(--color-success-bg); color: var(--color-success); }
+.ph-till .ph-spacer { flex: 1; }
+.ph-line-tag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; background: var(--color-warning-bg); color: var(--color-warning); vertical-align: middle; }
+.ph-line-tag.rx { background: var(--color-danger-bg); color: var(--color-danger); }
+.ph-line-tag.ok { background: var(--color-success-bg); color: var(--color-success); }
+.ph-sign { border: 1px dashed var(--color-border); border-radius: var(--radius-md); padding: var(--space-3); margin-top: var(--space-3); }
+@media print { .ph-noprint { display: none !important; } }

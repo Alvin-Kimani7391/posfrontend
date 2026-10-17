@@ -70,6 +70,11 @@
     info: stroke('<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>'),
     arrowRight: stroke('<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>'),
     sliders: stroke('<path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/>'),
+    // Pharmacy
+    pill: stroke('<path d="M10.5 20.5a4.95 4.95 0 0 1-7-7l10-10a4.95 4.95 0 0 1 7 7l-10 10z"/><path d="M8.5 8.5l7 7"/>'),
+    pulse: stroke('<path d="M3 12h4l2.5-6 4 12 2.5-6H21"/>'),
+    thermo: stroke('<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 9v6"/>'),
+    patient: stroke('<circle cx="12" cy="7" r="3.5"/><path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/><path d="M12 16v4"/><path d="M10 18h4"/>'),
   };
 
   window.Icons = {

@@ -520,9 +520,10 @@
             <div class="field"><label>Cost price (KES, optional)</label><input class="input" name="costPrice" type="number" step="0.01" min="0" /></div>
           </div>
           <div class="form-row">
-            <div class="field"><label>Batch number <span class="text-muted">(optional)</span></label><input class="input" name="batchNumber" /></div>
-            <div class="field"><label>Expiry date <span class="text-muted">(optional)</span></label><input class="input" name="expiryDate" type="date" /></div>
+            <div class="field"><label>Batch number <span class="text-muted" id="rcv-batch-opt">(optional)</span></label><input class="input" name="batchNumber" /></div>
+            <div class="field"><label>Expiry date <span class="text-muted" id="rcv-exp-opt">(optional)</span></label><input class="input" name="expiryDate" type="date" /></div>
           </div>
+          <div class="field-hint" id="rcv-expiry-hint" style="display:none; margin-top:calc(var(--space-2) * -1); margin-bottom:var(--space-3)"></div>
           ${wh() ? `<div class="field"><label>Receive into</label>
             <select class="select" name="location"><option value="RETAIL">Retail (shop floor, ready to sell)</option><option value="WAREHOUSE">Warehouse (wholesale store)</option></select>
             <span class="field-hint">Warehouse stock cannot be sold at the till until you move it to retail.</span></div>` : ''}
@@ -544,6 +545,16 @@
           selected = { product, variant };
           const sf = modal.querySelector('#serials-field');
           if (sf) sf.style.display = product.trackSerialNumber ? '' : 'none';
+          // Expiry-tracked products must be given an expiry date: it is what feeds the expiry watch.
+          const expInput = modal.querySelector('[name="expiryDate"]');
+          const expOpt = modal.querySelector('#rcv-exp-opt');
+          const hint = modal.querySelector('#rcv-expiry-hint');
+          if (expInput) expInput.required = !!product.trackExpiry;
+          if (expOpt) expOpt.textContent = product.trackExpiry ? '(required)' : '(optional)';
+          if (hint) {
+            hint.style.display = product.trackExpiry ? '' : 'none';
+            hint.textContent = product.trackExpiry ? 'This product tracks expiry. Leave the batch number empty to use one based on the expiry date.' : '';
+          }
           modal.querySelector('#selected-product').innerHTML = `
             <span class="badge badge-info">${window.UI.escapeHtml(variant ? `${product.name} (${Object.values(variant.attributes || {}).join(', ')})` : product.name)}</span>
           `;
@@ -557,6 +568,7 @@
       if (!form.reportValidity()) return;
 
       const raw = window.UI.serializeForm(form);
+      if (selected.product.trackExpiry && !raw.expiryDate) return window.UI.toast.error('Enter the expiry date for this product');
       const serials = selected.product.trackSerialNumber ? splitList(raw.serials) : [];
       if (selected.product.trackSerialNumber) {
         if (!serials.length) return window.UI.toast.error('Enter the serial number / IMEI of each unit');
