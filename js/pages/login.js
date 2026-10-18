@@ -208,7 +208,9 @@
     window.Storage.setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
     window.Storage.setUser(data.user);
     if (window.I18n && data.user) window.I18n.adopt(data.user.language, data.country && data.country.language, data.user._id || data.user.id);
-    window.location.href = 'dashboard.html';
+    const HOSP = ['WAITER', 'HEAD_WAITER', 'SUPERVISOR', 'CHEF', 'KITCHEN_STAFF', 'BARTENDER', 'EXPEDITOR', 'DELIVERY_RIDER', 'RECEPTIONIST', 'HOUSEKEEPER'];
+    const bt = (data.business && (data.business.businessType || data.business.type)) || (data.user && data.user.businessType);
+    window.location.href = (data.user && HOSP.includes(data.user.role)) || bt === 'restaurant' ? 'restaurant/index.html' : 'dashboard.html';
   }
 
   function handleLoginError(err, form) {
