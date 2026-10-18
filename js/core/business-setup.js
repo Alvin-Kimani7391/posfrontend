@@ -25,6 +25,11 @@
     await window.Api.put('/business', { businessType: type, featureSettings: full });
     await window.Api.put('/business/onboarding', { typeConfirmed: true });
     await window.AppShell.refreshBusinessProfile?.();
+    // Restaurant / accommodation businesses continue in their own setup guide (stations, tables, menu, rooms).
+    if ((type === 'restaurant' || full.restaurantOrdering || full.accommodation) && !/^hx-/.test((location.pathname.split('/').pop() || ''))) {
+      window.location.href = 'hx-setup.html?welcome=1';
+      await new Promise(() => {}); // navigating away: keep callers from drawing over the page
+    }
   }
 
   /** "Keep the standard setup": confirm the current type/flags without changing anything. */

@@ -12,8 +12,10 @@
     el.innerHTML = `
       <div class="page-header"><div><h1>Pharmacy desk</h1><p id="ph-sub">What needs attention today.</p></div>
         <div class="flex" style="gap:var(--space-2);flex-wrap:wrap">
-          <a class="btn btn-secondary" href="prescriptions.html" data-requires-permission="prescriptions.intake">${window.Icons.get('plus')} New prescription</a>
-          <a class="btn btn-primary" href="sales.html" data-requires-permission="sales.create">${window.Icons.get('sales')} Open till</a>
+          <a class="btn btn-secondary" href="prescriptions.html?new=1" data-requires-permission="prescriptions.intake">${window.Icons.get('plus')} New prescription</a>
+          <a class="btn btn-secondary" href="medicines.html?add=1" data-requires-permission="medicines.manage">${window.Icons.get('pill')} Add medicine</a>
+          <a class="btn btn-secondary" href="sales.html?desk=otc" data-requires-permission="sales.create">${window.Icons.get('bag')} Over the counter</a>
+          <a class="btn btn-primary" href="sales.html?desk=rx" data-requires-permission="sales.create">${window.Icons.get('pill')} Dispense prescription</a>
         </div></div>
       <div id="ph-setup"></div>
       <div id="ph-dash"><div class="ph-card-pad text-muted">Loading…</div></div>`;

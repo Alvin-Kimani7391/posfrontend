@@ -17,7 +17,16 @@
 (function () {
   const BASE_ROLES = ['ADMIN', 'MANAGER', 'CASHIER', 'STOREKEEPER', 'ACCOUNTANT'];
   // Pharmacies also get the Pharmacist role. It still needs a verified credential (Pharmacy settings -> Staff credentials).
-  const rolesNow = () => (window.AppShell.hasFeature && window.AppShell.hasFeature('pharmacyDispensing') ? [...BASE_ROLES, 'PHARMACIST'] : BASE_ROLES);
+  const FOOD_ROLES = ['SUPERVISOR', 'HEAD_WAITER', 'WAITER', 'CHEF', 'KITCHEN_STAFF', 'BARTENDER', 'EXPEDITOR', 'DELIVERY_RIDER'];
+  const ROOM_ROLES = ['RECEPTIONIST', 'HOUSEKEEPER'];
+  const rolesNow = () => {
+    const has = (k) => window.AppShell.hasFeature && window.AppShell.hasFeature(k);
+    const out = [...BASE_ROLES];
+    if (has('pharmacyDispensing')) out.push('PHARMACIST');
+    if (has('restaurantOrdering')) out.push(...FOOD_ROLES);
+    if (has('accommodation')) out.push(...ROOM_ROLES);
+    return Array.from(new Set(out));
+  };
   const DEFAULT_NEW_ROLE = 'CASHIER';
   const state = { page: 1, limit: 10, search: '', total: 0, pages: 1 };
   let contentEl;

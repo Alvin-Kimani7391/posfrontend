@@ -1,21 +1,70 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Menu</title>
-<style>*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#f4f6f5;color:#14201f;padding-bottom:90px}header{background:#0d2f2c;color:#fff;padding:20px}header h1{margin:0;font-size:20px}header p{margin:4px 0 0;color:#8fd8cf}
-.c{padding:14px;max-width:720px;margin:auto}h2{margin:18px 0 8px}.it{background:#fff;border-radius:14px;padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;justify-content:space-between;border:1px solid #e3e8e6}.it small{color:#5f6f6c}
-button{font:inherit;border:0;border-radius:12px;padding:12px 16px;background:#0f766e;color:#fff;font-weight:600;min-height:44px}button.s{background:#e6f4f2;color:#0b5e58}button:disabled{opacity:.4}
-.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e3e8e6;padding:12px;display:flex;gap:8px;justify-content:center}.m{background:#fff;border-radius:14px;padding:16px;margin:14px;text-align:center}input{font:inherit;padding:12px;border:1px solid #cfd8d5;border-radius:10px;width:100%;margin:6px 0}</style></head>
-<body><header><h1 id="bn">Loading…</h1><p id="pl"></p></header><div class="c" id="c"></div><div class="bar" id="bar"></div>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Menu</title>
+<style>
+:root{--g:#0f766e;--gd:#0d2f2c;--bg:#f4f6f5;--bd:#e3e8e6;--mut:#5f6f6c}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:#14201f;padding-bottom:96px}
+header{background:var(--gd);color:#fff;padding:18px 16px 14px}header h1{margin:0;font-size:20px}header p{margin:4px 0 0;color:#8fd8cf;font-size:14px}
+nav{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--bd);display:flex;gap:8px;overflow-x:auto;padding:10px 12px;scrollbar-width:none}nav::-webkit-scrollbar{display:none}
+nav a{flex:none;padding:8px 14px;border-radius:99px;background:#e6f4f2;color:#0b5e58;font-weight:600;font-size:14px;text-decoration:none}
+.c{padding:12px;max-width:720px;margin:auto}h2{margin:18px 4px 8px;font-size:18px}
+.it{background:#fff;border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:8px;display:flex;gap:12px;align-items:center;justify-content:space-between}
+.it img{width:64px;height:64px;border-radius:10px;object-fit:cover}.it .t{flex:1;min-width:0}.it small{color:var(--mut)}.it .p{font-weight:700;color:var(--g)}
+button{font:inherit;border:0;border-radius:12px;padding:12px 16px;background:var(--g);color:#fff;font-weight:600;min-height:44px;cursor:pointer}button.s{background:#e6f4f2;color:#0b5e58}button:disabled{opacity:.4}
+.add{min-width:44px;padding:10px 14px}.m{background:#fff;border:1px solid var(--bd);border-radius:14px;padding:14px;margin:10px 4px;text-align:center}.m.w{background:#fff8e6;border-color:#f3dd9a}
+.bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--bd);padding:10px 12px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center;z-index:6}.bar button{flex:1;max-width:260px}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10;display:flex;align-items:flex-end;justify-content:center}.sheet>div{background:#fff;width:100%;max-width:720px;max-height:88vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px}
+.sheet h3{margin:0 0 4px}.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd)}.row label{flex:1}
+input[type=text],input[type=tel],input[type=password],textarea,select{font:inherit;padding:12px;border:1px solid #cfd8d5;border-radius:10px;width:100%;margin:6px 0}
+.q{display:inline-flex;align-items:center;gap:10px}.q button{padding:6px 14px;min-height:36px}.tot{font-weight:700;font-size:18px;display:flex;justify-content:space-between;margin:12px 0}
+</style></head>
+<body><header><h1 id="bn">Loading…</h1><p id="pl"></p></header><nav id="nav"></nav><div class="c" id="c"></div><div class="bar" id="bar"></div><div id="sh"></div>
+<script src="/js/core/config.js"></script>
 <script>
-(function(){const API='https://posbackend-5jaq.onrender.com/api/v1/public/qr/';const token=decodeURIComponent((location.pathname.split('/q/')[1]||new URLSearchParams(location.search).get('t')||'').split('/')[0]);
-const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const $=s=>document.querySelector(s);let ctx,cart={},pin='';
+(function(){
+const API=((window.APP_CONFIG&&window.APP_CONFIG.API_BASE_URL)||'https://posbackend-5jaq.onrender.com/api/v1')+'/public/qr/';
+const token=decodeURIComponent((location.pathname.split('/q/')[1]||new URLSearchParams(location.search).get('t')||'').split('/')[0]);
+const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const $=s=>document.querySelector(s);
+let ctx,menu,cart=[],pin='',guest={name:'',phone:''};
 const money=n=>new Intl.NumberFormat('en-KE',{style:'currency',currency:(ctx&&ctx.business.currency)||'KES'}).format(n||0);
-async function call(p,method,body){const r=await fetch(API+token+p,{method:method||'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const j=await r.json().catch(()=>({}));if(!r.ok||j.success===false)throw new Error(j.message||'Something went wrong');return j.data}
-async function init(){try{ctx=await call('');$('#bn').textContent=ctx.business.name;$('#pl').textContent=(ctx.place&&ctx.place.label)||'';const m=await call('/menu');draw(m)}catch(e){$('#c').innerHTML='<div class="m"><h3>'+E(e.message)+'</h3></div>';$('#bn').textContent='Menu'}}
-function draw(m){const can=ctx.canOrder;$('#c').innerHTML=(ctx.welcome?'<div class="m">'+E(ctx.welcome)+'</div>':'')+(!can?'<div class="m">'+({MENU_ONLY:'You can browse the menu. Please call a waiter to order.',TABLE_NOT_OPEN:'Ask a waiter to open your table to order here.',ROOM_NOT_OCCUPIED:'Ordering opens once you are checked in.'}[ctx.reason]||'Ordering is not available right now.')+'</div>':'')+m.categories.map(c=>'<h2>'+E(c.name)+'</h2>'+c.items.map(i=>'<div class="it"><div><b>'+E(i.name)+'</b><br><small>'+E(i.description||'')+'</small>'+(i.price!=null?'<br><b>'+money(i.price)+'</b>':'')+'</div>'+(can&&i.available?'<div><button class="s" data-m="'+i.id+'" data-d="-1">−</button> <b id="q'+i.id+'">'+(cart[i.id]||0)+'</b> <button data-m="'+i.id+'" data-d="1">+</button></div>':(i.available?'':'<small>Sold out</small>'))+'</div>').join('')).join('');
-document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{const id=b.dataset.m;cart[id]=Math.max(0,(cart[id]||0)+ +b.dataset.d);$('#q'+id).textContent=cart[id];bar()});bar()}
-function bar(){const n=Object.values(cart).reduce((a,b)=>a+b,0);const k=ctx.place&&ctx.place.kind;$('#bar').innerHTML=(n?'<button id="send">Send order ('+n+')</button>':'')+'<button class="s" id="call">Call waiter</button>'+(ctx.mode&&k==='TABLE'&&ctx.options&&ctx.options.allowBillRequest!==false?'<button class="s" id="bill">Ask for bill</button>':'');
-if($('#send'))$('#send').onclick=send;$('#call').onclick=()=>ask('WAITER');if($('#bill'))$('#bill').onclick=()=>ask('BILL')}
-async function pinFor(){if(ctx.needsPin&&!pin)pin=prompt('Enter your room PIN')||'';return pin}
-async function send(){try{const p=await pinFor();const items=Object.entries(cart).filter(([,q])=>q>0).map(([menuItemId,quantity])=>({menuItemId,quantity}));await call('/orders','POST',{items,clientRef:String(Date.now()),...(p?{pin:p}:{})});cart={};alert('Order sent. A member of staff will confirm it shortly.');init()}catch(e){alert(e.message)}}
-async function ask(kind){try{const p=await pinFor();await call('/calls','POST',{kind,...(p?{pin:p}:{})});alert('A member of staff has been notified.')}catch(e){alert(e.message)}}
+async function call(p,method,body){let r;try{r=await fetch(API+token+p,{method:method||'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined})}catch{throw new Error('No connection. Please check your internet and try again.')}
+ const j=await r.json().catch(()=>({}));if(!r.ok||j.success===false)throw new Error(j.message||'Something went wrong');return j.data}
+async function init(){try{ctx=await call('');$('#bn').textContent=ctx.business.name;$('#pl').textContent=(ctx.place&&ctx.place.label)||'';menu=await call('/menu');draw()}catch(e){$('#c').innerHTML='<div class="m"><h3>'+E(e.message)+'</h3><p>Please ask a member of staff.</p></div>';$('#bn').textContent='Menu'}}
+const REASON={MENU_ONLY:'You can browse the menu. Please call a waiter to order.',TABLE_NOT_OPEN:'Ask a waiter to open your table, then you can order here.',ROOM_NOT_OCCUPIED:'Ordering opens once you are checked in.',OFF:'Ordering from your phone is not available. Please call a waiter.'};
+function draw(){const can=ctx.canOrder;
+ $('#nav').innerHTML=menu.categories.map((c,i)=>'<a href="#c'+i+'">'+E(c.name)+'</a>').join('');
+ $('#c').innerHTML=(ctx.welcome?'<div class="m">'+E(ctx.welcome)+'</div>':'')+(!can?'<div class="m w">'+E(REASON[ctx.reason]||'Ordering is not available right now.')+'</div>':'')+
+ menu.categories.map((c,i)=>'<h2 id="c'+i+'">'+E(c.name)+'</h2>'+c.items.map(it=>'<div class="it">'+(it.image?'<img src="'+E(it.image)+'" alt="" loading="lazy">':'')+'<div class="t"><b>'+E(it.name)+'</b><br><small>'+E(it.description||'')+'</small>'+(it.price!=null?'<br><span class="p">'+money(it.price)+'</span>':'')+(it.available?'':'<br><small>Sold out</small>')+'</div>'+(can&&it.available?'<button class="add" data-i="'+it.id+'">+ Add</button>':'')+'</div>').join('')).join('');
+ document.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>pick(find(b.dataset.i)));bar()}
+const find=id=>menu.categories.flatMap(c=>c.items).find(i=>i.id===id);
+function pick(it){const vs=it.variants||[],gs=it.modifierGroups||[];if(!vs.length&&!gs.length)return add(it,null,[],1,'');
+ let h='<h3>'+E(it.name)+'</h3><small>'+E(it.description||'')+'</small>';
+ if(vs.length)h+='<h4>Size'+(it.requireVariant?' *':'')+'</h4>'+vs.map((v,i)=>'<div class="row"><label><input type="radio" name="v" value="'+v.id+'" '+(i===0&&it.requireVariant?'checked':'')+'> '+E(v.name)+'</label><span>'+(v.price!=null?money(v.price):v.priceDelta?'+'+money(v.priceDelta):'')+'</span></div>').join('');
+ gs.forEach((g,gi)=>{h+='<h4>'+E(g.name)+(g.required?' *':'')+(g.max?' (up to '+g.max+')':'')+'</h4>'+g.options.map(o=>'<div class="row"><label><input type="checkbox" data-g="'+gi+'" value="'+o.id+'"> '+E(o.name)+'</label><span>'+(o.priceDelta?'+'+money(o.priceDelta):'')+'</span></div>').join('')});
+ h+='<input type="text" id="nt" placeholder="Notes (e.g. no onions)" maxlength="200"><div class="row"><b>Quantity</b><span class="q"><button class="s" id="mn">−</button><b id="qn">1</b><button class="s" id="pl2">+</button></span></div><div style="display:flex;gap:8px;margin-top:12px"><button class="s" id="cx" style="flex:1">Cancel</button><button id="ok" style="flex:2">Add to order</button></div>';
+ sheet(h);let q=1;$('#mn').onclick=()=>{q=Math.max(1,q-1);$('#qn').textContent=q};$('#pl2').onclick=()=>{q++;$('#qn').textContent=q};$('#cx').onclick=close;
+ $('#ok').onclick=()=>{const v=(document.querySelector('[name=v]:checked')||{}).value||null;const mods=[];let bad='';
+  gs.forEach((g,gi)=>{const ch=[...document.querySelectorAll('[data-g="'+gi+'"]:checked')].map(x=>x.value);if(g.required&&ch.length<Math.max(1,g.min||1))bad='Please choose '+g.name;if(g.max&&ch.length>g.max)bad=g.name+': choose at most '+g.max;ch.forEach(o=>mods.push({groupId:g.id,optionId:o}))});
+  if(it.requireVariant&&!v)bad='Please choose a size';if(bad)return alert(bad);add(it,v,mods,q,$('#nt').value.trim());close()}}
+function add(it,v,mods,q,notes){const key=[it.id,v,mods.map(m=>m.optionId).sort().join(','),notes].join('|');const ex=cart.find(c=>c.key===key);if(ex)ex.quantity+=q;else cart.push({key,menuItemId:it.id,name:it.name,variantId:v||undefined,modifiers:mods,notes,quantity:q,price:it.price});bar()}
+function bar(){const n=cart.reduce((a,c)=>a+c.quantity,0);const k=ctx.place&&ctx.place.kind;
+ $('#bar').innerHTML=(n?'<button id="cart">View order ('+n+')</button>':'')+'<button class="s" id="call">Call '+(k==='ROOM'?'reception':'waiter')+'</button>'+(k==='TABLE'&&ctx.options&&ctx.options.allowBillRequest!==false?'<button class="s" id="bill">Bill</button>':'');
+ if($('#cart'))$('#cart').onclick=cartSheet;$('#call').onclick=()=>ask(k==='ROOM'?'RECEPTION':'WAITER');if($('#bill'))$('#bill').onclick=()=>ask('BILL')}
+function cartSheet(){const o=ctx.options||{};const tot=cart.reduce((a,c)=>a+(c.price||0)*c.quantity,0);
+ let h='<h3>Your order</h3>'+cart.map((c,i)=>'<div class="row"><span><b>'+c.quantity+'× '+E(c.name)+'</b>'+(c.notes?'<br><small>'+E(c.notes)+'</small>':'')+'</span><span class="q"><button class="s" data-m="'+i+'">−</button><button class="s" data-p="'+i+'">+</button></span></div>').join('')+(o.showPrices!==false?'<div class="tot"><span>Estimated total</span><span>'+money(tot)+'</span></div>':'');
+ if(o.requireName||o.requirePhone||true)h+='<input type="text" id="gn" placeholder="Your name'+(o.requireName?' *':' (optional)')+'" value="'+E(guest.name)+'"><input type="tel" id="gp" placeholder="Phone'+(o.requirePhone?' *':' (optional)')+'" value="'+E(guest.phone)+'">';
+ if(ctx.needsPin)h+='<input type="password" id="pn" inputmode="numeric" placeholder="Room PIN (on your registration card)" value="'+E(pin)+'">';
+ if(o.allowNotes!==false)h+='<textarea id="on" rows="2" placeholder="Anything else for the order?" maxlength="300"></textarea>';
+ h+='<div style="display:flex;gap:8px"><button class="s" id="cx" style="flex:1">Back</button><button id="go" style="flex:2">Send order</button></div>';sheet(h);
+ document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{const c=cart[+b.dataset.m];if(--c.quantity<=0)cart.splice(+b.dataset.m,1);bar();cart.length?cartSheet():close()});
+ document.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{cart[+b.dataset.p].quantity++;bar();cartSheet()});$('#cx').onclick=close;$('#go').onclick=send}
+async function send(){const o=ctx.options||{};guest={name:$('#gn').value.trim(),phone:$('#gp').value.trim()};pin=$('#pn')?$('#pn').value.trim():pin;
+ if(o.requireName&&!guest.name)return alert('Please enter your name');if(o.requirePhone&&!guest.phone)return alert('Please enter your phone number');
+ if(ctx.needsPin&&!/^\d{4,8}$/.test(pin))return alert('Enter your 4-8 digit room PIN');
+ const body={items:cart.map(c=>({menuItemId:c.menuItemId,quantity:c.quantity,...(c.variantId?{variantId:c.variantId}:{}),...(c.modifiers.length?{modifiers:c.modifiers}:{}),...(c.notes?{notes:c.notes}:{})})),clientRef:'q'+Date.now()+Math.random().toString(36).slice(2,6)};
+ const g={};if(guest.name)g.name=guest.name;if(guest.phone)g.phone=guest.phone;if(Object.keys(g).length)body.guest=g;if($('#on')&&$('#on').value.trim())body.notes=$('#on').value.trim();if(pin&&ctx.needsPin)body.pin=pin;
+ const b=$('#go');b.disabled=true;b.textContent='Sending…';
+ try{await call('/orders','POST',body);cart=[];close();bar();sheet('<h3>Order sent ✅</h3><p>A member of staff will confirm it shortly.</p><button id="cx" style="width:100%">OK</button>');$('#cx').onclick=close}catch(e){b.disabled=false;b.textContent='Send order';alert(e.message)}}
+async function ask(kind){try{let p='';if(ctx.needsPin){p=pin||prompt('Enter your room PIN')||'';pin=p}await call('/calls','POST',{kind,...(guest.name?{guestName:guest.name}:{}),...(p?{pin:p}:{})});alert('A member of staff has been notified.')}catch(e){alert(e.message)}}
+function sheet(h){$('#sh').innerHTML='<div class="sheet"><div>'+h+'</div></div>';$('.sheet').onclick=e=>{if(e.target.className==='sheet')close()}}
+function close(){$('#sh').innerHTML=''}
 init()})();
 </script></body></html>

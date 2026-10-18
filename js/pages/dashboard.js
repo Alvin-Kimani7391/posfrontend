@@ -1,7 +1,11 @@
 /**
- * dashboard.js
+ * dashboard.js (merged: original dashboard + pharmacy quick actions)
  * WHOLESALE BUSINESSES (feature multiWarehouse): the Wholesale desk is part of this page. It sits under the KPI tiles and
  * follows the same date range + branch filter (see js/pages/wholesale-dashboard.js). The old wholesale.html redirects here.
+ *
+ * PHARMACY BUSINESSES (feature pharmacyDispensing): the "New sale" quick action is replaced by the two pharmacy tills,
+ * "Dispense prescription" (sales.html?desk=rx) and "Over the counter" (sales.html?desk=otc). Wholesale takes priority
+ * if a business somehow has both features switched on.
  *
  * Two dashboards:
  *
@@ -66,6 +70,8 @@
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
+    // Restaurant / accommodation businesses (and their floor, kitchen and front-desk staff) have their own home.
+    if (window.HomeRoute && window.Storage.isAuthenticated() && await window.HomeRoute.redirectIfHospitality()) return;
     contentEl = window.AppShell.mount({ title: 'Dashboard' });
     if (!contentEl) return;
 
@@ -136,8 +142,10 @@
       <div class="quick-actions">
         ${wsOn() ? `
         <a class="qa primary" href="sales.html?mode=wholesale" data-requires-permission="sales.view">${window.Icons.get('sales')} Wholesale sale</a>
-        <a class="qa" href="sales.html?mode=retail" data-requires-permission="sales.view">${window.Icons.get('sales')} Retail sale</a>` : `
-        <a class="qa primary" href="sales.html" data-requires-permission="sales.view">${window.Icons.get('sales')} New sale</a>`}
+        <a class="qa" href="sales.html?mode=retail" data-requires-permission="sales.view">${window.Icons.get('sales')} Retail sale</a>` : (window.AppShell.hasFeature && window.AppShell.hasFeature('pharmacyDispensing') ? `
+        <a class="qa primary" href="sales.html?desk=rx" data-requires-permission="sales.create">${window.Icons.get('pill')} Dispense prescription</a>
+        <a class="qa" href="sales.html?desk=otc" data-requires-permission="sales.create">${window.Icons.get('bag')} Over the counter</a>` : `
+        <a class="qa primary" href="sales.html" data-requires-permission="sales.view">${window.Icons.get('sales')} New sale</a>`)}
         <a class="qa" href="products.html" data-requires-permission="products.view">${window.Icons.get('products')} Products</a>
         <a class="qa" href="inventory.html" data-requires-permission="inventory.view">${window.Icons.get('inventory')} ${wsOn() ? 'Wholesale inventory' : 'Inventory'}</a>
         ${wsOn() ? `<a class="qa" href="suppliers.html" data-requires-permission="suppliers.view">${window.Icons.get('truck')} Suppliers</a>` : ''}

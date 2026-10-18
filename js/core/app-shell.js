@@ -1,5 +1,5 @@
 /**
- * app-shell.js
+ * app-shell.js (merged: original shell + pharmacy till integration)
  * Every authenticated page (dashboard.html, branches.html, employees.html, ...)
  * has the same <div id="app-shell"></div> placeholder and the same
  * <body data-page="branches"> attribute. This file renders the sidebar,
@@ -24,6 +24,10 @@
  * CASH DRAWER: for users with sales.view, mount() loads js/core/cash-drawer.js and
  * shows a small drawer status chip in the topbar (click it for drawer settings).
  * Pages that need the drawer (sales.js) call AppShell.whenCashDrawerReady().
+ *
+ * PHARMACY TILL: for businesses with the pharmacyDispensing feature the till is split into
+ * "Dispense prescription" and "Over the counter" (both open sales.html, see pharmacy-desk.js),
+ * and the normal Sales link becomes "Sales history" (sales.html?view=history).
  */
 (function (window) {
   const APP_NAME = 'Six Star Pos';
@@ -31,10 +35,31 @@
   const NAV_ITEMS = [
     { key: 'dashboard',     label: 'Dashboard',          icon: 'dashboard', href: 'dashboard.html' },
     // Setup guide: owner only (it edits business settings). Always reachable so the owner can resume it any time.
-    { key: 'onboarding',    label: 'Setup guide',        icon: 'rocket',    href: 'onboarding.html',    permission: 'settings.update', ownerOnly: true, badge: 'setup' },
-    { key: 'sales',         label: 'Sales',              icon: 'sales',     href: 'sales.html',         permission: 'sales.view' },
+    { key: 'onboarding', hxHide: true,    label: 'Setup guide',        icon: 'rocket',    href: 'onboarding.html',    permission: 'settings.update', ownerOnly: true, badge: 'setup' },
+    // Pharmacy: the till is split into the two things a pharmacy actually does (both open sales.html; see pharmacy-desk.js).
+    { key: 'dispense-rx',  label: 'Dispense prescription', icon: 'pill', href: 'sales.html?desk=rx',  permission: 'sales.create', feature: ['pharmacyDispensing'] },
+    { key: 'dispense-otc', label: 'Over the counter',      icon: 'bag',  href: 'sales.html?desk=otc', permission: 'sales.create', feature: ['pharmacyDispensing'] },
+    { key: 'sales', hxHide: true,         label: 'Sales',              icon: 'sales',     href: 'sales.html',         permission: 'sales.view', phLabel: 'Sales history', phHref: 'sales.html?view=history' },
     // Anti-fraud: scan a receipt's QR to confirm it is a real sale. Open to every signed-in staff member (no permission).
-    { key: 'verify',        label: 'Verify receipt',     icon: 'shield',    href: 'verify.html' },
+    { key: 'verify', hxHide: true,        label: 'Verify receipt',     icon: 'shield',    href: 'verify.html' },
+    // ---- Restaurant & accommodation (shown only when those modules are switched on; see isHospitality()).
+    { key: 'hx-floor',        group: 'Restaurant',    label: 'Tables & orders',      icon: 'table',    href: 'hx-floor.html',        permission: 'restaurant.orders.view', feature: ['restaurantOrdering'] },
+    { key: 'hx-kitchen',      group: 'Restaurant',    label: 'Kitchen & bar',        icon: 'flame',    href: 'hx-kitchen.html',      permission: 'restaurant.kitchen.view', feature: ['restaurantOrdering'] },
+    { key: 'hx-bills',        group: 'Restaurant',    label: 'Bills & payments',     icon: 'receipt',  href: 'hx-bills.html',        permission: 'restaurant.bills.view', feature: ['restaurantOrdering'] },
+    { key: 'hx-reservations', group: 'Restaurant',    label: 'Reservations',         icon: 'calendar', href: 'hx-reservations.html', permission: 'restaurant.reservations.view', feature: ['reservations'] },
+    { key: 'hx-delivery',     group: 'Restaurant',    label: 'Delivery & pickup',    icon: 'bike',     href: 'hx-delivery.html',     permAny: ['restaurant.delivery.view', 'restaurant.delivery.self'], feature: ['restaurantOrdering'] },
+    { key: 'hx-menu',         group: 'Restaurant',    label: 'Menu',                 icon: 'utensils', href: 'hx-menu.html',         permission: 'restaurant.menu.manage', feature: ['restaurantOrdering'] },
+    { key: 'hx-stock',        group: 'Restaurant',    label: 'Ingredients & recipes',icon: 'box',      href: 'hx-stock.html',        permission: 'restaurant.ingredients.view', feature: ['recipeManagement'] },
+    { key: 'hx-guest',        group: 'Restaurant',    label: 'Guest requests & QR',  icon: 'qr',       href: 'hx-guest.html',        permAny: ['restaurant.guest.view', 'restaurant.guest.qr'], feature: ['guestQrOrdering'] },
+    { key: 'hx-staff',        group: 'Restaurant',    label: 'Shifts & tips',        icon: 'clock',    href: 'hx-staff.html',        permAny: ['restaurant.shifts.self', 'restaurant.shifts.view', 'restaurant.tips.view'], feature: ['restaurantOrdering'] },
+    { key: 'hx-desk',         group: 'Accommodation', label: 'Front desk',           icon: 'key',      href: 'hx-desk.html',         permission: 'accommodation.stays.view', feature: ['accommodation'] },
+    { key: 'hx-rooms',        group: 'Accommodation', label: 'Room board',           icon: 'bed',      href: 'hx-rooms.html',        permission: 'accommodation.rooms.view', feature: ['accommodation'] },
+    { key: 'hx-stays',        group: 'Accommodation', label: 'Bookings',             icon: 'calendar', href: 'hx-stays.html',        permission: 'accommodation.stays.view', feature: ['accommodation'] },
+    { key: 'hx-housekeeping', group: 'Accommodation', label: 'Housekeeping',         icon: 'broom',    href: 'hx-housekeeping.html', permission: 'accommodation.housekeeping.view', feature: ['accommodation'] },
+    { key: 'hx-reports',      group: 'Restaurant & rooms', label: 'Reports',         icon: 'reports',  href: 'hx-reports.html',      permAny: ['restaurant.reports.view', 'accommodation.reports.view'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-setup',        group: 'Restaurant & rooms', label: 'Setup guide',     icon: 'rocket',   href: 'hx-setup.html',        permAny: ['restaurant.settings.manage', 'restaurant.tables.manage', 'restaurant.menu.manage', 'accommodation.rooms.manage'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-settings',     group: 'Restaurant & rooms', label: 'Service settings',icon: 'sliders',  href: 'hx-settings.html',     permAny: ['restaurant.settings.view', 'accommodation.settings.view'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-services',     group: 'Restaurant & rooms', label: 'Services & system check', icon: 'sliders', href: 'hx-services.html', permission: 'settings.update' },
     { key: 'products',      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
     { key: 'inventory',     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view', wsLabel: 'Wholesale inventory' },
     // Wholesale is no longer a separate section. For businesses with warehouses (feature multiWarehouse) the normal pages
@@ -50,7 +75,7 @@
     { key: 'patients',      label: 'Patients',           icon: 'patient',   href: 'patients.html',      permission: 'patients.view',  feature: ['pharmacyDispensing'] },
     { key: 'pharmacy-compliance', label: 'Recalls & registers', icon: 'shield', href: 'pharmacy-compliance.html', permission: 'pharmacy.reports', feature: ['pharmacyDispensing'] },
     { key: 'pharmacy-settings', label: 'Pharmacy settings', icon: 'sliders', href: 'pharmacy-settings.html', permission: 'pharmacy.settings', feature: ['pharmacyDispensing'] },
-    { key: 'stocktakes',    label: 'Stocktake',          icon: 'clipboard', href: 'stocktakes.html',    permission: 'stocktake.view' },
+    { key: 'stocktakes', hxHide: true,    label: 'Stocktake',          icon: 'clipboard', href: 'stocktakes.html',    permission: 'stocktake.view' },
     { key: 'serials',       label: 'Serial numbers',     icon: 'hash',      href: 'serials.html',       permission: 'serials.view',   feature: ['serialNumberTracking'] },
     { key: 'warranty',      label: 'Warranty claims',    icon: 'shield',    href: 'warranty.html',      permission: 'warranty.view',  feature: ['warrantyManagement'] },
     { key: 'repairs',       label: 'Repairs',            icon: 'wrench',    href: 'repairs.html',       permission: 'repairs.view',   feature: ['repairManagement'] },
@@ -60,12 +85,12 @@
     { key: 'suppliers',     label: 'Suppliers',          icon: 'truck',     href: 'suppliers.html',     permission: 'suppliers.view' },
     { key: 'purchases',     label: 'Purchases',          icon: 'bag',       href: 'purchases.html',     permission: 'purchases.view' },
     { key: 'expenses',      label: 'Expenses',           icon: 'wallet',    href: 'expenses.html',      permission: 'expenses.view' },
-    { key: 'refunds',       label: 'Refunds',            icon: 'refund',    href: 'refunds.html',       permission: 'refunds.view' },
+    { key: 'refunds', hxHide: true,       label: 'Refunds',            icon: 'refund',    href: 'refunds.html',       permission: 'refunds.view' },
 
     { key: 'reports',       label: 'Reports',            icon: 'reports',   href: 'reports.html',       permission: 'reports.view' },
     { key: 'audit',         label: 'Audit log',          icon: 'audit',     href: 'audit-logs.html',    permission: 'audit.view' },
     { key: 'cash',          label: 'Registers & Shifts', icon: 'cash',      href: 'cash-register.html', permission: 'registers.view' },
-    { key: 'offline',       label: 'Offline review',     icon: 'wifiOff',     href: 'offline-review.html', permission: 'offline.review' },
+    { key: 'offline', hxHide: true,       label: 'Offline review',     icon: 'wifiOff',     href: 'offline-review.html', permission: 'offline.review' },
 
     { key: 'branches',      label: 'Branches',           icon: 'building',     href: 'branches.html',      permission: 'branches.view' },
     { key: 'employees',     label: 'Employees',          icon: 'employees', href: 'employees.html',     permission: 'employees.view' },
@@ -311,8 +336,25 @@
     return () => window.removeEventListener('businessprofilechange', h);
   }
 
-  /** Sidebar label: wholesale businesses see the hybrid names (e.g. "Wholesale inventory"). */
-  function labelFor(item) { return item.wsLabel && hasFeature('multiWarehouse') ? item.wsLabel : item.label; }
+  /** Sidebar label: pharmacies see "Sales history"; wholesale businesses see the hybrid names (e.g. "Wholesale inventory"). */
+  function labelFor(item) {
+    if (item.phLabel && hasFeature('pharmacyDispensing')) return item.phLabel;
+    return item.wsLabel && hasFeature('multiWarehouse') ? item.wsLabel : item.label;
+  }
+
+  /** Which sidebar link is lit. The pharmacy till links share one page (sales.html), so the URL / desk mode decides. */
+  function isActiveItem(item, activePage) {
+    if (activePage === 'sales' && hasFeature('pharmacyDispensing')) {
+      let q = null; try { q = new URLSearchParams(window.location.search); } catch { q = null; }
+      const history = !!q && q.get('view') === 'history';
+      const desk = (window.PharmacyDesk && window.PharmacyDesk.mode && window.PharmacyDesk.mode()) || (q && q.get('desk')) || 'otc';
+      if (item.key === 'sales') return history;
+      if (item.key === 'dispense-rx') return !history && desk === 'rx';
+      if (item.key === 'dispense-otc') return !history && desk !== 'rx';
+      return false;
+    }
+    return item.key === activePage;
+  }
 
   function itemVisibleForBusiness(item) {
     if (!item.feature) return true;
@@ -340,6 +382,11 @@
     const active = document.body.dataset.page || '';
     nav.innerHTML = `<div class="sidebar-section-label">Menu</div>${buildSidebarNav(active)}`;
     window.Permissions.applyPermissionGates(nav, getUser());
+    const bn = document.querySelector('.bottom-nav');
+    if (bn) {
+      bn.innerHTML = buildBottomNav(active);
+      bn.querySelectorAll('.bottom-nav-item').forEach((btn) => btn.addEventListener('click', () => { if (btn.dataset.href) window.location.href = btn.dataset.href; }));
+    }
     nav.querySelectorAll('.sidebar-link').forEach((a) => {
       if (!a.title) a.title = a.textContent.replace(/\s+/g, ' ').trim();
       a.addEventListener('click', () => {
@@ -349,14 +396,43 @@
     });
   }
 
+  /** Restaurant / accommodation business: the menu is built around the floor, kitchen and front desk. */
+  function isHospitality() {
+    if (!profile) return false;
+    const f = profile.featureSettings || {};
+    return profile.businessType === 'restaurant' || f.restaurantOrdering === true || f.accommodation === true;
+  }
+
+  function itemAllowed(item, user) {
+    if (!itemVisibleForBusiness(item)) return false;
+    if (item.ownerOnly && user?.role !== 'OWNER') return false;
+    if (item.hxHide && isHospitality()) return false;
+    if (item.permAny && !item.permAny.some((p) => window.Permissions.can(user, p))) return false;
+    return true;
+  }
+
+  function hrefFor(item) {
+    if (item.key === 'dashboard' && isHospitality()) return 'hx-dashboard.html';
+    if (item.phHref && hasFeature('pharmacyDispensing')) return item.phHref;
+    return item.href;
+  }
+
   function buildSidebarNav(activePage) {
-    return NAV_ITEMS.filter((i) => itemVisibleForBusiness(i) && !(i.ownerOnly && getUser()?.role !== 'OWNER')).map((item) => {
+    const user = getUser();
+    const hx = isHospitality();
+    let lastGroup = null;
+    return NAV_ITEMS.filter((i) => itemAllowed(i, user) && !(hx === false && i.group)).map((item) => {
       const gated = item.permission ? `data-requires-permission="${item.permission}"` : '';
-      const activeClass = item.key === activePage ? 'active' : '';
+      const activeClass = isActiveItem(item, activePage) ? 'active' : '';
       const disabled = item.disabled;
-      return `
+      let label = '';
+      if (hx) {
+        const g = item.key === 'dashboard' ? '' : (item.group || 'Business');
+        if (g !== lastGroup) { if (g) label = `<div class="sidebar-section-label">${g}</div>`; lastGroup = g; }
+      }
+      return `${label}
         <a class="sidebar-link ${activeClass}" ${gated} data-nav-key="${item.key}"
-           href="${disabled ? '#' : item.href}"
+           href="${disabled ? '#' : hrefFor(item)}"
            title="${disabled ? 'Coming soon' : labelFor(item)}"
            ${disabled ? 'style="opacity:.45;pointer-events:none"' : ''}>
           <span class="icon">${window.Icons.get(item.icon)}</span>
@@ -366,10 +442,18 @@
     }).join('');
   }
 
+  function bottomNavKeys() {
+    if (!isHospitality()) return BOTTOM_NAV_KEYS;
+    const user = getUser();
+    const want = ['dashboard', 'hx-floor', 'hx-kitchen', 'hx-desk', 'hx-rooms', 'hx-bills', 'hx-stays', 'hx-housekeeping', 'hx-delivery', 'hx-guest', 'employees'];
+    return want.filter((k) => { const it = NAV_ITEMS.find((n) => n.key === k); return it && itemAllowed(it, user) && (!it.permission || window.Permissions.can(user, it.permission)); }).slice(0, 5);
+  }
+
   function buildBottomNav(activePage) {
-    return NAV_ITEMS.filter((i) => BOTTOM_NAV_KEYS.includes(i.key)).map((item) => `
+    const keys = bottomNavKeys();
+    return keys.map((k) => NAV_ITEMS.find((n) => n.key === k)).filter(Boolean).map((item) => `
       <button class="bottom-nav-item ${item.key === activePage ? 'active' : ''}"
-              data-href="${item.disabled ? '' : item.href}"
+              data-href="${item.disabled ? '' : hrefFor(item)}"
               ${item.disabled ? 'style="opacity:.45"' : ''}>
         <span class="icon">${window.Icons.get(item.icon)}</span>
         <span>${labelFor(item)}</span>
@@ -708,6 +792,7 @@
     whenCashDrawerReady,
     getBusinessProfile,
     hasFeature,
+    isHospitality,
     whenProfileReady,
     refreshBusinessProfile,
     onProfileChange,

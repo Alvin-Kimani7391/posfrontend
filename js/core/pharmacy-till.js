@@ -51,7 +51,9 @@
       if (!pending.has(id)) pending.set(id, fetchOne(id).finally(() => pending.delete(id)));
       jobs.push(pending.get(id));
     });
-    return Promise.all(jobs);
+    // the class rules (who needs a prescription / is controlled) come from the pharmacy settings: load them with the medicines,
+    // otherwise every non-OTC medicine would be shown with the strictest label until payment.
+    return Promise.all([P().classes(), ...jobs]);
   }
   const ensureCart = (cart) => ensure((cart || []).map((i) => i.product));
 
@@ -96,15 +98,19 @@
     if (!el) return;
     if (!active()) { el.innerHTML = ''; el.style.display = 'none'; return; }
     el.style.display = '';
+    // With the pharmacy desk (Over the counter | Dispense prescription) on screen, the desk panel already shows the attached
+    // prescription and the attach button; this bar then only carries warnings.
+    const deskOn = !!(window.PharmacyDesk && window.PharmacyDesk.mode && window.PharmacyDesk.mode());
     const n = needs(cart);
     const chips = [];
     n.blocked.forEach((b) => chips.push(`<span class="ph-chip bad">${esc(b.item.product.name)} is ${esc(b.reason)}</span>`));
-    if (ph && ph.rx) chips.push(`<span class="ph-chip ok">${esc(ph.rx.number)} attached</span>`);
+    if (ph && ph.rx) { if (!deskOn) chips.push(`<span class="ph-chip ok">${esc(ph.rx.number)} attached</span>`); }
     else if (n.rx.length) chips.push('<span class="ph-chip warn">Prescription needed</span>');
     if (n.restricted.length) chips.push('<span class="ph-chip bad">Controlled drug: pharmacist + countersignature</span>');
     if (n.poison.length && !(ph && ph.rx)) chips.push('<span class="ph-chip warn">Poisons Book entry</span>');
     if (!chips.length && n.dispenser) chips.push('<span class="ph-chip">Dispenser only</span>');
-    el.innerHTML = `<span class="ph-till-title">${window.Icons.get('pill')} Pharmacy</span>${chips.join('') || '<span class="text-muted">Ordinary items. Medicines that need a prescription are flagged here.</span>'}<span class="ph-spacer"></span>${n.rx.length && P().can('prescriptions.view') ? '<button type="button" class="btn btn-secondary btn-sm" id="ph-attach">Attach prescription</button>' : ''}`;
+    if (deskOn && !chips.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
+    el.innerHTML = `<span class="ph-till-title">${window.Icons.get('pill')} Pharmacy</span>${chips.join('') || '<span class="text-muted">Ordinary items. Medicines that need a prescription are flagged here.</span>'}<span class="ph-spacer"></span>${!deskOn && n.rx.length && P().can('prescriptions.view') ? '<button type="button" class="btn btn-secondary btn-sm" id="ph-attach">Attach prescription</button>' : ''}`;
     el.querySelector('#ph-attach')?.addEventListener('click', () => el.dispatchEvent(new CustomEvent('ph-attach', { bubbles: true })));
   }
 
@@ -228,5 +234,5 @@
     catch (e) { window.UI.toast.error(`Label not printed: ${e.message}. You can print it from Prescriptions → Dispensing register.`); }
   }
 
-  window.PharmacyTill = { active, ensure, ensureCart, needs, tag, paintBar, prepare, payload, sig, offlineIssue, afterSale, forget: () => cache.clear() };
+  window.PharmacyTill = { active, medicineOf: (id) => { const e = cache.get(String(id)); return e && e.med ? e.med : null; }, ensure, ensureCart, needs, tag, paintBar, prepare, payload, sig, offlineIssue, afterSale, forget: () => cache.clear() };
 })(window);

@@ -36,13 +36,19 @@
   <script src="js/core/config.js"></script>
   <script src="js/core/icons.js"></script>
   <script src="js/core/storage.js"></script>
+  <script src="js/core/api.js"></script>
+  <script src="js/core/home-route.js"></script>
   <script src="js/core/pwa.js"></script>
   
   <script>
     document.getElementById('boot-logo').innerHTML = window.Icons.get('store');
     // Redirect immediately - the boot screen only shows if this takes a beat
     // (slow connection/first paint), it's not a deliberate splash delay.
-    window.location.replace(window.Storage.isAuthenticated() ? 'dashboard.html' : 'login.html');
+    if (window.Storage.isAuthenticated()) {
+      window.HomeRoute.resolve().then(function (page) { window.location.replace(page); });
+    } else {
+      window.location.replace('login.html');
+    }
   </script>
 </body>
 </html>

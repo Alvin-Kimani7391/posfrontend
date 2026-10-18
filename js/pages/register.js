@@ -9,7 +9,8 @@
 
   function init() {
     if (window.Storage.isAuthenticated()) {
-      window.location.replace('dashboard.html');
+      if (window.HomeRoute) window.HomeRoute.resolve().then((page) => window.location.replace(page));
+      else window.location.replace('dashboard.html');
       return;
     }
 

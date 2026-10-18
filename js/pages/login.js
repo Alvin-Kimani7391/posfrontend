@@ -19,7 +19,7 @@
     if (new URLSearchParams(window.location.search).get('online')) { try { localStorage.removeItem('pos.offlineSession'); } catch { /* ignore */ } }
     // If already logged in, skip straight to the dashboard.
     if (window.Storage.isAuthenticated()) {
-      window.location.replace('dashboard.html');
+      window.HomeRoute.resolve().then((page) => window.location.replace(page));
       return;
     }
 
@@ -204,13 +204,15 @@
     });
   }
 
-  function onLoginSuccess(data) {
+  async function onLoginSuccess(data) {
     window.Storage.setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
     window.Storage.setUser(data.user);
     if (window.I18n && data.user) window.I18n.adopt(data.user.language, data.country && data.country.language, data.user._id || data.user.id);
-    const HOSP = ['WAITER', 'HEAD_WAITER', 'SUPERVISOR', 'CHEF', 'KITCHEN_STAFF', 'BARTENDER', 'EXPEDITOR', 'DELIVERY_RIDER', 'RECEPTIONIST', 'HOUSEKEEPER'];
-    const bt = (data.business && (data.business.businessType || data.business.type)) || (data.user && data.user.businessType);
-    window.location.href = (data.user && HOSP.includes(data.user.role)) || bt === 'restaurant' ? 'restaurant/index.html' : 'dashboard.html';
+    // The login response has no business info, so ask for the business profile (type + switched-on modules)
+    // and open the right home: restaurant / accommodation businesses go to their own dashboard.
+    let page = 'dashboard.html';
+    try { page = await window.HomeRoute.resolve(); } catch { /* keep the retail dashboard */ }
+    window.location.href = page;
   }
 
   function handleLoginError(err, form) {

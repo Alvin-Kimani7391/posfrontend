@@ -75,6 +75,22 @@
     pulse: stroke('<path d="M3 12h4l2.5-6 4 12 2.5-6H21"/>'),
     thermo: stroke('<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 9v6"/>'),
     patient: stroke('<circle cx="12" cy="7" r="3.5"/><path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/><path d="M12 16v4"/><path d="M10 18h4"/>'),
+
+    // ---- Restaurant & accommodation (hospitality) icons
+    utensils: stroke('<path d="M6 3v8a2 2 0 0 0 2 2v8"/><path d="M4 3v6a2 2 0 0 0 2 2"/><path d="M8 3v6"/><path d="M17 3c-2 1.5-3 4-3 6.5 0 1.5 1 2.5 3 2.5v9"/>'),
+    flame: stroke('<path d="M12 3c1 3 4 4.5 4 9a4 4 0 0 1-8 0c0-1.5.6-2.6 1.5-3.5C10 10 11.5 8 12 3z"/><path d="M12 21a2 2 0 0 0 2-2c0-1.3-1-2-2-3-1 1-2 1.7-2 3a2 2 0 0 0 2 2z"/>'),
+    bed: stroke('<path d="M3 18V7"/><path d="M3 14h18v4"/><path d="M21 14v-2a3 3 0 0 0-3-3h-7v5"/><circle cx="7" cy="11" r="1.6"/>'),
+    key: stroke('<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/><path d="M14 9l2 2"/>'),
+    broom: stroke('<path d="M14 3l-4 8"/><path d="M6 12h10l2 9H4z"/><path d="M8 16l-1 5"/><path d="M12 16v5"/>'),
+    calendar: stroke('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>'),
+    qr: stroke('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3z"/><path d="M20 14v1"/><path d="M14 20h1"/><path d="M18 20h3v-3"/>'),
+    clock: stroke('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    bike: stroke('<circle cx="6" cy="17" r="3.5"/><circle cx="18" cy="17" r="3.5"/><path d="M6 17l4-8h5l3 8"/><path d="M10 9L9 6H7"/>'),
+    table: stroke('<rect x="3" y="9" width="18" height="4" rx="1.5"/><path d="M6 13v7"/><path d="M18 13v7"/><path d="M9 9V5h6v4"/>'),
+    bellRing: stroke('<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>'),
+    receipt: stroke('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6"/><path d="M9 12h6"/>'),
+    chefHat: stroke('<path d="M7 14a4 4 0 1 1 1.5-7.7A4 4 0 0 1 16 6a4 4 0 0 1 1 8"/><path d="M7 14v6h10v-6"/>'),
+    coffee: stroke('<path d="M4 8h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 9h2a2 2 0 0 1 0 5h-2"/><path d="M8 3v2"/><path d="M12 3v2"/>'),
   };
 
   window.Icons = {

@@ -142,6 +142,15 @@
     pharmacy: {}, // pharmacy: { sig, rx, countersign, poisonsBook } collected before payment (see js/core/pharmacy-till.js)
   };
 
+  // What the pharmacy desk (js/core/pharmacy-desk.js) is allowed to do to the cart.
+  const pharmacyHost = {
+    state,
+    addLine: (product, qty) => addToCart(product, null, qty),
+    removeProducts: (ids) => { state.cart = state.cart.filter((l) => !ids.includes(String(l.product._id))); renderCart(); },
+    clear: () => resetCart(),
+    render: () => renderCart(),
+  };
+
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
   const fm = (n) => window.UI.formatMoney(n);
   const $ = (id) => document.getElementById(id);
@@ -321,6 +330,12 @@
 
   function onProfileChanged() {
     refreshModeUi();
+    // The business profile can arrive after the till first paints: add the pharmacy switch then.
+    if (window.PharmacyDesk && window.PharmacyDesk.active() && !$('ph-seg') && $('pz-root')) {
+      $('pz-root').querySelector('.pz-tabs')?.insertAdjacentHTML('afterend', window.PharmacyDesk.segHtml());
+      window.PharmacyDesk.bindSeg(contentEl);
+      if (state.view === 'new-sale') renderNewSaleView();
+    }
     if (isWsBiz() && !modeExplicit && state.mode === 'RETAIL' && !state.cart.length && !isOfflineNow()) { setMode('WHOLESALE'); return; }
     if (isWs() && !ws.ready) ensureWsReady().then(() => { if (isWs() && state.view === 'new-sale') renderNewSaleView(); });
   }
@@ -385,6 +400,7 @@
     }
     // Paint the till first; the shift / payment flags / cash drawer load in the background.
     renderNewSaleView();
+    try { if (new URLSearchParams(window.location.search).get('view') === 'history') contentEl.querySelector('.pz-tab[data-view="history"]')?.click(); } catch { /* ignore */ }
     loadShift().catch(() => {});
 
     // The cash drawer module (and any unfinished "close the drawer" lock) is set up
@@ -435,6 +451,7 @@
             <button class="pz-tab active" data-view="new-sale" role="tab"><i class="fa-solid fa-cash-register" aria-hidden="true"></i> New sale</button>
             <button class="pz-tab" data-view="history" role="tab" data-requires-permission="sales.view"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Sales history</button>
           </div>
+          ${window.PharmacyDesk ? window.PharmacyDesk.segHtml() : ''}
           <div class="pz-seg" id="pz-seg" data-mode="${state.mode}" role="tablist" aria-label="Sale type" hidden>
             <button type="button" data-mode="RETAIL" role="tab"><i class="fa-solid fa-store" aria-hidden="true"></i> Retail</button>
             <button type="button" data-mode="WHOLESALE" role="tab"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i> Wholesale</button>
@@ -486,6 +503,7 @@
     window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
 
     $('pz-seg')?.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+    if (window.PharmacyDesk) window.PharmacyDesk.bindSeg(contentEl);
     // Re-measure whenever the workspace itself changes size (sidebar open / collapsed, full view, rotation...).
     if (typeof ResizeObserver !== 'undefined' && $('pz-root')) {
       rootObserver?.disconnect();
@@ -1155,6 +1173,7 @@
           </div>
         </div>
         <div class="ph-till" id="ph-till-bar" style="display:none"></div>
+        <div id="ph-desk" style="display:none"></div>
       </div>
 
       <div class="pz-main">
@@ -1223,6 +1242,7 @@
     $('ph-till-bar')?.addEventListener('ph-attach', () => {
       window.PharmacyTill.prepare(state.cart, (r) => { state.pharmacy = r; renderCart(); }, state.pharmacy);
     });
+    if (window.PharmacyDesk && !wsOn) window.PharmacyDesk.bind(pharmacyHost);
 
     attachHardwareScanner();
     fitRoot();
@@ -1434,15 +1454,16 @@
     } catch { return true; } // never block a sale just because the hint could not be loaded
   }
 
-  function addToCart(product, variant) {
+  function addToCart(product, variant, qty) {
     if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before starting the next sale'); return; }
+    const add = Number(qty) > 0 ? Number(qty) : 1; // the pharmacy desk loads a whole prescription quantity at once
     const key = variant ? variant._id : product._id;
     const existing = state.cart.find((i) => keyOf(i) === key);
     if (existing) {
-      existing.quantity += 1;
+      existing.quantity += add;
       syncAutoDiscount(existing); // preset discount grows with the quantity; a manual discount is left alone
     } else {
-      const item = { product, variant, quantity: 1, discount: 0, autoDiscount: false, overridePriceEnabled: false, overridePrice: null };
+      const item = { product, variant, quantity: add, discount: 0, autoDiscount: false, overridePriceEnabled: false, overridePrice: null };
       const preset = autoDiscountFor(item);
       if (preset > 0) {
         item.discount = preset;
@@ -1455,7 +1476,7 @@
     // Batch / expiry tracked products: show which batch will be sold (earliest expiry first). Display only.
     if (window.BatchTill) window.BatchTill.ensure(state.cart).then(() => { if (state.view === 'new-sale') renderCart(); }).catch(() => {});
     // Pharmacy: learn whether this product is a medicine (class, recall status) and repaint the tags.
-    if (window.PharmacyTill && window.PharmacyTill.active()) window.PharmacyTill.ensure([product]).then(() => { if (state.view === 'new-sale') renderCart(); });
+    if (window.PharmacyTill && window.PharmacyTill.active()) window.PharmacyTill.ensure([product]).then(() => { if (state.view === 'new-sale') renderCart(); if (window.PharmacyDesk) window.PharmacyDesk.guardOtc(); });
   }
 
   /** Wholesale: add a warehouse product (a second tap adds one more of the same unit). */
@@ -1497,6 +1518,7 @@
     renderCustomerButton();
     renderTotals();
     if (window.PharmacyTill) window.PharmacyTill.paintBar($('ph-till-bar'), state.pharmacy, state.cart);
+    if (window.PharmacyDesk) window.PharmacyDesk.paint();
   }
 
   /* One row per product: Products half (# | Barcode | Name | Price) and Cart half (Qty | Discount | Subtotal | x) */
@@ -1787,6 +1809,8 @@
         return;
       }
     }
+    // Pharmacy: a "Dispense prescription" sale needs its prescription before any money is taken.
+    if (window.PharmacyDesk && !wholesale && !window.PharmacyDesk.beforePayment()) return;
     // Pharmacy: medicines that need a prescription / countersignature / Poisons Book entry are sorted out BEFORE money is taken.
     const PT = window.PharmacyTill;
     if (PT && PT.active() && !wholesale) {

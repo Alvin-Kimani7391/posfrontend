@@ -212,7 +212,12 @@
       updateSelectionBar();
     });
 
-    document.getElementById('add-product-btn').addEventListener('click', () => openProductModal());
+    document.getElementById('add-product-btn').addEventListener('click', () => {
+      // Pharmacies add medicines through their own form (drug details + opening batch); other goods use the normal form.
+      if (window.PharmacyProductForm && window.AppShell.hasFeature && window.AppShell.hasFeature('pharmacyDispensing') && window.Permissions.can(window.AppShell.getUser(), 'medicines.manage')) {
+        window.PharmacyProductForm.chooser({ onDone: () => fetchAndRender(), onOther: () => openProductModal() });
+      } else openProductModal();
+    });
     window.AppShell.runUrlAction?.('add-product-btn'); // opened from the setup guide
     document.getElementById('manage-categories-btn').addEventListener('click', openCategoriesModal);
 

@@ -10,8 +10,11 @@
     el.innerHTML = `<div class="page-header"><div><h1>Medicines</h1><p>The medicine details behind your products: what it is, how strong, its class and how it must be stored.</p></div>
       <div class="flex" style="gap:var(--space-2);flex-wrap:wrap">
         <a class="btn btn-secondary" href="pharmacy-settings.html#import" data-requires-permission="medicines.manage">Bulk import</a>
+        <button class="btn btn-secondary" id="ph-link-med" data-requires-permission="medicines.manage" title="You already have this item under Products">Use an existing product</button>
         <button class="btn btn-primary" id="ph-add-med" data-requires-permission="medicines.manage">${window.Icons.get('plus')} Add medicine</button></div></div><div id="mk-root"></div>`;
-    el.querySelector('#ph-add-med').addEventListener('click', () => window.ProductPicker.open({ title: 'Which product is this medicine?', onSelect: ({ product }) => form({ productId: product._id, name: product.name }) }));
+    el.querySelector('#ph-add-med').addEventListener('click', () => window.PharmacyProductForm.open({ onDone: () => list.reload() }));
+    el.querySelector('#ph-link-med').addEventListener('click', () => window.ProductPicker.open({ title: 'Which product is this medicine?', onSelect: ({ product }) => window.PharmacyProductForm.open({ product, onDone: () => list.reload() }) }));
+    if (new URLSearchParams(location.search).get('add') === '1') window.PharmacyProductForm.open({ onDone: () => list.reload() });
     list = K.listPage({
       container: el.querySelector('#mk-root'), endpoint: '/pharmacy/medicines', itemsKey: 'medicines', search: true, searchParam: 'q', searchPlaceholder: 'Generic or brand name, strength',
       filters: [
@@ -26,8 +29,8 @@
         { label: 'Status', render: (m) => P.badge(m.status) + (m.statusReason ? `<div class="text-xs text-muted">${esc(m.statusReason)}</div>` : '') },
       ],
       rowActions: (m) => K.btn('alt', 'Alternatives') + (P.can('medicines.manage') ? ` ${K.btn('edit', 'Edit')} ${K.btn('status', 'Status')}` : ''),
-      onAction: (a, m) => (a === 'alt' ? alternatives(m) : a === 'edit' ? form({ productId: m.productId, medicine: m }) : status(m)),
-      emptyText: 'No medicines set up yet', emptyMessage: 'Add a product as a medicine, or import them all from a spreadsheet in Pharmacy settings.', emptyIcon: 'inventory',
+      onAction: (a, m) => (a === 'alt' ? alternatives(m) : a === 'edit' ? window.PharmacyProductForm.open({ medicine: m, onDone: () => list.reload() }) : status(m)),
+      emptyText: 'No medicines set up yet', emptyMessage: 'Add your first medicine, or import them all from a spreadsheet in Pharmacy settings.', emptyIcon: 'inventory',
     });
   }
 

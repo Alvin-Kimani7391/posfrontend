@@ -170,14 +170,15 @@
   }
 
   /** Validated prescriptions that can still be dispensed (used by the till). */
-  function prescriptionPicker({ onSelect }) {
+  function prescriptionPicker({ onSelect, patientId }) {
     return picker({
-      title: 'Choose prescription', placeholder: 'Prescription number (RX-…)', maxWidth: '600px',
+      title: patientId ? 'Choose this patient’s prescription' : 'Choose prescription', placeholder: 'Prescription number (RX-…)', maxWidth: '600px',
       emptyText: 'No validated prescription found. Record it on the Prescriptions screen and have a pharmacist review it.',
+      footerHtml: `<a class="btn btn-secondary" href="prescriptions.html${patientId ? `?patient=${esc(patientId)}&new=1` : '?new=1'}">Record a new prescription</a><button class="btn btn-secondary" data-act="close">Close</button>`,
       fetch: async (term) => {
         const out = [];
         for (const status of ['VALIDATED', 'PARTIALLY_DISPENSED']) {
-          const { data } = await window.Api.get('/pharmacy/prescriptions', { status, search: term || undefined, limit: 15 });
+          const { data } = await window.Api.get('/pharmacy/prescriptions', { status, search: term || undefined, patientId: patientId || undefined, limit: 15 });
           out.push(...(data.prescriptions || []));
         }
         out.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));

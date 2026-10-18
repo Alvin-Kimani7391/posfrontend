@@ -12,9 +12,10 @@
   function render(el) {
     el.innerHTML = `<div class="page-header"><div><h1>Prescriptions</h1><p>Record prescriptions, have a pharmacist review them, then dispense at the till.</p></div>
       <div class="flex" style="gap:var(--space-2);flex-wrap:wrap">
-        <a class="btn btn-secondary" href="sales.html" data-requires-permission="sales.create">${window.Icons.get('sales')} Dispense at till</a>
+        <a class="btn btn-secondary" href="sales.html?desk=rx" data-requires-permission="sales.create">${window.Icons.get('pill')} Dispense a prescription</a>
         <button class="btn btn-primary" id="ph-new-rx" data-requires-permission="prescriptions.intake">${window.Icons.get('plus')} New prescription</button></div></div><div id="ph-host"></div>`;
     el.querySelector('#ph-new-rx').addEventListener('click', () => intake());
+    if (params.get('new') === '1' && P.can('prescriptions.intake')) intake(params.get('patient'));
     P.tabs(el.querySelector('#ph-host'), [
       { key: 'all', label: 'Prescriptions', perm: 'prescriptions.view', render: (h) => rxTab(h, false) },
       { key: 'review', label: 'Awaiting review', perm: 'prescriptions.review', render: (h) => rxTab(h, true) },
@@ -35,7 +36,7 @@
         { label: 'Valid until', render: (r) => P.date(r.validUntil) },
         { label: 'Status', render: (r) => P.badge(r.status) },
       ],
-      rowActions: () => K.btn('open', 'Open'),
+      rowActions: (r) => K.btn('open', 'Open') + (['VALIDATED', 'PARTIALLY_DISPENSED'].includes(r.status) && P.can('sales.create') ? ` <a class="btn btn-primary btn-sm" href="sales.html?desk=rx&rx=${esc(r._id)}">Dispense</a>` : ''),
       onAction: (a, r) => open(r._id),
       emptyText: pending ? 'Nothing waiting for review' : 'No prescriptions yet', emptyMessage: pending ? '' : 'Record a prescription when a patient brings one in.', emptyIcon: 'clipboard',
     });
@@ -65,7 +66,7 @@
           ${isOpen && P.can('prescriptions.intake') ? '<button class="btn btn-ghost" data-act="cancel" style="color:var(--color-danger)">Cancel prescription</button>' : ''}
           ${isOpen && P.can('prescriptions.review') ? '<button class="btn btn-secondary" data-act="intervene">Record intervention</button>' : ''}
           ${rx.status === 'RECEIVED' && P.can('prescriptions.review') ? '<button class="btn btn-secondary" data-act="reject">Reject</button><button class="btn btn-primary" data-act="validate">Validate</button>' : ''}
-          ${['VALIDATED', 'PARTIALLY_DISPENSED'].includes(rx.status) && P.can('sales.create') ? '<a class="btn btn-primary" href="sales.html">Dispense at till</a>' : ''}
+          ${['VALIDATED', 'PARTIALLY_DISPENSED'].includes(rx.status) && P.can('sales.create') ? '<a class="btn btn-primary" href="sales.html?desk=rx&rx=${esc(rx._id)}">Dispense now</a>' : ''}
           <button class="btn btn-secondary" data-act="close">Close</button>`,
       });
       modal.querySelector('[data-act="close"]').addEventListener('click', () => window.UI.closeModal());
@@ -113,7 +114,7 @@
     });
   }
 
-  function intake() {
+  function intake(patientId) {
     const st = { patient: null, lines: [{}] };
     const today = P.day(new Date());
     const modal = window.UI.openModal({
@@ -164,6 +165,7 @@
       host.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => { st.lines.splice(Number(b.dataset.rm), 1); paintLines(); }));
     };
     paintLines();
+    if (patientId && P.can('patients.view')) window.Api.get(`/pharmacy/patients/${patientId}`).then(({ data }) => { st.patient = data.patient; paintPatient(); }).catch(() => {});
     modal.querySelector('#rx-add-line').addEventListener('click', () => { st.lines.push({}); paintLines(); });
     modal.querySelector('[data-act="cancel"]').addEventListener('click', () => window.UI.closeModal());
     const save = modal.querySelector('[data-act="save"]');

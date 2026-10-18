@@ -18,7 +18,7 @@
     clothing:     { label: 'Clothing & fashion', icon: 'tag',       blurb: 'Sizes and colours as product variants.' },
     hardware:     { label: 'Hardware',           icon: 'wrench',    blurb: 'Units like bags and metres, quotations, deliveries.' },
     cosmetics:    { label: 'Cosmetics & beauty', icon: 'layers',    blurb: 'Shades, batches with expiry, recalls.' },
-    restaurant:   { label: 'Restaurant & café',  icon: 'store',     blurb: 'Tables, kitchen screen, recipes.' },
+    restaurant:   { label: 'Restaurant, café & rooms', icon: 'utensils', blurb: 'Tables, kitchen screen, recipes, reservations and optional rooms & stays.' },
     general_shop: { label: 'General shop',       icon: 'bag',       blurb: 'Simple selling and stock. The standard setup.' },
     wholesale:    { label: 'Wholesale',          icon: 'truck',     blurb: 'Wholesale prices, credit, multiple warehouses.' },
     garage:       { label: 'Garage / workshop',  icon: 'car',       blurb: 'Vehicles, job cards and quotations.' },
@@ -43,9 +43,13 @@
     wholesalePricing:      { label: 'Wholesale pricing',        group: 'Selling',    ready: true,  desc: 'Set a minimum order quantity and a wholesale price per product. The till switches to it automatically.' },
     customerCredit:        { label: 'Customer credit',          group: 'Selling',    ready: true,  desc: 'Let trusted customers buy on credit.' },
     loyaltyProgram:        { label: 'Loyalty programme',        group: 'Selling',    ready: false, desc: 'Reward repeat customers with points.' },
-    tableManagement:       { label: 'Tables',                   group: 'Restaurant', ready: false, desc: 'Open orders against tables.' },
-    kitchenDisplay:        { label: 'Kitchen screen',           group: 'Restaurant', ready: false, desc: 'Send orders to a kitchen display.' },
-    recipeManagement:      { label: 'Recipes',                  group: 'Restaurant', ready: false, desc: 'Deduct ingredients when a dish is sold.' },
+    restaurantOrdering:    { label: 'Restaurant ordering',      group: 'Restaurant', ready: true,  desc: 'The restaurant module: take orders, send them to the kitchen, bill and pay. Switch this off and no restaurant screen works.' },
+    tableManagement:       { label: 'Tables',                   group: 'Restaurant', ready: true,  desc: 'Open orders against tables and see the floor at a glance.', requires: ['restaurantOrdering'] },
+    kitchenDisplay:        { label: 'Kitchen screen',           group: 'Restaurant', ready: true,  desc: 'Send orders to a kitchen / bar screen with tickets and timers.', requires: ['restaurantOrdering'] },
+    recipeManagement:      { label: 'Recipes & ingredients',    group: 'Restaurant', ready: true,  desc: 'Deduct ingredients when a dish is sold; track food cost and waste.', requires: ['restaurantOrdering'] },
+    reservations:          { label: 'Reservations',             group: 'Restaurant', ready: true,  desc: 'Book tables ahead, take deposits and manage the waiting list.', requires: ['restaurantOrdering'] },
+    guestQrOrdering:       { label: 'Guest QR ordering',        group: 'Restaurant', ready: true,  desc: 'QR codes on tables and rooms: guests see the menu, order and call a waiter.' },
+    accommodation:         { label: 'Rooms & stays',            group: 'Accommodation', ready: true, desc: 'Rooms, bookings, check-in / check-out, guest folios and housekeeping.' },
     pharmacyDispensing:    { label: 'Dispensing',               group: 'Pharmacy',   ready: true,  desc: 'Medicine records, patients, prescriptions, the dispensing register, labels and the pharmacy desk. Switching this on opens the whole pharmacy module.' },
     prescriptionManagement:{ label: 'Prescriptions',            group: 'Pharmacy',   ready: true,  desc: 'Record prescriptions, have a pharmacist review them, and dispense against them at the till.' },
     restrictedProductControl:{ label: 'Restricted products',    group: 'Pharmacy',   ready: true,  desc: 'Control who may sell prescription-only and controlled medicines (credentials, countersign, Poisons Book).' },
@@ -53,7 +57,7 @@
     quarantineManagement:  { label: 'Quarantine',               group: 'Quality',    ready: true,  desc: 'Hold suspect stock so it cannot be sold.' },
   };
 
-  const GROUP_ORDER = ['Stock', 'After-sales', 'Garage', 'Selling', 'Restaurant', 'Pharmacy', 'Quality'];
+  const GROUP_ORDER = ['Stock', 'After-sales', 'Garage', 'Selling', 'Restaurant', 'Accommodation', 'Pharmacy', 'Quality'];
 
   // Mirrors backend BUSINESS_FEATURE_DEFAULTS / LOCKED_ON.
   const DEFAULTS = {
@@ -62,7 +66,7 @@
     clothing: ['productVariants', 'loyaltyProgram'],
     hardware: ['unitConversions', 'quotationManagement', 'deliveryManagement'],
     cosmetics: ['expiryTracking', 'batchTracking', 'productVariants', 'loyaltyProgram', 'quarantineManagement', 'recallManagement'],
-    restaurant: ['tableManagement', 'kitchenDisplay', 'recipeManagement', 'batchTracking'],
+    restaurant: ['restaurantOrdering', 'tableManagement', 'kitchenDisplay', 'recipeManagement', 'reservations', 'guestQrOrdering', 'batchTracking'],
     general_shop: [],
     wholesale: ['wholesalePricing', 'unitConversions', 'quotationManagement', 'deliveryManagement', 'multiWarehouse', 'customerCredit'],
     garage: ['vehicleManagement', 'jobCards', 'quotationManagement'],
