@@ -1,5 +1,6 @@
 /**
- * alerts.js - ONE place where the owner decides which alerts the business uses.
+ * alerts.js - the "Alerts" tab of the SMS & Alerts page (sms.html). Exposes window.AlertsPanel.mount(container, { goto }).
+ * ONE place where the owner decides which alerts the business uses.
  *
  *  - In-app notifications (free): low stock, out of stock, expiry watch (daily).
  *  - Texts to the owner (SMS credits): low stock summary, expiry summary.
@@ -17,11 +18,10 @@
   const can = (p) => window.Permissions.can(user(), p);
   const feat = (...k) => !!(window.AppShell.hasFeature && window.AppShell.hasFeature(...k));
 
-  let root;
-  const S = { prefs: null, sms: null, smsError: '', editable: false, recent: null };
+  const S = { goto: null, prefs: null, sms: null, smsError: '', editable: false, recent: null };
   const BLOCKER_TEXT = {
-    NO_CREDITS: 'You have no SMS credits, so texts will not send. Buy credits on the SMS page.',
-    NO_SENDER_ID: 'No Sender ID is available yet. Apply for your own on the SMS page or contact support.',
+    NO_CREDITS: 'You have no SMS credits, so texts will not send. Buy credits in the Buy SMS tab.',
+    NO_SENDER_ID: 'No Sender ID is available yet. Apply for your own in the Sender ID tab or contact support.',
     ALERTS_PAUSED: 'SMS alerts are temporarily paused by the platform. They will resume automatically.',
   };
   const PURPOSE = { READY: 'Ready for collection', READY_REMINDER: 'Not collected', SERVICE_DUE: 'Service due', SERVICE_OVERDUE: 'Service overdue', WARRANTY_EXPIRING: 'Warranty ending', INSURANCE_EXPIRING: 'Insurance ending', LAYAWAY_DUE: 'Layaway due', LAYAWAY_OVERDUE: 'Layaway overdue', EXPIRY_DIGEST: 'Expiry text', LOW_STOCK_DIGEST: 'Low stock text', OWNER_TEST: 'Test text' };
@@ -91,21 +91,23 @@
   ];
 
   /* --------------------------- page --------------------------- */
-  document.addEventListener('DOMContentLoaded', async () => {
-    root = window.AppShell.mount({ title: 'Alerts' });
-    if (!root) return;
+  async function mount(container, opts = {}) {
+    S.goto = typeof opts.goto === 'function' ? opts.goto : (tab) => { window.location.href = `sms.html?tab=${tab}`; };
     injectStyles();
-    root.innerHTML = `
-      <div class="page-header"><div><h1>Alerts</h1><p>Choose which alerts your business uses and how you are told. Notifications in the app are free. Texts use SMS credits.</p></div></div>
+    container.innerHTML = `
+      <p class="text-secondary text-sm" style="margin:0 0 var(--space-4)">Choose which alerts your business uses and how you are told. Notifications in the app are free. Texts use SMS credits.</p>
       <div id="al-root"><p class="text-muted">Loading…</p></div>`;
     await (window.AppShell.whenProfileReady ? window.AppShell.whenProfileReady() : Promise.resolve());
     S.editable = can('settings.update');
     await load();
     render();
-  });
+  }
+
+  window.AlertsPanel = { mount, current: () => S.sms };
 
   function injectStyles() {
-    const st = document.createElement('style');
+    if (document.getElementById('al-styles')) return;
+    const st = document.createElement('style'); st.id = 'al-styles';
     st.textContent = `
       .al-group-title{margin:var(--space-6) 0 var(--space-3);font-size:var(--text-sm);text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-secondary)}
       .al-item{border-bottom:1px solid var(--color-border)}
@@ -199,7 +201,8 @@
     : (sms.blockers || []).map((k) => `<div class="text-xs" style="color:var(--color-warning);margin-top:4px">${esc(BLOCKER_TEXT[k] || k)}</div>`).join('')}</div>
         <div class="al-actions">
           ${S.editable && sms.ready ? '<button type="button" class="btn btn-secondary btn-sm" data-action="send-test">Send me a test text</button>' : ''}
-          <a class="btn btn-secondary btn-sm" href="sms.html">SMS credits &amp; Sender ID</a>
+          <button type="button" class="btn btn-secondary btn-sm" data-goto="buy">Buy SMS credits</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-goto="senderid">Sender ID</button>
         </div>
       </div></div>` : '';
 
@@ -288,6 +291,7 @@
     host.querySelector('[data-action="run-expiry"]')?.addEventListener('click', (e) => runExpiry(e.currentTarget));
     host.querySelector('[data-action="send-lowstock"]')?.addEventListener('click', (e) => sendLowStock(e.currentTarget));
     host.querySelector('[data-action="send-test"]')?.addEventListener('click', (e) => sendTest(e.currentTarget));
+    host.querySelectorAll('[data-goto]').forEach((x) => x.addEventListener('click', () => S.goto(x.dataset.goto)));
   }
 
   function previewAll(item) { item.querySelectorAll('textarea[data-kind]').forEach(preview); }
@@ -380,7 +384,7 @@
       if (r.queued) window.UI.toast.success(`Text queued: ${data.summary.low} low, ${data.summary.out} out of stock.`);
       else if (r.reason === 'DISABLED') window.UI.toast.error('Switch this alert on and save it first.');
       else if (r.reason === 'NOTHING') window.UI.toast.success('Nothing is low or out of stock right now.');
-      else if (r.reason === 'NO_CREDITS') window.UI.toast.error('Not enough SMS credits. Top up on the SMS page.');
+      else if (r.reason === 'NO_CREDITS') window.UI.toast.error('Not enough SMS credits. Top up in the Buy SMS tab.');
       else if (r.reason === 'NO_SENDER_ID') window.UI.toast.error(BLOCKER_TEXT.NO_SENDER_ID);
       else if (r.reason === 'ALERTS_PAUSED') window.UI.toast.error(BLOCKER_TEXT.ALERTS_PAUSED);
       else if (r.reason === 'DUPLICATE') window.UI.toast.warning('A text was already sent in the last hour. Try again later.');

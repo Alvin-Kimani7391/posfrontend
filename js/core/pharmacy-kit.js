@@ -106,18 +106,20 @@
   /** res = POST /pharmacy/dispensings/:id/label */
   function printLabels(res) {
     const ph = res.pharmacy || {};
+    // The label is for the patient: it follows the language the screen is in (Kiswahili or English).
+    const T = (t) => { try { return window.I18n && window.I18n.t ? window.I18n.t(t) : t; } catch { return t; } };
     const html = (res.labels || []).map((l) => `
       <div class="lab">
         <div class="ph"><strong>${esc(ph.name || '')}</strong>${ph.phone ? ` · ${esc(ph.phone)}` : ''}${ph.address ? `<br>${esc(typeof ph.address === 'string' ? ph.address : Object.values(ph.address).filter(Boolean).join(', '))}` : ''}</div>
-        <div><strong>${esc(res.patientName || '')}</strong> · ${esc(date(res.date))}${res.reprint ? ' <span class="reprint">Reprint</span>' : ''}</div>
+        <div><strong>${esc(res.patientName || '')}</strong> · ${esc(date(res.date))}${res.reprint ? ` <span class="reprint">${T('Reprint')}</span>` : ''}</div>
         <h4>${esc(l.medicine)} ${esc(l.strength || '')} ${esc(l.dosageForm || '')}</h4>
-        <div>Qty: <strong>${esc(qty(l.quantity))}</strong></div>
-        <div class="dir">${esc(l.directions || 'As directed by your prescriber')}</div>
-        <div class="meta"><span>${(l.batches || []).map((b) => `Batch ${esc(b.batchNumber)}${b.expiryDate ? ` · Exp ${esc(date(b.expiryDate))}` : ''}`).join('; ') || ''}</span><span>${esc(res.dispensingNumber || '')}</span></div>
-        <div class="meta"><span>Dispensed by ${esc((res.dispensedBy || {}).name || '')}${(res.dispensedBy || {}).registrationNumber ? ` (${esc(res.dispensedBy.registrationNumber)})` : ''}</span></div>
-        <div class="meta"><span>Keep out of reach of children</span></div>
+        <div>${T('Qty:')} <strong>${esc(qty(l.quantity))}</strong></div>
+        <div class="dir">${esc(l.directions || T('As directed by your prescriber'))}</div>
+        <div class="meta"><span>${(l.batches || []).map((b) => `${T('Batch')} ${esc(b.batchNumber)}${b.expiryDate ? ` · ${T('Exp')} ${esc(date(b.expiryDate))}` : ''}`).join('; ') || ''}</span><span>${esc(res.dispensingNumber || '')}</span></div>
+        <div class="meta"><span>${T('Dispensed by')} ${esc((res.dispensedBy || {}).name || '')}${(res.dispensedBy || {}).registrationNumber ? ` (${esc(res.dispensedBy.registrationNumber)})` : ''}</span></div>
+        <div class="meta"><span>${T('Keep out of reach of children')}</span></div>
       </div>`).join('');
-    printHtml(`Labels ${res.dispensingNumber || ''}`, html || '<p>Nothing to print</p>');
+    printHtml(`${T('Labels')} ${res.dispensingNumber || ''}`, html || `<p>${T('Nothing to print')}</p>`);
   }
 
   /** Search-and-choose modal. fetch(term) -> [{ html, value }]. Returns the modal element. */

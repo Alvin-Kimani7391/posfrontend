@@ -11,6 +11,14 @@
   const esc = (s) => window.UI.escapeHtml(String(s == null ? '' : s));
   const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
   const BUSINESS_ID_RE = /^[a-f0-9]{24}$/i;
+  const svg = (d, w = 18) => `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const ICON = {
+    check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 34),
+    cross: svg('<path d="M6 6l12 12M18 6L6 18"/>', 34),
+    bang: svg('<path d="M12 6v7"/><path d="M12 17.5v.01"/>', 34),
+    alert: svg('<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/>', 18),
+    shield: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>', 14),
+  };
   const pending = { token: new URLSearchParams(location.search).get('t') || '' };
 
   const money = (n, cur) => window.UI.formatMoney(Number(n) || 0, cur === 'TZS' ? 'TZS' : 'KES');
@@ -28,7 +36,8 @@
     const el = $('vf-session'); const u = window.Storage.getUser();
     if (!loggedIn() || !u) { el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
-    el.innerHTML = `<span>${esc(u.name || 'Signed in')}</span><a class="btn btn-ghost btn-sm" href="dashboard.html">POS</a><button class="btn btn-ghost btn-sm" id="vf-out" type="button">Sign out</button>`;
+    const ini = String(u.name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+    el.innerHTML = `<div class="vf-avatar" aria-hidden="true">${esc(ini)}</div><div class="vf-who"><b>${esc(u.name || 'Signed in')}</b><span>${esc(String(u.role || '').toLowerCase())}</span></div><a class="vf-link hide-sm" href="dashboard.html">POS</a><button class="vf-link" id="vf-out" type="button">Sign out</button>`;
     $('vf-out').addEventListener('click', async () => {
       try { await window.Api.post('/auth/logout', undefined, { background: true }); } catch { /* clear locally anyway */ }
       window.Storage.clearSession();
@@ -37,7 +46,7 @@
   }
 
   /* ------------------------------ sign in ------------------------------ */
-  function loginAlert(msg) { $('vf-login-alert').innerHTML = msg ? `<div class="form-alert form-alert-error"><span>${esc(msg)}</span></div>` : ''; }
+  function loginAlert(msg) { $('vf-login-alert').innerHTML = msg ? `<div class="vf-err" role="alert">${ICON.alert}<span>${esc(msg)}</span></div>` : ''; }
   function onLogin(data) {
     window.Storage.setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
     window.Storage.setUser(data.user);
@@ -45,8 +54,8 @@
     start();
   }
   function setupLogin() {
-    document.querySelectorAll('#vf-login .tab-btn').forEach((b) => b.addEventListener('click', () => {
-      document.querySelectorAll('#vf-login .tab-btn').forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('#vf-login .vf-seg button').forEach((b) => b.addEventListener('click', () => {
+      document.querySelectorAll('#vf-login .vf-seg button').forEach((x) => x.classList.toggle('active', x === b));
       show('vf-pw-form', b.dataset.tab === 'password'); show('vf-pin-form', b.dataset.tab === 'pin'); loginAlert('');
     }));
     $('vf-pw-form').addEventListener('submit', async (e) => {
@@ -108,55 +117,80 @@
   };
 
   function showResult(data) {
-    const root = $('vf-result-root'); const r = data.receipt || {};
-    let cls = 'vf-ok'; let mark = '✓'; let title = 'RECEIPT CONFIRMED'; let sub = 'Legit - this receipt matches a real sale in your system.';
-    if (data.verdict === 'FAKE') { cls = 'vf-bad'; mark = '✕'; title = 'FAKE RECEIPT'; sub = data.typed ? 'No sale matches that receipt number.' : 'This QR code matches no sale in your system. Do NOT release the goods.'; }
-    else if (data.status === 'CANCELLED') { cls = 'vf-bad'; mark = '✕'; title = 'SALE CANCELLED'; sub = 'This sale was cancelled - the receipt is no longer valid. Do NOT release the goods.'; }
-    else if (data.status === 'REFUNDED') { cls = 'vf-bad'; mark = '!'; title = 'FULLY REFUNDED'; sub = 'The whole sale was refunded. Do NOT release the goods.'; }
-    else if (data.status === 'PARTLY_REFUNDED' || data.status === 'UNPAID_BALANCE') { cls = 'vf-warn'; mark = '!'; title = 'RECEIPT CONFIRMED'; sub = 'The receipt is real, but read the notices below.'; }
-
-    const alerts = [];
-    (data.warnings || []).forEach((w) => { if (WARN_TEXT[w]) alerts.push(`<div class="vf-alert warn">${esc(WARN_TEXT[w])}</div>`); });
-    if (data.verdict !== 'FAKE' && data.scan && data.scan.previousCount > 0) {
-      alerts.push(`<div class="vf-alert warn"><strong>Already checked ${esc(data.scan.previousCount)} time${data.scan.previousCount === 1 ? '' : 's'} before</strong>${data.scan.lastScannedAt ? ` (last: ${esc(window.UI.formatDateTime(data.scan.lastScannedAt))})` : ''}. If this customer is collecting goods again, the receipt may be re-used.</div>`);
+    const root = $('vf-result-root'); const r = data.receipt || {}; const cur = r.currency;
+    const u = window.Storage.getUser() || {};
+    let cls = 'vf-ok'; let icon = ICON.check; let chip = 'Verified'; let title = 'Receipt confirmed'; let sub = 'This receipt matches a real sale recorded in your system.';
+    let stop = false;
+    if (data.verdict === 'FAKE') {
+      cls = 'vf-bad'; icon = ICON.cross; chip = 'Not recognised'; title = 'Fake receipt'; stop = true;
+      sub = data.typed ? 'No sale matches that receipt number.' : 'This QR code does not match any sale in your system.';
+    } else if (data.status === 'CANCELLED') {
+      cls = 'vf-bad'; icon = ICON.cross; chip = 'Void'; title = 'Sale cancelled'; stop = true; sub = 'This sale was cancelled, so the receipt is no longer valid.';
+    } else if (data.status === 'REFUNDED') {
+      cls = 'vf-bad'; icon = ICON.bang; chip = 'Void'; title = 'Fully refunded'; stop = true; sub = 'The whole sale was refunded, so the goods are not owed to the customer.';
+    } else if (data.status === 'PARTLY_REFUNDED' || data.status === 'UNPAID_BALANCE') {
+      cls = 'vf-warn'; icon = ICON.bang; chip = 'Check details'; title = 'Receipt confirmed'; sub = 'The receipt is real, but please read the notices below before releasing goods.';
     }
 
-    let details = '';
-    if (data.verdict !== 'FAKE') {
-      const cur = r.currency;
-      details = `
-        <div class="vf-card"><dl class="vf-kv">
-          <dt>Receipt no.</dt><dd>${esc(r.receiptNumber)}</dd>
-          ${r.invoiceNumber ? `<dt>Invoice no.</dt><dd>${esc(r.invoiceNumber)}</dd>` : ''}
-          <dt>Time of sale</dt><dd>${esc(window.UI.formatDateTime(r.soldAt))}${r.offline ? ' <span class="text-xs text-muted">(made offline)</span>' : ''}</dd>
+    const notes = [];
+    (data.warnings || []).forEach((w) => { if (WARN_TEXT[w]) notes.push(`<div class="vf-note">${ICON.alert}<div>${esc(WARN_TEXT[w])}</div></div>`); });
+    if (data.verdict !== 'FAKE' && data.scan && data.scan.previousCount > 0) {
+      const n = data.scan.previousCount;
+      notes.push(`<div class="vf-note">${ICON.alert}<div><b>Checked ${esc(n)} time${n === 1 ? '' : 's'} before.</b>${data.scan.lastScannedAt ? ` Last on ${esc(window.UI.formatDateTime(data.scan.lastScannedAt))}.` : ''} If this customer is collecting goods again, the receipt may be getting re-used.</div></div>`);
+    }
+
+    let body = '';
+    if (data.verdict === 'FAKE') {
+      body = `<div class="vf-paper" style="padding:6px 18px"><div class="vf-sec" style="padding-left:0">What to do</div><ol class="vf-steps">
+        <li><span>Do not release the goods.</span></li>
+        <li><span>Ask the customer to wait and call the manager or owner.</span></li>
+        <li><span>The owner has been alerted automatically and this scan is saved in the audit log.</span></li></ol></div>`;
+    } else {
+      const method = (m) => String(m || '').replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
+      body = `<div class="vf-paper">
+        <div class="vf-paper-head"><div><div class="biz">${esc(r.business || 'Receipt')}${r.branch ? ` · ${esc(r.branch)}` : ''}</div><div class="no">${esc(r.receiptNumber)}</div></div>
+          <div class="amt"><span>Total</span><b>${esc(money(r.total, cur))}</b></div></div>
+        <div class="vf-tear"></div>
+        <dl class="vf-dl">
+          <dt>Time of sale</dt><dd>${esc(window.UI.formatDateTime(r.soldAt))}${r.offline ? ' <small>(made offline)</small>' : ''}</dd>
           <dt>Served by</dt><dd>${esc(r.cashier || '—')}</dd>
           <dt>Till</dt><dd>${esc(r.till || '—')}</dd>
-          <dt>Branch</dt><dd>${esc(r.branch || '—')}</dd>
+          ${r.invoiceNumber ? `<dt>Invoice no.</dt><dd>${esc(r.invoiceNumber)}</dd>` : ''}
           ${r.customer ? `<dt>Customer</dt><dd>${esc(r.customer)}</dd>` : ''}
-          ${r.saleStatus === 'CANCELLED' && r.cancelReason ? `<dt>Cancelled</dt><dd>${esc(r.cancelReason)}</dd>` : ''}
-        </dl></div>
-        <div class="vf-card"><h2>Products</h2>
-          <table class="vf-items"><thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead><tbody>
-          ${(r.items || []).map((i) => `<tr><td>${esc(i.name)}<div class="text-xs text-muted">@ ${esc(money(i.unitPrice, cur))}</div></td><td class="r">${esc(i.quantity)}</td><td class="r">${esc(money(i.total, cur))}</td></tr>`).join('')}
-          </tbody></table>
-          <div style="margin-top:var(--space-3)">
-            ${r.tax ? `<div class="vf-sum"><span>VAT / tax</span><span>${esc(money(r.tax, cur))}</span></div>` : ''}
-            <div class="vf-sum total"><span>Total</span><span>${esc(money(r.total, cur))}</span></div>
-            ${(r.payments || []).map((p) => `<div class="vf-sum"><span>Paid by ${esc(String(p.method || '').replace('_', ' ').toLowerCase())}</span><span>${esc(money(p.amount, cur))}</span></div>`).join('')}
-            ${Number(r.balance) > 0 ? `<div class="vf-sum" style="color:var(--color-danger);font-weight:600"><span>Balance owed</span><span>${esc(money(r.balance, cur))}</span></div>` : ''}
-          </div>
-        </div>`;
+          ${r.saleStatus === 'CANCELLED' && r.cancelReason ? `<dt>Reason</dt><dd>${esc(r.cancelReason)}</dd>` : ''}
+        </dl>
+        <div class="vf-tear"></div>
+        <div class="vf-sec">Products</div>
+        <table class="vf-items"><tbody>
+          ${(r.items || []).map((i) => `<tr><td>${esc(i.name)}<span class="u">${esc(money(i.unitPrice, cur))} each</span></td><td class="q">× ${esc(i.quantity)}</td><td>${esc(money(i.total, cur))}</td></tr>`).join('')}
+        </tbody></table>
+        <div class="vf-sums">
+          ${r.tax ? `<div class="vf-sum"><span>VAT included</span><span>${esc(money(r.tax, cur))}</span></div>` : ''}
+          <div class="vf-sum total"><span>Total</span><span>${esc(money(r.total, cur))}</span></div>
+          ${(r.payments || []).map((p) => `<div class="vf-sum"><span>${esc(method(p.method))}</span><span>${esc(money(p.amount, cur))}</span></div>`).join('')}
+          ${Number(r.balance) > 0 ? `<div class="vf-sum owed"><span>Balance owed</span><span>${esc(money(r.balance, cur))}</span></div>` : ''}
+        </div></div>
+        <div class="vf-audit">${ICON.shield}<span>Checked by ${esc(u.name || 'staff')} · ${esc(window.UI.formatDateTime(new Date()))}</span></div>`;
     }
+
     root.innerHTML = `
-      <div class="vf-result ${cls}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-        <div class="vf-banner"><div class="vf-mark" aria-hidden="true">${mark}</div><h2>${esc(title)}</h2><p>${esc(sub)}</p></div>
-        <div class="vf-body-wrap">${alerts.join('')}${details}</div>
-        <div class="vf-foot"><button class="btn btn-primary" id="vf-next" type="button">Scan next receipt</button><button class="btn btn-secondary" id="vf-close" type="button">Close</button></div>
+      <div class="vf-backdrop" id="vf-backdrop">
+        <div class="vf-sheet ${cls}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+          <div class="vf-scroll">
+            <div class="vf-status"><div class="vf-seal">${icon}</div><div class="vf-chip">${esc(chip)}</div><h2>${esc(title)}</h2><p>${esc(sub)}</p></div>
+            <div class="vf-pad">${notes.join('')}${body}</div>
+          </div>
+          <div class="vf-foot"><button class="vf-btn" id="vf-next" type="button">Scan next receipt</button><button class="vf-btn quiet" id="vf-close" type="button">Close</button></div>
+        </div>
       </div>`;
     document.body.style.overflow = 'hidden';
-    const close = () => { root.innerHTML = ''; document.body.style.overflow = ''; };
+    const close = () => { root.innerHTML = ''; document.body.style.overflow = ''; document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
     $('vf-close').addEventListener('click', close);
+    $('vf-backdrop').addEventListener('click', (e) => { if (e.target.id === 'vf-backdrop') close(); });
     $('vf-next').addEventListener('click', () => { close(); scan(); });
+    $('vf-next').focus();
   }
 
   function scan() {

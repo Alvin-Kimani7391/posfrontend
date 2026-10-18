@@ -45,6 +45,11 @@
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function isMobile() { return window.matchMedia && window.matchMedia('(max-width: 640px)').matches; }
   function reduceMotion() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  /** Kiswahili for tour text: exact match on the English step text (see js/core/i18n-sw.js); English when there is none. */
+  function T(text) {
+    try { if (window.I18n && window.I18n.lang && window.I18n.lang() === 'sw' && window.I18n.t) return window.I18n.t(text); } catch (e) { /* keep English */ }
+    return text;
+  }
   function toast(kind, msg) { try { window.UI.toast[kind](msg); } catch (e) { /* ignore */ } }
 
   function visible(el) {
@@ -713,7 +718,7 @@
     }
     var nextLabel = last ? (opts.finishLabel || 'Done') : 'Next';
     var hint = run.interactive
-      ? '<div class="tour-try"><span class="tour-try-dot"></span>' + esc(s.tryText || 'Try it: tap the highlighted area.') + '</div>' : '';
+      ? '<div class="tour-try"><span class="tour-try-dot"></span>' + esc(T(s.tryText || 'Try it: tap the highlighted area.')) + '</div>' : '';
 
     var meta = '';
     if (opts.full) {
@@ -724,8 +729,8 @@
 
     ui.card.innerHTML =
       '<button type="button" class="tour-x" data-t="close" aria-label="Close tour">' + SVG_X + '</button>' +
-      '<h3 class="tour-title" id="tour-title">' + s.title + '</h3>' +
-      '<div class="tour-body">' + s.body + '</div>' + hint +
+      '<h3 class="tour-title" id="tour-title">' + T(s.title) + '</h3>' +
+      '<div class="tour-body">' + T(s.body) + '</div>' + hint +
       '<div class="tour-foot"><div class="tour-dots">' + dots + '</div><div class="tour-actions">' +
       (i > 0 ? '<button type="button" class="btn btn-ghost btn-sm" data-t="back">Back</button>' : '') +
       '<button type="button" class="btn btn-primary btn-sm" data-t="next">' + esc(nextLabel) + '</button></div></div>' + meta;

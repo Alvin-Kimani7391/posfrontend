@@ -1,5 +1,6 @@
 /**
- * sms.js - SMS Marketing for shop owners. Tabs: Overview | Sender ID | Buy SMS | New campaign | Campaigns.
+ * sms.js - SMS & Alerts for shop owners. Tabs: Overview | Alerts | Sender ID | Buy SMS | New campaign | Campaigns.
+ * The Alerts tab is js/pages/alerts.js (window.AlertsPanel).
  * Customers/segments come from the CRM; payments go through the same PayHero account as Billing.
  */
 (function () {
@@ -16,32 +17,34 @@
   const when = (d) => (d ? window.UI.formatDateTime(d) : '-');
   const toastErr = (e) => window.UI.toast.error((e && e.message) || 'Something went wrong');
 
-  const TABS = [['overview', 'Overview'], ['senderid', 'Sender ID'], ['buy', 'Buy SMS'], ['compose', 'New campaign'], ['history', 'Campaigns']];
-  const S = { tab: 'overview', data: null, segments: [], templates: [], offer: null, poll: null, segment: '' };
+  const TABS = [['overview', 'Overview'], ['alerts', 'Alerts'], ['senderid', 'Sender ID'], ['buy', 'Buy SMS'], ['compose', 'New campaign'], ['history', 'Campaigns']];
+  const S = { tab: 'overview', alerts: null, data: null, segments: [], templates: [], offer: null, poll: null, segment: '' };
   let el; let user; let can = {};
+  const tabsFor = () => TABS.filter(([k]) => (k === 'alerts' ? can.alerts : can.view));
 
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
-    el = window.AppShell.mount({ title: 'SMS Marketing' });
+    el = window.AppShell.mount({ title: 'SMS & Alerts' });
     if (!el) return;
     user = window.AppShell.getUser();
     const P = (k) => window.Permissions.can(user, k);
-    can = { view: P('reports.view'), send: P('customers.update'), pay: P('billing.pay') };
-    if (!can.view) {
-      el.innerHTML = `<div class="card">${window.UI.emptyStateHtml({ icon: 'alert', title: 'No access', message: 'SMS marketing is limited to managers and owners.' })}</div>`;
+    can = { view: P('reports.view'), alerts: P('settings.view'), send: P('customers.update'), pay: P('billing.pay') };
+    if (!can.view && !can.alerts) {
+      el.innerHTML = `<div class="card">${window.UI.emptyStateHtml({ icon: 'alert', title: 'No access', message: 'SMS and alerts are limited to managers and owners.' })}</div>`;
       return;
     }
     const q = new URLSearchParams(window.location.search);
-    if (TABS.some((t) => t[0] === q.get('tab'))) S.tab = q.get('tab');
+    S.tab = tabsFor()[0][0];
+    if (tabsFor().some((t) => t[0] === q.get('tab'))) S.tab = q.get('tab');
     S.segment = q.get('segment') || '';
 
     el.innerHTML = `
       <div class="page-header">
-        <div><h1>SMS Marketing</h1><p>Register your Sender ID, buy SMS credits and message your CRM customers.</p></div>
+        <div><h1>SMS &amp; Alerts</h1><p>Automatic alerts to you and your customers, SMS credits, Sender ID and marketing campaigns, all in one place.</p></div>
         <div class="page-actions"><button class="btn btn-secondary btn-sm" id="sms-refresh">Refresh</button></div>
       </div>
-      <div class="tabs" id="sms-tabs" style="margin-bottom:var(--space-5)">${TABS.map(([k, l]) => `<button class="tab-btn" data-tab="${k}">${l}</button>`).join('')}</div>
+      <div class="tabs" id="sms-tabs" style="margin-bottom:var(--space-5)">${tabsFor().map(([k, l]) => `<button class="tab-btn" data-tab="${k}">${l}</button>`).join('')}</div>
       <div id="sms-body"></div>`;
     $('sms-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) show(b.dataset.tab); });
     $('sms-refresh').addEventListener('click', load);
@@ -53,12 +56,15 @@
     stopPoll();
     $('sms-body').innerHTML = window.UI.skeletonRows(3, 1);
     try {
-      const [ov, seg, tpl] = await Promise.all([
+      if (!can.view) { show(S.tab); return; } // alerts-only access: nothing else to load
+      const [ov, seg, tpl, al] = await Promise.all([
         Api.get('/sms/overview'),
         Api.get('/crm/segments').catch(() => ({ data: { items: [] } })),
         Api.get('/sms/templates').catch(() => ({ data: [] })),
+        can.alerts ? Api.get('/sms-alerts/settings').catch(() => null) : Promise.resolve(null),
       ]);
       S.data = ov.data; S.segments = (seg.data && seg.data.items) || []; S.templates = tpl.data || [];
+      S.alerts = al && al.data ? al.data : null;
       show(S.tab);
     } catch (err) {
       $('sms-body').innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load SMS', message: err.message });
@@ -68,11 +74,25 @@
   function show(t) {
     stopPoll(); S.tab = t;
     document.querySelectorAll('#sms-tabs .tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
+    if (t === 'alerts') { window.AlertsPanel.mount($('sms-body'), { goto: show }); return; }
+    if (window.AlertsPanel && window.AlertsPanel.current()) S.alerts = window.AlertsPanel.current(); // pick up changes made in the Alerts tab
     if (!S.data) return;
     ({ overview: vOverview, senderid: vSender, buy: vBuy, compose: vCompose, history: vHistory }[t])($('sms-body'));
   }
 
   /* ------------------------------ overview ------------------------------ */
+  const ALERT_KEYS = ['ready', 'readyReminder', 'serviceDue', 'warrantyExpiring', 'insuranceExpiring', 'layawayDue', 'lowStockDigest', 'expiryDigest'];
+  const alertsOn = () => (S.alerts && S.alerts.settings ? ALERT_KEYS.filter((k) => S.alerts.settings[k] && S.alerts.settings[k].enabled).length : 0);
+  function alertsCard(d, sids) {
+    if (!can.alerts) return '';
+    const n = alertsOn(); const a = S.alerts;
+    const asSender = sids.length ? sids.join(', ') : (d.defaultSender && d.defaultSender.enabled ? d.defaultSender.senderId : '');
+    const issue = a && n > 0 && a.blockers && a.blockers.length ? `<div class="text-xs" style="color:var(--color-warning);margin-top:4px">${a.blockers.includes('NO_CREDITS') ? 'You have no SMS credits, so these texts will not send until you buy some.' : a.blockers.includes('NO_SENDER_ID') ? 'No Sender ID is available yet, so these texts will not send.' : 'SMS alerts are temporarily paused by the platform.'}</div>` : '';
+    return `<div class="card bl-card-gap"><div class="card-header"><h2>Automatic alerts</h2><button class="btn btn-primary btn-sm" data-go="alerts">${n ? 'Manage alerts' : 'Set up alerts'}</button></div><div class="card-body">
+      <div class="text-sm">${n ? `<b>${n}</b> text alert${n === 1 ? ' is' : 's are'} switched on${asSender ? `, sent as <b>${esc(asSender)}</b>` : ''}. Each text uses 1 credit.` : 'No text alerts are switched on yet. Get low stock, expiry and customer reminders by SMS.'}</div>${issue}
+    </div></div>`;
+  }
+
   function vOverview(b) {
     const d = S.data; const w = d.wallet;
     const sids = [...new Set(d.senderIds.map((s) => s.senderId))];
@@ -83,10 +103,12 @@
         ${RT.kpi({ label: 'Messages sent', value: num(w.totalSent), icon: 'check', tone: 'primary' })}
         ${RT.kpi({ label: 'Approved Sender IDs', value: num(sids.length), icon: 'tag', tone: sids.length || (d.defaultSender && d.defaultSender.enabled) ? 'primary' : 'warning', sub: sids.join(', ') || (d.defaultSender && d.defaultSender.enabled ? `Alerts send as ${d.defaultSender.senderId} until you get your own` : 'Apply for one first') })}
       </div>
+      ${alertsCard(d, sids)}
       <div class="card bl-card-gap"><div class="card-header"><h2>Get started</h2></div><div class="card-body">
-        ${step(1, sids.length > 0, 'Register your Sender ID', 'The name customers see as the sender.', 'senderid')}
+        ${can.alerts ? step(1, alertsOn() > 0, 'Switch on your alerts', 'Low stock, expiry and customer reminders. Each text costs 1 credit.', 'alerts') : ''}
         ${step(2, w.availableCredits > 0 || w.totalPurchased > 0, 'Buy SMS credits', 'Pick a bundle or a custom amount.', 'buy')}
-        ${step(3, d.campaigns.length > 0, 'Send your first campaign', 'Choose a CRM segment and write your message.', 'compose')}
+        ${step(3, sids.length > 0, 'Register your own Sender ID (optional)', 'Alerts use the shared Sender ID until yours is approved. Needed for marketing campaigns.', 'senderid')}
+        ${step(4, d.campaigns.length > 0, 'Send your first campaign', 'Choose a CRM segment and write your message.', 'compose')}
       </div></div>
       <div class="card"><div class="card-header"><h2>Recent credit activity</h2></div>
         <div class="table-wrap flat"><table class="table"><thead><tr><th>Date</th><th>Type</th><th class="num">Credits</th><th>Note</th></tr></thead><tbody>
