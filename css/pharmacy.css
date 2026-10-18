@@ -50,3 +50,48 @@
 .ph-line-tag.ok { background: var(--color-success-bg); color: var(--color-success); }
 .ph-sign { border: 1px dashed var(--color-border); border-radius: var(--radius-md); padding: var(--space-3); margin-top: var(--space-3); }
 @media print { .ph-noprint { display: none !important; } }
+
+/* ---- medicine form (js/core/pharmacy-product-form.js) ---- */
+.ph-fsec { border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-4); margin-bottom: var(--space-3); }
+.ph-fsec h4 { margin: 0 0 var(--space-1); font-size: var(--text-base); }
+.ph-req { color: var(--color-danger); }
+.ph-choose { display: grid; gap: var(--space-3); grid-template-columns: 1fr 1fr; }
+.ph-choose-card { display: flex; flex-direction: column; gap: var(--space-2); text-align: left; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface, #fff); cursor: pointer; font: inherit; color: inherit; }
+.ph-choose-card:hover, .ph-choose-card:focus-visible { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-info-bg); outline: none; }
+.ph-choose-ic { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--color-info-bg); color: var(--color-primary); }
+.ph-choose-ic svg { width: 20px; height: 20px; }
+@media (max-width: 560px) { .ph-choose { grid-template-columns: 1fr; } }
+
+/* ---- till: Over the counter | Dispense prescription switch ---- */
+.ph-seg { position: relative; display: inline-grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 14px; background: #eef0f5; box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.06); flex: 0 0 auto; isolation: isolate; }
+.ph-seg::before { content: ''; position: absolute; z-index: -1; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); border-radius: 10px; background: var(--color-primary); box-shadow: var(--shadow-sm); transition: transform 260ms cubic-bezier(0.3, 0.9, 0.3, 1.05); }
+.ph-seg[data-mode="rx"]::before { transform: translateX(100%); }
+.ph-seg button { height: 38px; padding: 0 var(--space-4); display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: none; border-radius: 10px; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: var(--text-sm); font-weight: var(--font-bold, 700); cursor: pointer; white-space: nowrap; transition: color 200ms ease; }
+.ph-seg button svg { width: 16px; height: 16px; }
+.ph-seg button.active { color: #fff; }
+.ph-seg button:not(.active):hover { color: var(--color-text); }
+.ph-seg button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+@media (max-width: 900px) { .ph-seg button { padding: 0 var(--space-3); } }
+
+/* ---- till: the prescription panel ---- */
+.ph-desk { padding: var(--space-3); border-top: 1px solid var(--color-border); font-size: var(--text-sm); }
+.ph-desk-otc { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; padding-top: var(--space-2); padding-bottom: var(--space-2); background: var(--color-bg); color: var(--color-text-secondary); }
+.ph-desk-otc svg { width: 15px; height: 15px; vertical-align: -2px; }
+.ph-desk-rx { max-height: 34vh; overflow: auto; background: var(--color-info-bg); }
+.ph-desk-empty { background: var(--color-info-bg); }
+.ph-desk-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-2); }
+.ph-desk-title { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.ph-desk-btns { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }
+.ph-desk-head .ph-desk-btns { margin-top: 0; }
+.ph-desk-step { display: flex; gap: var(--space-3); align-items: center; }
+.ph-step-n { width: 26px; height: 26px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--color-primary); color: #fff; font-weight: 700; font-size: 13px; }
+.ph-step-n.ok { background: var(--color-success); }
+.ph-desk-meta { display: grid; gap: var(--space-2) var(--space-4); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.ph-desk-meta .ph-k { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-muted); }
+.ph-desk-tablewrap { overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface, #fff); }
+.ph-desk-table { margin: 0; }
+.ph-desk-table td, .ph-desk-table th { padding: 6px var(--space-3); vertical-align: top; }
+.ph-desk-table .ph-num-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ph-desk-table tr.ph-done { opacity: .6; }
+.ph-allergy-hit { color: var(--color-danger); font-weight: 700; font-size: var(--text-xs); margin-top: 2px; }
+@media (max-width: 700px) { .ph-desk-rx { max-height: 36vh; } }
