@@ -15,6 +15,11 @@
     ['reports', 'Reports'], ['cash', 'Registers & Shifts'], ['branches', 'Branches'], ['employees', 'Employees'],
     ['customers', 'Customers'], ['tickets', 'Help & Support'], ['notifications', 'Notifications'],
     ['settings', 'Settings'], ['audit', 'Audit log'],
+    ['hx-dashboard', 'Hotel/Restaurant: Dashboard'], ['hx-floor', 'Restaurant: Tables & orders'], ['hx-kitchen', 'Restaurant: Kitchen & bar'],
+    ['hx-bills', 'Restaurant: Bills & payments'], ['hx-reservations', 'Restaurant: Reservations'], ['hx-delivery', 'Restaurant: Delivery & pickup'],
+    ['hx-menu', 'Restaurant: Menu'], ['hx-stock', 'Restaurant: Ingredients'], ['hx-guest', 'Restaurant: Guest requests & QR'], ['hx-staff', 'Restaurant: Shifts & tips'],
+    ['hx-desk', 'Rooms: Front desk'], ['hx-rooms', 'Rooms: Room board'], ['hx-stays', 'Rooms: Bookings'], ['hx-housekeeping', 'Rooms: Housekeeping'],
+    ['hx-reports', 'Restaurant & rooms: Reports'], ['hx-setup', 'Restaurant & rooms: Setup guide'], ['hx-settings', 'Restaurant & rooms: Settings'], ['hx-services', 'Restaurant & rooms: System check'],
   ];
   const PAGE_LABEL = Object.fromEntries(PAGES);
   const ROLES = [

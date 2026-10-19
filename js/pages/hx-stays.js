@@ -26,22 +26,26 @@
   }
 
   /* ---------- new booking ---------- */
-  function newBooking() {
+  async function newBooking() {
+    // "Today" is the business's today (its time zone), which can differ from this device's clock.
+    const bd = await get('/accommodation/board', { branchId: window.HX.branchId() });
+    const today = (bd && bd.date) || ymd();
     formModal({ title: 'New booking: dates', submitText: 'Check availability', fields: [
-      { row: [{ name: 'checkInDate', label: 'Check-in', type: 'date', value: ymd(), required: true }, { name: 'checkOutDate', label: 'Check-out', type: 'date', value: addDays(ymd(), 1), required: true }] },
+      { row: [{ name: 'checkInDate', label: 'Check-in', type: 'date', value: today, required: true }, { name: 'checkOutDate', label: 'Check-out', type: 'date', value: addDays(today, 1), required: true }] },
       { row: [{ name: 'adults', label: 'Adults', type: 'number', value: 2, min: 1 }, { name: 'children', label: 'Children', type: 'number', value: 0, min: 0 }] },
     ], onSubmit: async (v) => {
       if (v.checkOutDate <= v.checkInDate) { window.UI.toast.warning('Check-out must be after check-in'); return false; }
       const a = await get('/accommodation/availability', { branchId: window.HX.branchId(), checkInDate: v.checkInDate, checkOutDate: v.checkOutDate, adults: v.adults || 1, children: v.children || 0 });
-      const types = list(a, 'roomTypes', 'available', 'types').filter((t) => (t.available != null ? t.available : t.availableRooms != null ? t.availableRooms : 1) > 0);
+      if (a && a.today && v.checkInDate < a.today) { window.UI.toast.warning(`Check-in ${v.checkInDate} is before today (${a.today}, ${a.timeZone || 'business time zone'}). Choose ${a.today} or later.`); return false; }
+      const types = ((a && Array.isArray(a.byType)) ? a.byType : []).filter((t) => (t.available != null ? t.available : 0) > 0);
       if (!types.length) { window.UI.toast.warning('No rooms are free for those dates'); return false; }
       setTimeout(() => guestForm(v, types), 150); return true;
     } });
   }
   function guestForm(dates, types) {
-    const id = (t) => t.roomTypeId || t._id, price = (t) => t.total != null ? t.total : t.totalPrice != null ? t.totalPrice : t.rate != null ? t.rate : t.baseRate;
+    const id = (t) => t.roomTypeId || t._id, price = (t) => (t.from != null ? t.from : t.total != null ? t.total : null);
     formModal({ title: 'New booking: guest', submitText: 'Create booking', maxWidth: '540px', fields: [
-      { name: 'roomTypeId', label: 'Room type', type: 'select', options: types.map((t) => [id(t), `${t.name || t.roomTypeName}${price(t) != null ? ' · ' + M(price(t)) : ''}`]) },
+      { name: 'roomTypeId', label: 'Room type', type: 'select', options: types.map((t) => [id(t), `${t.roomType || t.name || t.roomTypeName || 'Room'}${price(t) != null ? ' · ' + M(price(t)) + ' total' : ''} · ${t.available} free`]) },
       { row: [{ name: 'name', label: 'Guest name', required: true }, { name: 'phone', label: 'Phone', type: 'tel' }] }, { name: 'email', label: 'Email (optional)', type: 'email' },
       { row: [{ name: 'mealPlan', label: 'Meals', type: 'select', options: [['ROOM_ONLY', 'Room only'], ['BED_BREAKFAST', 'Bed & breakfast'], ['HALF_BOARD', 'Half board'], ['FULL_BOARD', 'Full board']] }, { name: 'source', label: 'Booked via', type: 'select', options: [['WALK_IN', 'Walk-in'], ['PHONE', 'Phone'], ['ONLINE', 'Online'], ['AGENT', 'Agent'], ['CORPORATE', 'Corporate']] }] },
       { row: [{ name: 'idType', label: 'ID type', type: 'select', options: [['NATIONAL_ID', 'National ID'], ['PASSPORT', 'Passport'], ['DRIVING_LICENCE', 'Driving licence'], ['OTHER', 'Other']] }, { name: 'idNumber', label: 'ID / passport number', hint: 'Needed to check the guest in.' }] },

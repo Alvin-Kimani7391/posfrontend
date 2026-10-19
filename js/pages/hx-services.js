@@ -43,9 +43,7 @@
       <div class="hx-card"><h3>Staff &amp; workers</h3><p class="hx-sub">Add workers in <b>Employees</b>. Roles you can pick depend on the services above.</p>
         <div id="staffbox"><p class="hx-sub">Loading…</p></div>
         <div class="hx-actions" style="margin-top:var(--space-3)"><a class="btn btn-primary" href="employees.html">Add a worker</a><a class="btn btn-secondary" href="hx-setup.html">Setup guide</a></div></div>
-      <div class="hx-card"><h3>Backend address</h3><p class="hx-sub">This app is talking to:</p><p><code class="hx-mono" id="apiNow">${E(window.APP_CONFIG.API_BASE_URL)}</code></p>
-        <div class="hx-form"><div class="field"><label for="apiIn">Use a different backend (must end with /api/v1)</label><input class="input" id="apiIn" placeholder="https://your-backend.onrender.com/api/v1" value="${E(localStorage.getItem('pos.apiBase') || '')}"></div></div>
-        <div class="hx-actions"><button class="btn btn-secondary" id="apiSave">Use this address</button><button class="btn btn-secondary" id="apiReset">Reset to default</button></div></div>
+      <div class="hx-card"><h3>Backend address</h3><p class="hx-sub">This app is talking to:</p><p><code class="hx-mono" id="apiNow">${E(window.APP_CONFIG.API_BASE_URL)}</code></p></div>
       <div class="hx-card"><h3>System check</h3><p class="hx-sub">Tests every restaurant and accommodation screen against the backend and tells you what is wrong.</p>
         <div class="hx-actions"><button class="btn btn-primary" id="runchk">Run system check</button></div><div id="chk" style="margin-top:var(--space-3)"></div></div>`;
     el.querySelectorAll('[data-f]').forEach((c) => c.addEventListener('change', () => {
@@ -53,8 +51,6 @@
       el.querySelectorAll('[data-f]').forEach((x) => { x.checked = !!flags[x.dataset.f]; x.closest('.hx-svc-row').classList.toggle('on', !!flags[x.dataset.f]); });
     }));
     el.querySelector('#savesvc')?.addEventListener('click', save);
-    el.querySelector('#apiSave').addEventListener('click', () => { const v = el.querySelector('#apiIn').value.trim().replace(/\/+$/, ''); if (!/^https?:\/\/.+/.test(v)) return window.UI.toast.warning('Enter a full address starting with https://'); localStorage.setItem('pos.apiBase', v); location.reload(); });
-    el.querySelector('#apiReset').addEventListener('click', () => { localStorage.removeItem('pos.apiBase'); location.reload(); });
     el.querySelector('#runchk').addEventListener('click', runCheck);
     staff();
   }
