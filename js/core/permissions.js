@@ -199,7 +199,9 @@
     "accommodation.housekeeping.view",
     "accommodation.housekeeping.update",
     "accommodation.housekeeping.manage",
-    "accommodation.reports.view"
+    "accommodation.reports.view",
+    "restaurant.payments.verify",
+    "accommodation.folio.verify"
   ],
   "CASHIER": [
     "restaurant.menu.view",
@@ -255,7 +257,9 @@
     "customers.view",
     "notifications.view",
     "tickets.view",
-    "tickets.create"
+    "tickets.create",
+    "restaurant.bills.generate",
+    "restaurant.bills.pay"
   ],
   "HEAD_WAITER": [
     "restaurant.menu.view",
@@ -288,7 +292,8 @@
     "customers.create",
     "notifications.view",
     "tickets.view",
-    "tickets.create"
+    "tickets.create",
+    "restaurant.bills.pay"
   ],
   "SUPERVISOR": [
     "restaurant.menu.view",
@@ -374,7 +379,9 @@
     "restaurant.ingredients.view",
     "restaurant.ingredients.waste",
     "restaurant.shifts.self",
-    "notifications.view"
+    "notifications.view",
+    "restaurant.bills.generate",
+    "restaurant.bills.pay"
   ],
   "EXPEDITOR": [
     "restaurant.menu.view",
@@ -415,7 +422,9 @@
     "shifts.view",
     "notifications.view",
     "tickets.view",
-    "tickets.create"
+    "tickets.create",
+    "restaurant.bills.generate",
+    "restaurant.bills.pay"
   ],
   "HOUSEKEEPER": [
     "accommodation.rooms.view",

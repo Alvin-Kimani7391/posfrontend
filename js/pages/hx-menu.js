@@ -5,6 +5,8 @@
 (function () {
   const { E, M, can, get, send, list, head, pill, formModal, unwrap } = window.HX;
   let el, items = [], groups = [], stations = [], cats = [], tab = 'dishes', q = '';
+  const isSold = (i) => !!(i && i.soldOut && (i.soldOut === true || i.soldOut.flag === true));   // API sends { flag, ... }: an object is always truthy
+  const recipesOn = () => window.HX.feature('recipeManagement') && can('restaurant.recipes.manage');
   document.addEventListener('DOMContentLoaded', init);
   async function init() { el = window.HX.mount('Menu'); if (!el) return; await window.AppShell.whenProfileReady?.(); load(); }
 
@@ -31,11 +33,29 @@
   }
   function rows() {
     const v = items.filter((i) => i.name.toLowerCase().includes(q.toLowerCase())), box = el.querySelector('#dl');
-    box.innerHTML = v.length ? `<div class="hx-card flush">${v.map((i) => `<div class="hx-row"><div class="grow"><b>${E(i.name)}</b><small class="hx-sub">${E((cats.find((c) => c._id === i.categoryId) || {}).name || 'No category')} · ${E(i.stationCode || 'default station')}${(i.variants || []).length ? ' · ' + i.variants.length + ' sizes' : ''}</small></div>
-      <span class="hx-money">${M(i.basePrice)}</span>${i.soldOut ? pill('sold out', 'bad') : ''}
-      ${can('restaurant.menu.soldout') ? `<button class="btn btn-sm btn-secondary" data-so="${i._id}" data-v="${i.soldOut ? 0 : 1}">${i.soldOut ? 'Back in stock' : 'Sold out'}</button>` : ''}<button class="btn btn-sm btn-secondary" data-e="${i._id}">Edit</button></div>`).join('')}</div>` : window.HX.empty('No dishes', 'Add your first dish.');
-    box.querySelectorAll('[data-e]').forEach((b) => b.onclick = () => dishForm(items.find((x) => x._id === b.dataset.e)));
+    box.innerHTML = v.length ? `<div class="hx-card flush">${v.map((i) => { const so = isSold(i); return `<div class="hx-row hx-dishrow">
+      <button type="button" class="hx-thumb" data-ph="${i._id}" title="${i.image ? 'Change photo' : 'Add photo'}">${i.image ? `<img src="${E(i.image)}" alt="" loading="lazy">` : '<span>+ Photo</span>'}</button>
+      <div class="grow"><b>${E(i.name)}</b><small class="hx-sub">${E((cats.find((c) => c._id === i.categoryId) || {}).name || 'No category')} · ${E(i.stationCode || 'default station')}${(i.variants || []).length ? ' · ' + i.variants.length + ' sizes' : ''}</small></div>
+      <span class="hx-money">${M(i.basePrice)}</span>${so ? pill('sold out', 'bad') : pill('available', 'ok')}${i.stockMode === 'RECIPE' ? pill('stock tracked', 'plan') : ''}
+      <div class="hx-actions">${recipesOn() ? `<button class="btn btn-sm btn-secondary" data-rc="${i._id}">${i.stockMode === 'RECIPE' ? 'Ingredients' : 'Set ingredients'}</button>` : ''}${can('restaurant.menu.soldout') ? `<button class="btn btn-sm btn-secondary" data-so="${i._id}" data-v="${so ? 0 : 1}">${so ? 'Back in stock' : 'Mark sold out'}</button>` : ''}<button class="btn btn-sm btn-secondary" data-e="${i._id}">Edit</button></div></div>`; }).join('')}</div>` : window.HX.empty('No dishes', 'Add your first dish.');
+    const find = (id) => items.find((x) => x._id === id);
+    box.querySelectorAll('[data-e]').forEach((b) => b.onclick = () => dishForm(find(b.dataset.e)));
+    box.querySelectorAll('[data-ph]').forEach((b) => b.onclick = () => photoModal(find(b.dataset.ph)));
+    box.querySelectorAll('[data-rc]').forEach((b) => b.onclick = () => window.HX.recipe.open(find(b.dataset.rc), { onSaved: load }));
     box.querySelectorAll('[data-so]').forEach((b) => b.onclick = async () => { if (await send('post', `/restaurant/menu/items/${b.dataset.so}/sold-out`, { soldOut: b.dataset.v === '1' })) load(); });
+  }
+  /** Upload / replace / remove the dish photo (POST /restaurant/menu/items/:id/image, field "image", JPG/PNG/WEBP, 5 MB). */
+  function photoModal(it) {
+    if (!it) return;
+    if (!can('restaurant.menu.manage')) return window.UI.toast.info('Only managers can change dish photos');
+    window.HX.modal({ title: `Photo for ${it.name}`, maxWidth: '420px', body: `<div class="hx-photo"><div class="hx-photoprev" id="pv">${it.image ? `<img src="${E(it.image)}" alt="">` : '<span class="hx-sub">No photo yet</span>'}</div><input class="input" id="pf" type="file" accept="image/jpeg,image/png,image/webp"><small class="hx-sub">JPG, PNG or WEBP, up to 5 MB. Waiters see it on the order screen.</small></div>`,
+      footer: `${it.image ? '<button class="btn btn-secondary" id="pr" style="margin-right:auto">Remove photo</button>' : ''}<button class="btn btn-secondary" data-c>Close</button><button class="btn btn-primary" id="pu" disabled>Upload photo</button>`,
+      onMount(el, close) {
+        const f = el.querySelector('#pf'), up = el.querySelector('#pu'); el.querySelector('[data-c]').onclick = close;
+        f.onchange = () => { const file = f.files[0]; if (!file) return; if (file.size > 5 * 1024 * 1024) { window.UI.toast.warning('That image is over 5 MB'); f.value = ''; return; } el.querySelector('#pv').innerHTML = `<img src="${URL.createObjectURL(file)}" alt="">`; up.disabled = false; };
+        up.onclick = async () => { const fd = new FormData(); fd.append('image', f.files[0]); window.UI.setButtonLoading(up, true, 'Uploading…'); try { await window.Api.upload(`/restaurant/menu/items/${it._id}/image`, fd); window.UI.toast.success('Photo saved'); close(); load(); } catch (e) { window.UI.setButtonLoading(up, false); window.UI.toast.error((e && e.message) || 'Upload failed'); } };
+        const rm = el.querySelector('#pr'); if (rm) rm.onclick = async () => { try { await window.Api.delete(`/restaurant/menu/items/${it._id}/image`); window.UI.toast.success('Photo removed'); close(); load(); } catch (e) { window.UI.toast.error((e && e.message) || 'Could not remove'); } };
+      } });
   }
 
   function dishForm(it) {
@@ -53,7 +73,7 @@
       if (v.variants) body.variants = v.variants.split('\n').map((l) => l.split(',')).filter((p) => p[0].trim()).map((p) => ({ name: p[0].trim(), ...(p[1] && !isNaN(p[1]) ? { price: Number(p[1]) } : {}) }));
       if (v.modifierGroupIds) body.modifierGroupIds = [v.modifierGroupIds];
       const r = it ? await send('put', '/restaurant/menu/items/' + it._id, body) : await send('post', '/restaurant/menu/items', body);
-      if (r) { window.UI.toast.success('Saved'); load(); return true; } return false;
+      if (r) { window.UI.toast.success('Saved'); await load(); const saved = unwrap(r, 'item'); if (!it && saved && saved._id) setTimeout(() => photoModal(items.find((x) => x._id === saved._id) || saved), 150); return true; } return false;
     } });
   }
 

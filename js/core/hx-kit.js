@@ -145,8 +145,8 @@
   HX.tabs = (items, cur) => `<div class="hx-cats hx-tabs">${items.map(([k, l]) => `<button class="hx-chip ${k === cur ? 'on' : ''}" data-tab="${k}">${HX.E(l)}</button>`).join('')}</div>`;
   HX.ask = (title, label, opts = {}) => new Promise((res) => {
     let done = false;
-    HX.formModal({ title, maxWidth: '420px', submitText: opts.cta || 'Confirm', fields: [{ name: 'v', label, type: opts.type || 'textarea', required: opts.required !== false, value: opts.value }], onSubmit: async (v) => { done = true; res(v.v); return true; } });
-    const t = setInterval(() => { if (!document.querySelector('.modal-backdrop')) { clearInterval(t); if (!done) res(null); } }, 300);
+    const m = HX.formModal({ title, maxWidth: '420px', submitText: opts.cta || 'Confirm', fields: [{ name: 'v', label, type: opts.type || 'textarea', required: opts.required !== false, value: opts.value }], onSubmit: async (v) => { done = true; res(v.v); return true; } });
+    const t = setInterval(() => { if (!m || !m.isConnected) { clearInterval(t); if (!done) res(null); } }, 250);
   });
 })(window);
 
@@ -167,4 +167,15 @@
   });
   /** Expandable row: click the head to show/hide the details underneath. */
   HX.xrow = (headHtml, bodyHtml, open) => `<div class="hx-xrow ${open ? 'open' : ''}" data-xtoggle aria-expanded="${!!open}"><span class="hx-caret"></span>${headHtml}</div><div class="hx-xbody ${open ? 'open' : ''}">${bodyHtml}</div>`;
+})(window);
+
+/* ---- modal wrapper shared by every hx screen (returns { el, close }) ---- */
+(function (window) {
+  const HX = window.HX;
+  HX.modal = function modal({ title, body = '', footer = '', maxWidth, cls = '', onMount }) {
+    let ref = null;
+    const close = () => { if (ref && ref.isConnected) ref.querySelector('.modal-close').click(); };
+    window.UI.openModal({ title, maxWidth, bodyHtml: body, footerHtml: footer, onMount(m) { ref = m; if (cls) m.classList.add(...cls.split(' ').filter(Boolean)); if (onMount) onMount(m, close); } });
+    return { el: ref, close };
+  };
 })(window);

@@ -6,7 +6,7 @@
   const { E, M, can, get, list, head, pill, hm } = window.HX;
   let el, tab = 'arrivals', d = null;
   document.addEventListener('DOMContentLoaded', init);
-  async function init() { el = window.HX.mount('Front desk'); if (!el) return; await window.AppShell.whenProfileReady?.(); window.HX.live(load, 30000); load(); }
+  async function init() { el = window.HX.mount('Front desk'); if (!el) return; await window.AppShell.whenProfileReady?.(); window.HX.live(() => { if (!document.querySelector('.modal-backdrop')) load(); }, 30000); load(); }
 
   async function load() {
     d = await get('/accommodation/desk', { branchId: window.HX.branchId() });
@@ -18,7 +18,7 @@
     const g = s.guest || {}, t = s.totals || {};
     const head = `<div class="grow"><b>${E(g.name)}${s.roomNumber ? ' · Room ' + E(s.roomNumber) : ''}</b><small class="hx-sub">${E(s.roomTypeName || '')} · ${s.adults || 1} adult${(s.adults || 1) > 1 ? 's' : ''}${s.children ? ', ' + s.children + ' child' : ''} · ${E(s.bookingCode)}${tab === 'departures' ? ' · out by ' + hm(s.expectedCheckOut) : tab === 'arrivals' ? ' · from ' + hm(s.expectedCheckIn) : ''}</small></div>${t.balance > 0 ? `<span class="hx-money">${M(t.balance)}</span>` : ''}${pill(s.status === 'RESERVED' ? 'Check in' : s.status === 'CHECKED_IN' && tab === 'departures' ? 'Check out' : s.status, s.status === 'RESERVED' ? 'plan' : 'busy')}`;
     const kv = (k, v) => (v ? `<div><small class="hx-sub">${k}</small><b>${v}</b></div>` : '');
-    const body = `<div class="hx-detail">${kv('Phone', E(g.phone))}${kv('Email', E(g.email))}${kv('Arrival', window.HX.dt(s.expectedCheckIn))}${kv('Departure', window.HX.dt(s.expectedCheckOut))}${kv('Total', t.total != null ? M(t.total) : '')}${kv('Paid', t.paid != null ? M(t.paid) : '')}${kv('Balance', t.balance != null ? M(t.balance) : '')}${kv('Requests', E(s.specialRequests))}${kv('Notes', E(s.notes))}</div><div class="hx-actions"><a class="btn btn-primary btn-sm" href="hx-stays.html#stay=${s._id}">${s.status === 'RESERVED' ? 'Check in / open booking' : s.status === 'CHECKED_IN' ? 'Folio & check-out' : 'Open booking'}</a></div>`;
+    const body = `<div class="hx-detail">${kv('Phone', E(g.phone))}${kv('Email', E(g.email))}${kv('Arrival', window.HX.dt(s.expectedCheckIn))}${kv('Departure', window.HX.dt(s.expectedCheckOut))}${kv('Total', t.total != null ? M(t.total) : '')}${kv('Paid', t.paid != null ? M(t.paid) : '')}${kv('Balance', t.balance != null ? M(t.balance) : '')}${kv('Requests', E(s.specialRequests))}${kv('Notes', E(s.notes))}</div><div class="hx-actions"><a class="btn btn-primary btn-sm" href="hx-stays.html#stay=${s._id}">${s.status === 'RESERVED' ? 'Check in / open booking' : s.status === 'CHECKED_IN' ? 'Folio & check-out' : 'Open booking'}</a>${(s.status === 'CHECKED_IN' || s.status === 'RESERVED') && can('accommodation.folio.pay') ? `<button class="btn btn-secondary btn-sm" data-pay="${s._id}" data-bal="${t.balance || 0}" data-name="${E(g.name || '')}" data-room="${E(s.roomNumber || '')}" data-phone="${E(g.phone || '')}">Take payment</button>` : ''}</div>`;
     return window.HX.xrow(head, body);
   }
 
@@ -33,5 +33,6 @@
       window.HX.tabs([['arrivals', `Arrivals · ${a.length}`], ['departures', `Departures · ${l.length}`], ['inhouse', `In house · ${h.length}`]], tab) +
       (rows.length ? `<div class="hx-card flush hx-xlist">${rows.map(row).join('')}</div>` : window.HX.empty('No guests here', 'Nothing for this list today.'));
     el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; paint(); }));
+    el.querySelectorAll('[data-pay]').forEach((b) => b.addEventListener('click', () => window.HX.pay.open({ kind: 'stay', id: b.dataset.pay, title: 'Take payment', reference: `${b.dataset.name}${b.dataset.room ? ' · Room ' + b.dataset.room : ''}`, due: Math.max(0, Number(b.dataset.bal) || 0), phone: b.dataset.phone, customerName: b.dataset.name, depositChoice: true, onPaid: () => load() })));
   }
 })();

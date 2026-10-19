@@ -11,8 +11,11 @@
     el = window.HX.mount('Delivery & pickup'); if (!el) return; await window.AppShell.whenProfileReady?.();
     const rider = !can('restaurant.delivery.view');
     if (!rider && can('restaurant.delivery.manage')) { const e = await get('/employees', { limit: 100 }); riders = list(e, 'employees').filter((x) => x.role === 'DELIVERY_RIDER'); }
-    el.innerHTML = head(rider ? 'My deliveries' : 'Delivery & pickup', rider ? 'Runs assigned to you.' : 'Assign riders and follow each order to the door.', '<span class="hx-live">Live</span>') + (rider ? '' : '<div id="tb"></div>') + '<div id="dl"></div>';
-    window.HX.live(() => load(rider), 20000); load(rider);
+    el.innerHTML = head(rider ? 'My deliveries' : 'Delivery & pickup', rider ? 'Runs assigned to you.' : 'Assign riders and follow each order to the door.', (rider || !can('restaurant.orders.create') ? '' : '<button class="btn btn-secondary" id="np">New pickup</button><button class="btn btn-primary" id="nd">New delivery</button>') + '<span class="hx-live">Live</span>') + (rider ? '' : '<div id="tb"></div>') + '<div id="dl"></div>';
+    const refresh = () => load(rider);
+    el.querySelector('#nd')?.addEventListener('click', () => window.HX.order.start('DELIVERY', { onChange: refresh, onClose: refresh }));
+    el.querySelector('#np')?.addEventListener('click', () => window.HX.order.start('PICKUP', { onChange: refresh, onClose: refresh }));
+    window.HX.live(() => { if (!document.querySelector('.modal-backdrop')) refresh(); }, 20000); refresh();
   }
   async function load(rider) {
     const d = await get(rider ? '/restaurant/delivery/mine' : '/restaurant/delivery', { branchId: window.HX.branchId() });
@@ -25,6 +28,8 @@
     el.querySelectorAll('[data-as]').forEach((b) => b.addEventListener('click', () => assign(b.dataset.as)));
     el.querySelectorAll('[data-st]').forEach((b) => b.addEventListener('click', () => status(b.dataset.id, b.dataset.st)));
     el.querySelectorAll('[data-pk]').forEach((b) => b.addEventListener('click', () => collect(b.dataset.pk)));
+    el.querySelectorAll('[data-op]').forEach((b) => b.addEventListener('click', () => window.HX.order.open(b.dataset.op, { onChange: () => load(rider), onClose: () => load(rider) })));
+    el.querySelectorAll('[data-bp]').forEach((b) => b.addEventListener('click', () => window.HX.bill.forOrder(b.dataset.bp, { pay: true, onChange: () => load(rider) })));
   }
   function card(o) {
     const d = o.delivery || {}, st = d.status || (o.pickup && o.pickup.status) || 'PENDING', id = o._id || o.orderId;
@@ -32,6 +37,7 @@
     return `<div class="hx-card"><div class="hx-row" style="padding-top:0"><div class="grow"><b>#${E(o.orderNumber)} · ${E(d.contactName || o.customerName || 'Customer')}</b><small class="hx-sub">${mins(o.createdAt)} min ago · ${M(o.totals && o.totals.total)}</small></div>${pill(st, TONE[st] || 'warn')}</div>
       ${d.address ? `<p>${E(d.address)}${d.landmark ? ' · ' + E(d.landmark) : ''}</p>` : ''}${d.phone || o.customerPhone ? `<p><a href="tel:${E(d.phone || o.customerPhone)}">${E(d.phone || o.customerPhone)}</a></p>` : ''}${d.instructions ? `<small class="hx-sub">${E(d.instructions)}</small>` : ''}${d.riderName ? `<p class="hx-sub">Rider: ${E(d.riderName)}</p>` : ''}
       <div class="hx-actions" style="margin-top:var(--space-3)">
+        ${can('restaurant.orders.create') && !['DELIVERED', 'FAILED'].includes(st) ? `<button class="btn btn-sm btn-secondary" data-op="${id}">Order</button>` : ''}${can('restaurant.bills.generate') && can('restaurant.bills.pay') && o.billStatus !== 'PAID' ? `<button class="btn btn-sm btn-secondary" data-bp="${id}">Bill &amp; pay</button>` : ''}
         ${o.orderType === 'PICKUP' ? (o.pickup && o.pickup.status === 'COLLECTED' ? '' : (can('restaurant.orders.create') ? `<button class="btn btn-sm btn-primary" data-pk="${id}">Handed over</button>` : '')) : ''}
         ${o.orderType !== 'PICKUP' && can('restaurant.delivery.manage') && !['DELIVERED', 'FAILED'].includes(st) ? `<button class="btn btn-sm btn-secondary" data-as="${id}">${d.riderName ? 'Change rider' : 'Assign rider'}</button>` : ''}
         ${can('restaurant.delivery.self') && st === 'ASSIGNED' ? b('OUT_FOR_DELIVERY', 'Picked up') : ''}${can('restaurant.delivery.self') && st === 'OUT_FOR_DELIVERY' ? b('DELIVERED', 'Delivered', 'btn-success') + b('FAILED', 'Failed', 'btn-secondary') : ''}</div></div>`;
