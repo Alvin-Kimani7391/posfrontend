@@ -166,76 +166,150 @@
     return true;
   }
 
-  /* ------------------------------------------------------------------ the panel */
+  /* ------------------------------------------------------------------ the panel
+   * Wide till (the root has .ph-rx-side): the prescription lives in its own column to the LEFT of the cart, so the cart and the
+   * payment summary keep their full height. Narrower till: a one-line strip above the cart, with "Details" opening the same
+   * panel in a window. Nothing here ever grows the area above the cart by more than that one line. */
   function allergyHit(patient, item) {
     const med = PT().medicineOf(item.productId) || {};
     const hay = `${item.nameSnapshot || ''} ${med.genericName || ''} ${med.brandName || ''}`.toLowerCase();
     return ((patient && patient.allergies) || []).filter((a) => a && a.length > 2 && hay.includes(String(a).toLowerCase()));
   }
 
-  function paint() {
-    const el = document.getElementById('ph-desk');
-    if (!el || !host) return;
-    if (!active()) { el.innerHTML = ''; el.style.display = 'none'; return; }
-    el.style.display = '';
-    const m = mode();
-    if (m === 'otc') {
-      el.innerHTML = `<div class="ph-desk ph-desk-otc"><span>${window.Icons.get('bag')} <strong>Over-the-counter sale.</strong> Medicines that need a prescription, and controlled drugs, are not sold here.</span><button type="button" class="btn btn-secondary btn-sm" data-d="to-rx">Dispense a prescription</button></div>`;
-      el.querySelector('[data-d="to-rx"]').addEventListener('click', () => switchTo('rx'));
-      return;
-    }
-    const r = rx();
-    if (desk.loading) { el.innerHTML = '<div class="ph-desk"><span class="text-muted">Loading the prescription…</span></div>'; return; }
-    if (!r) {
-      el.innerHTML = `<div class="ph-desk ph-desk-empty">
-        <div class="ph-desk-step"><span class="ph-step-n">1</span><div><strong>Choose the prescription to dispense</strong><div class="text-xs text-muted">Only prescriptions a pharmacist has validated can be dispensed. The medicines load into the cart for you.</div></div></div>
-        ${desk.error ? `<div class="ph-danger-box" style="margin:var(--space-2) 0 0">${esc(desk.error)}</div>` : ''}
-        <div class="ph-desk-btns">
-          <button type="button" class="btn btn-primary" data-d="find">${window.Icons.get('search')} Find prescription</button>
-          <button type="button" class="btn btn-secondary" data-d="patient" data-requires-permission="patients.view">${window.Icons.get('patient')} Find by patient</button>
-          <a class="btn btn-secondary" href="prescriptions.html?new=1" data-requires-permission="prescriptions.intake">${window.Icons.get('plus')} Record a new prescription</a>
-        </div></div>`;
-      el.querySelector('[data-d="find"]').addEventListener('click', () => choose());
-      el.querySelector('[data-d="patient"]').addEventListener('click', byPatient);
-      window.Permissions.applyPermissionGates(el, window.AppShell.getUser());
-      return;
-    }
+  let detailBody = null;              // the open "Details" window body (narrow tills)
+
+  function emptyHtml() {
+    return `<div class="ph-rx-empty">
+      <div class="ph-desk-step"><span class="ph-step-n">1</span><div><strong>Choose the prescription to dispense</strong><div class="text-xs text-muted">Only prescriptions a pharmacist has validated can be dispensed. Its medicines load into the cart for you.</div></div></div>
+      ${desk.error ? `<div class="ph-danger-box" style="margin:var(--space-3) 0 0">${esc(desk.error)}</div>` : ''}
+      <div class="ph-rx-btns">
+        <button type="button" class="btn btn-primary" data-d="find">${window.Icons.get('search')} Find prescription</button>
+        <button type="button" class="btn btn-secondary" data-d="patient" data-requires-permission="patients.view">${window.Icons.get('patient')} Find by patient</button>
+        <a class="btn btn-secondary" href="prescriptions.html?new=1" data-requires-permission="prescriptions.intake">${window.Icons.get('plus')} Record a new prescription</a>
+      </div></div>`;
+  }
+
+  /** Header + who + medicines. Used by the side column and by the Details window. */
+  function detailHtml(r) {
     const pt = desk.patient; const pres = r.prescriber || {};
     const allergies = (pt && pt.allergies) || [];
-    const rows = (r.items || []).map((i) => {
+    const items = (r.items || []).map((i) => {
       const l = left(i); const c = inCart(i.productId); const hits = allergyHit(pt, i);
-      const state = l <= 0 ? '<span class="badge badge-success">Done</span>' : c > 0 ? `<span class="badge ${c > l ? 'badge-danger' : 'badge-info'}">${c > l ? `Cart ${P().qty(c)} > left` : `In cart ${P().qty(c)}`}</span>` : `<button type="button" class="btn btn-secondary btn-sm" data-add="${esc(i.productId)}">Add ${esc(P().qty(l))}</button>`;
-      return `<tr class="${l <= 0 ? 'ph-done' : ''}">
-        <td><strong>${esc(i.nameSnapshot)}</strong> <span class="text-muted text-xs">${esc(i.strength || '')} ${esc(i.dosageForm || '')}</span>${hits.length ? `<div class="ph-allergy-hit">⚠ Patient is allergic to ${esc(hits.join(', '))}</div>` : ''}</td>
-        <td class="text-sm">${esc(i.directions || '— no directions on the prescription —')}</td>
-        <td class="ph-num-cell">${esc(P().qty(i.dispensedQty || 0))} / ${esc(P().qty(i.prescribedQty))}<div class="text-xs text-muted">${esc(P().qty(l))} left</div></td>
-        <td style="text-align:right">${state}</td></tr>`;
+      const act = l <= 0 ? '<span class="badge badge-success">Done</span>'
+        : c > 0 ? `<span class="badge ${c > l ? 'badge-danger' : 'badge-info'}">${c > l ? `Cart ${esc(P().qty(c))} is more than left` : `In cart ${esc(P().qty(c))}`}</span>`
+          : `<button type="button" class="btn btn-secondary btn-sm" data-add="${esc(i.productId)}">Add ${esc(P().qty(l))}</button>`;
+      return `<li class="ph-rx-item ${l <= 0 ? 'ph-done' : ''}">
+        <div class="ph-rx-item-top"><strong>${esc(i.nameSnapshot)}</strong><span class="ph-rx-act">${act}</span></div>
+        <div class="text-xs text-muted">${esc(i.strength || '')} ${esc(i.dosageForm || '')}</div>
+        <div class="ph-rx-dir">${esc(i.directions || 'No directions on the prescription')}</div>
+        <div class="text-xs text-secondary">Dispensed ${esc(P().qty(i.dispensedQty || 0))} of ${esc(P().qty(i.prescribedQty))} · <strong>${esc(P().qty(l))} left</strong></div>
+        ${hits.length ? `<div class="ph-allergy-hit">⚠ Patient is allergic to ${esc(hits.join(', '))}</div>` : ''}</li>`;
     }).join('');
-    el.innerHTML = `<div class="ph-desk ph-desk-rx">
-      <div class="ph-desk-head">
-        <div class="ph-desk-title"><span class="ph-step-n ok">✓</span> <strong>${esc(r.number)}</strong> ${P().badge(r.status)}
-          <span class="text-xs text-muted">written ${esc(P().date(r.prescriptionDate))} · valid until ${esc(P().date(r.validUntil))}${r.maxDispensings ? ` · repeat ${esc(r.maxDispensings)}×` : ''}</span></div>
-        <div class="ph-desk-btns"><button type="button" class="btn btn-ghost btn-sm" data-d="fold">${desk.collapsed ? 'Show medicines' : 'Hide medicines'}</button><button type="button" class="btn btn-secondary btn-sm" data-d="reload" title="Put any medicines that are missing back in the cart">Reload medicines</button><button type="button" class="btn btn-secondary btn-sm" data-d="change">Change</button><button type="button" class="btn btn-ghost btn-sm" data-d="clear" style="color:var(--color-danger)">Remove</button></div>
+    return `
+      <div class="ph-rx-who">
+        <div><span class="ph-k">Patient</span>${pt ? `<strong>${esc(pt.name)}</strong><div class="text-xs text-muted">${esc(pt.number || '')}${age(pt.dateOfBirth) ? ` · ${esc(age(pt.dateOfBirth))}` : ''}${pt.sex ? ` · ${esc(pt.sex)}` : ''}${pt.phone ? ` · ${esc(pt.phone)}` : ''}</div>` : '<span class="text-muted">Not visible to your role</span>'}</div>
+        <div><span class="ph-k">Prescriber</span><strong>${esc(pres.name || '-')}</strong><div class="text-xs text-muted">${esc(pres.registrationNumber || '')}${pres.facility ? ` · ${esc(pres.facility)}` : ''}</div></div>
+        <div><span class="ph-k">Dates</span><div class="text-xs">Written ${esc(P().date(r.prescriptionDate))}<br>Valid until ${esc(P().date(r.validUntil))}${r.maxDispensings ? `<br>Repeats: ${esc(r.maxDispensings)}×` : ''}</div></div>
       </div>
-      <div class="ph-desk-meta">
-        <div><span class="ph-k">Patient</span>${pt ? `<strong>${esc(pt.name)}</strong> <span class="text-muted text-xs">${esc(pt.number || '')}${age(pt.dateOfBirth) ? ` · ${esc(age(pt.dateOfBirth))}` : ''}${pt.sex ? ` · ${esc(pt.sex)}` : ''}${pt.phone ? ` · ${esc(pt.phone)}` : ''}</span>` : '<span class="text-muted">Not visible to your role</span>'}</div>
-        <div><span class="ph-k">Prescriber</span><strong>${esc(pres.name || '-')}</strong> <span class="text-muted text-xs">${esc(pres.registrationNumber || '')}${pres.facility ? ` · ${esc(pres.facility)}` : ''}</span></div>
-      </div>
-      ${allergies.length ? `<div class="ph-warn-box" style="margin:var(--space-2) 0"><strong>Allergies:</strong> ${allergies.map(esc).join(', ')}. Check each medicine below before dispensing.</div>` : (pt ? '<div class="ph-note" style="margin:var(--space-1) 0">No allergies recorded for this patient.</div>' : '')}
-      <div class="ph-desk-tablewrap" ${desk.collapsed ? 'hidden' : ''}><table class="table ph-desk-table"><thead><tr><th>Medicine</th><th>Directions</th><th>Dispensed</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="ph-note">Anything else the patient wants (over-the-counter items) can be added with the search above. Only medicines on the prescription count against it.</div>
-    </div>`;
-    el.querySelector('[data-d="change"]').addEventListener('click', () => choose());
-    el.querySelector('[data-d="clear"]').addEventListener('click', async () => {
+      ${allergies.length ? `<div class="ph-warn-box" style="margin:0 0 var(--space-3)"><strong>Allergies:</strong> ${allergies.map(esc).join(', ')}. Check each medicine before dispensing.</div>` : (pt ? '<div class="ph-note" style="margin:0 0 var(--space-3)">No allergies recorded for this patient.</div>' : '')}
+      <h4 class="ph-rx-h">Medicines <button type="button" class="btn btn-ghost btn-sm" data-d="reload" title="Put any missing medicines back in the cart">Reload all</button></h4>
+      <ul class="ph-rx-items">${items}</ul>
+      <div class="ph-note">Other items the patient wants can be added with the search above. Only medicines on the prescription count against it.</div>`;
+  }
+
+  function bindPanel(root, closeFn) {
+    const r = rx();
+    root.querySelector('[data-d="find"]')?.addEventListener('click', () => choose());
+    root.querySelector('[data-d="patient"]')?.addEventListener('click', byPatient);
+    root.querySelector('[data-d="change"]')?.addEventListener('click', () => { if (closeFn) closeFn(); choose(); });
+    root.querySelector('[data-d="clear"]')?.addEventListener('click', async () => {
       if (host.state.cart.length && !(await window.UI.confirmDialog({ title: 'Remove this prescription?', message: 'The cart is cleared too.', confirmText: 'Remove', danger: true }))) return;
+      if (closeFn) closeFn();
       clearRx();
     });
-    el.querySelector('[data-d="fold"]').addEventListener('click', () => { desk.collapsed = !desk.collapsed; paint(); });
-    el.querySelector('[data-d="reload"]').addEventListener('click', () => loadItems());
-    el.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', async () => {
-      const item = (r.items || []).find((x) => String(x.productId) === b.dataset.add); if (!item) return;
+    root.querySelector('[data-d="reload"]')?.addEventListener('click', () => loadItems());
+    root.querySelector('[data-d="details"]')?.addEventListener('click', openDetails);
+    root.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', async () => {
+      const item = ((r && r.items) || []).find((x) => String(x.productId) === b.dataset.add); if (!item) return;
       b.disabled = true; await addItem(item, left(item));
     }));
+    window.Permissions.applyPermissionGates(root, window.AppShell.getUser());
+  }
+
+  function openDetails() {
+    const r = rx(); if (!r) return;
+    const modal = window.UI.openModal({ title: `${r.number} · prescription`, maxWidth: '620px', bodyHtml: '<div id="ph-rx-detail"></div>', footerHtml: '<button class="btn btn-ghost" data-act="clear" style="color:var(--color-danger)">Remove prescription</button><button class="btn btn-secondary" data-act="change">Change prescription</button><button class="btn btn-primary" data-act="close">Done</button>' });
+    modal.querySelector('[data-act="close"]').addEventListener('click', () => window.UI.closeModal());
+    modal.querySelector('[data-act="change"]').addEventListener('click', () => { window.UI.closeModal(); choose(); });
+    modal.querySelector('[data-act="clear"]').addEventListener('click', async () => {
+      if (host.state.cart.length && !(await window.UI.confirmDialog({ title: 'Remove this prescription?', message: 'The cart is cleared too.', confirmText: 'Remove', danger: true }))) return;
+      window.UI.closeModal(); clearRx();
+    });
+    detailBody = modal.querySelector('#ph-rx-detail');
+    paintDetails();
+  }
+  function paintDetails() {
+    if (!detailBody) return;
+    if (!document.body.contains(detailBody)) { detailBody = null; return; }
+    const r = rx();
+    if (!r) { detailBody = null; window.UI.closeModal(); return; }
+    detailBody.innerHTML = detailHtml(r);
+    bindPanel(detailBody);
+  }
+
+  function paint() {
+    const strip = document.getElementById('ph-desk');          // one line inside the search card
+    const side = document.getElementById('ph-rxside');         // the column beside the cart (wide tills)
+    const root = document.getElementById('pz-root');
+    if (!host || !strip) return;
+    if (!active()) { strip.innerHTML = ''; strip.style.display = 'none'; if (side) side.hidden = true; return; }
+    const m = mode();
+    const wasRx = !!(root && root.classList.contains('ph-rx'));
+    if (root) root.classList.toggle('ph-rx', m === 'rx');
+    if (root && wasRx !== (m === 'rx') && host.fit) host.fit();   // the cart needs re-measuring when its column appears / goes
+    strip.style.display = '';
+
+    if (m === 'otc') {
+      if (side) { side.hidden = true; side.innerHTML = ''; }
+      strip.innerHTML = `<div class="ph-desk ph-desk-otc"><span>${window.Icons.get('bag')} <strong>Over-the-counter sale.</strong> Medicines that need a prescription, and controlled drugs, are not sold here.</span><button type="button" class="btn btn-secondary btn-sm" data-d="to-rx">Dispense a prescription</button></div>`;
+      strip.querySelector('[data-d="to-rx"]').addEventListener('click', () => switchTo('rx'));
+      return;
+    }
+
+    const r = rx();
+    // ---- the side column (visible only when the till is wide enough; see css/pharmacy.css)
+    if (side) {
+      side.hidden = false;
+      if (desk.loading) side.innerHTML = '<div class="ph-rx-pad text-muted">Loading the prescription…</div>';
+      else if (!r) { side.innerHTML = `<div class="ph-rx-head"><strong>${window.Icons.get('pill')} Prescription</strong></div><div class="ph-rx-scroll">${emptyHtml()}</div>`; bindPanel(side); }
+      else {
+        side.innerHTML = `<div class="ph-rx-head"><div class="ph-rx-title"><span class="ph-step-n ok">✓</span><strong>${esc(r.number)}</strong> ${P().badge(r.status)}</div>
+          <div class="ph-rx-btns"><button type="button" class="btn btn-secondary btn-sm" data-d="change">Change</button><button type="button" class="btn btn-ghost btn-sm" data-d="clear" style="color:var(--color-danger)">Remove</button></div></div>
+          <div class="ph-rx-scroll">${detailHtml(r)}</div>`;
+        bindPanel(side);
+      }
+    }
+    // ---- the one-line strip (visible only on narrower tills)
+    if (desk.loading) strip.innerHTML = '<div class="ph-desk ph-desk-rxstrip"><span class="text-muted">Loading the prescription…</span></div>';
+    else if (!r) {
+      strip.innerHTML = `<div class="ph-desk ph-desk-rxstrip ph-desk-rxstrip-empty"><span class="ph-step-n">1</span><strong>Choose the prescription to dispense</strong>
+        ${desk.error ? `<span class="ph-allergy-hit ph-opt" style="margin:0">${esc(desk.error)}</span>` : ''}<span class="ph-spacer"></span>
+        <button type="button" class="btn btn-primary btn-sm" data-d="find">${window.Icons.get('search')} Find prescription</button>
+        <button type="button" class="btn btn-secondary btn-sm ph-opt" data-d="patient" data-requires-permission="patients.view">By patient</button>
+        <a class="btn btn-secondary btn-sm ph-opt" href="prescriptions.html?new=1" data-requires-permission="prescriptions.intake">New prescription</a></div>`;
+      bindPanel(strip);
+    } else {
+      const pt = desk.patient; const al = (pt && pt.allergies) || [];
+      const open = (r.items || []).filter((i) => left(i) > 0).length;
+      strip.innerHTML = `<div class="ph-desk ph-desk-rxstrip"><span class="ph-step-n ok">✓</span><strong>${esc(r.number)}</strong> ${P().badge(r.status)}
+        <span class="ph-strip-who">${pt ? esc(pt.name) : ''}${open ? ` · ${open} medicine${open === 1 ? '' : 's'}` : ''}</span>
+        ${al.length ? `<span class="ph-chip-allergy" title="${esc(al.join(', '))}">⚠ Allergies: ${esc(al.slice(0, 2).join(', '))}${al.length > 2 ? '…' : ''}</span>` : ''}<span class="ph-spacer"></span>
+        <button type="button" class="btn btn-secondary btn-sm" data-d="details">Details</button>
+        <button type="button" class="btn btn-secondary btn-sm ph-opt" data-d="change">Change</button>
+        <button type="button" class="btn btn-ghost btn-sm ph-opt" data-d="clear" style="color:var(--color-danger)">Remove</button></div>`;
+      bindPanel(strip);
+    }
+    paintDetails();
   }
 
   /** sales.js calls this once the till is on screen. */

@@ -108,7 +108,7 @@
     else if (n.rx.length) chips.push('<span class="ph-chip warn">Prescription needed</span>');
     if (n.restricted.length) chips.push('<span class="ph-chip bad">Controlled drug: pharmacist + countersignature</span>');
     if (n.poison.length && !(ph && ph.rx)) chips.push('<span class="ph-chip warn">Poisons Book entry</span>');
-    if (!chips.length && n.dispenser) chips.push('<span class="ph-chip">Dispenser only</span>');
+    if (!chips.length && n.dispenser && !deskOn) chips.push('<span class="ph-chip">Dispenser only</span>');
     if (deskOn && !chips.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
     el.innerHTML = `<span class="ph-till-title">${window.Icons.get('pill')} Pharmacy</span>${chips.join('') || '<span class="text-muted">Ordinary items. Medicines that need a prescription are flagged here.</span>'}<span class="ph-spacer"></span>${!deskOn && n.rx.length && P().can('prescriptions.view') ? '<button type="button" class="btn btn-secondary btn-sm" id="ph-attach">Attach prescription</button>' : ''}`;
     el.querySelector('#ph-attach')?.addEventListener('click', () => el.dispatchEvent(new CustomEvent('ph-attach', { bubbles: true })));

@@ -149,6 +149,7 @@
     removeProducts: (ids) => { state.cart = state.cart.filter((l) => !ids.includes(String(l.product._id))); renderCart(); },
     clear: () => resetCart(),
     render: () => renderCart(),
+    fit: () => fitRoot(),
   };
 
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
@@ -582,7 +583,11 @@
     const bucket = w >= 1280 ? 'xl' : w >= 1040 ? 'lg' : w >= 800 ? 'md' : w >= 560 ? 'sm' : 'xs';
     const side = w >= 800;
     const summaryW = bucket === 'xl' ? 380 : bucket === 'lg' ? 340 : 310;
-    const ticketW = side ? w - summaryW - 12 : w;
+    // Pharmacy "Dispense prescription": the prescription gets its own column beside the cart when there is room (see pharmacy-desk.js).
+    const rxCol = side && root.classList.contains('ph-rx') && w >= 1180 ? (w >= 1400 ? 360 : 320) : 0;
+    root.style.setProperty('--ph-rx-w', `${rxCol}px`);
+    root.classList.toggle('ph-rx-side', rxCol > 0);
+    const ticketW = side ? w - summaryW - 12 - (rxCol ? rxCol + 12 : 0) : w;
     const wide = ticketW >= (wsMode ? 940 : 700);
     const bc = wide && ticketW >= (wsMode ? 1120 : 900);
     ['xs', 'sm', 'md', 'lg', 'xl'].forEach((b) => root.classList.toggle(`pz-w-${b}`, b === bucket));
@@ -1177,6 +1182,7 @@
       </div>
 
       <div class="pz-main">
+        ${window.PharmacyDesk && window.PharmacyDesk.active() && !wsOn ? '<aside class="card ph-rxside" id="ph-rxside" aria-label="Prescription" hidden></aside>' : ''}
         <section class="card pz-ticketwrap" aria-label="Ticket">
           <div class="pz-hr pz-hgroup">
             <div class="pz-left"><h3>${wsOn ? 'Warehouse stock' : 'Products'}</h3></div>
