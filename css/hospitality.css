@@ -325,3 +325,11 @@
 .hx-thumb { width: 64px; height: 64px; flex: none; border-radius: 10px; border: 1px dashed var(--color-border-strong); background: var(--color-bg); overflow: hidden; cursor: pointer; padding: 0; color: var(--color-text-muted); font-size: 11px; } .hx-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .hx-photo { display: grid; gap: var(--space-3); } .hx-photoprev { height: 220px; border-radius: 12px; background: var(--color-bg); display: grid; place-items: center; overflow: hidden; } .hx-photoprev img { width: 100%; height: 100%; object-fit: cover; }
 .hx-reciperows { display: grid; gap: var(--space-2); } .hx-reciperow { display: grid; grid-template-columns: minmax(0, 2fr) 90px 90px auto; gap: var(--space-2); align-items: center; }
+
+/* ---- loading skeletons ---- */
+.hx-sk{display:inline-block;background:linear-gradient(90deg,var(--color-border) 25%,rgba(128,128,128,.08) 37%,var(--color-border) 63%);background-size:400% 100%;animation:hx-sk 1.3s ease infinite;border-radius:var(--radius-md,8px);vertical-align:middle;max-width:100%}
+.hx-sktile{display:block;min-height:112px;border-radius:var(--radius-lg,12px)}
+.hx-skgrid{display:grid;gap:var(--space-4);grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.hx-skwrap .hx-row:last-child{border-bottom:0}
+@keyframes hx-sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
+@media (prefers-reduced-motion:reduce){.hx-sk{animation:none}}

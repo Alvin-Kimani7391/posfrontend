@@ -10,9 +10,10 @@
     const mk = (type, label) => (can('restaurant.orders.create') ? `<button class="btn btn-secondary" data-new="${type}">${label}</button>` : '');
     el.innerHTML = head('Tables & orders', 'Tap a table to take an order, send it to the kitchen, then bill and take payment.',
       `${mk('TAKEAWAY', 'Takeaway')}${mk('PICKUP', 'New pickup')}${mk('DELIVERY', 'New delivery')}${mk('BAR_TAB', 'Bar tab')}${can('restaurant.bills.view') ? '<a class="btn btn-secondary" href="hx-bills.html">Bills &amp; payments</a>' : ''}<span class="hx-live">Live</span>`)
-      + '<div id="areas"></div><div id="floor" class="hx-floor"><p class="hx-sub">Loading tables…</p></div><div class="hx-legend" id="legend"></div><div id="open-others"></div>';
+      + '<div id="areas"></div><div id="floor" class="hx-floor">' + window.HX.skel('tilesin') + '</div><div class="hx-legend" id="legend"></div><div id="open-others"></div>';
     el.querySelectorAll('[data-new]').forEach((b) => b.addEventListener('click', () => window.HX.order.start(b.dataset.new, { onChange: load, onClose: load })));
     el.querySelector('#legend').innerHTML = Object.keys(TONE).map((k) => pill(k, TONE[k])).join('');
+    if (window.HX.order && window.HX.order.prefetch) window.HX.order.prefetch();
     const [a] = await Promise.all([get('/restaurant/areas', { branchId: window.HX.branchId() }), load()]);
     areas = list(a, 'areas'); paintAreas();
     window.HX.live(() => { if (!document.querySelector('.modal-backdrop')) load(); }, 15000);

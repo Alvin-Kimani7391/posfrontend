@@ -116,8 +116,19 @@
     });
   }
 
-  /** Mounts the app shell and returns the content element, or null when the user is being redirected. */
-  function mount(title) { return shell().mount({ title }); }
+
+  /** Loading skeletons: shown at once, replaced by the real content. kind: tiles | rows | cards | page */
+  const bar = (w, h = 12) => `<span class="hx-sk" style="width:${w};height:${h}px"></span>`;
+  function skel(kind = 'rows', n) {
+    if (kind === 'tilesin') return Array.from({ length: n || 12 }, () => '<div class="hx-sk hx-sktile"></div>').join('');
+    if (kind === 'tiles') return `<div class="hx-floor hx-skwrap" aria-busy="true" aria-label="Loading">${Array.from({ length: n || 12 }, () => '<div class="hx-sk hx-sktile"></div>').join('')}</div>`;
+    if (kind === 'cards') return `<div class="hx-skgrid" aria-busy="true" aria-label="Loading">${Array.from({ length: n || 6 }, () => `<div class="hx-card">${bar('55%', 14)}<div style="height:10px"></div>${bar('85%')}<div style="height:8px"></div>${bar('40%')}</div>`).join('')}</div>`;
+    return `<div class="hx-card flush hx-skwrap" aria-busy="true" aria-label="Loading">${Array.from({ length: n || 6 }, () => `<div class="hx-row"><div class="grow">${bar('45%', 14)}<div style="height:8px"></div>${bar('30%', 10)}</div>${bar('64px', 22)}</div>`).join('')}</div>`;
+  }
+  const skelPage = () => `<div class="hx-head"><div>${bar('220px', 26)}<div style="height:10px"></div>${bar('340px', 12)}</div></div>${skel('rows', 6)}`;
+
+  /** Mounts the app shell and returns the content element, or null when the user is being redirected. A skeleton is painted straight away. */
+  function mount(title) { const el = shell().mount({ title }); if (el) el.innerHTML = skelPage(); return el; }
 
   /** Re-run fn every `ms` while the tab is visible; also reruns on branch change. Returns a stop function. */
   function live(fn, ms = 30000) {
@@ -128,7 +139,7 @@
     return () => { clearInterval(t); window.removeEventListener('branchchange', fn); document.removeEventListener('visibilitychange', tick); };
   }
 
-  window.HX = { errors: errs, E, M, user, can, canAny, branchId, feature, list, get, send, pill, head, icon, fieldHtml, formModal, readForm, mount, live };
+  window.HX = { errors: errs, E, M, user, can, canAny, branchId, feature, list, get, send, pill, head, icon, fieldHtml, formModal, readForm, mount, live, skel };
 })(window);
 /* ---- extra helpers shared by the order, bill and stay screens ---- */
 (function (window) {

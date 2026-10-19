@@ -246,12 +246,11 @@
   const BILL_TONE = { OPEN: 'warn', PARTIAL: 'busy', PAID: 'ok', VOID: 'mute', WRITTEN_OFF: 'mute' };
   const dueOf = (b) => (b.balance != null ? b.balance : Math.max(0, (b.total || 0) - (b.paid || 0)));
   async function openBill(id, opts = {}) {
-    const d = await get('/restaurant/bills/' + id); if (!d) { toast().error('Could not open that bill'); return null; }
+    const [d, ctx] = await Promise.all([get('/restaurant/bills/' + id), payCtx('restaurant')]); if (!d) { toast().error('Could not open that bill'); return null; }
     let bill = unwrap(d, 'bill'), sale = d.sale || (d.data && d.data.sale) || null;
-    const ctx = await payCtx('restaurant');
     const reload = async () => { const r = await get('/restaurant/bills/' + id); if (r) { bill = unwrap(r, 'bill'); sale = r.sale || (r.data && r.data.sale) || null; } if (opts.onChange) opts.onChange(bill); paint(); };
     let el = null;
-    const mm = modal({ title: `Bill ${bill.billNumber}`, maxWidth: '560px', cls: 'hx-modal-bill', body: '<div class="hx-billbody"></div>', footer: '<div class="hx-foot"></div>', onMount: (m) => { el = m; paint(); if (opts.autoPay && payable()) setTimeout(takePayment, 150); } });
+    const mm = modal({ title: `Bill ${bill.billNumber}`, maxWidth: '560px', cls: 'hx-modal-bill', body: '<div class="hx-billbody"></div>', footer: '<div class="hx-foot"></div>', onMount: (m) => { el = m; setTimeout(() => { paint(); if (opts.autoPay && payable()) setTimeout(takePayment, 150); }, 0); } });
     function payable() { return (bill.status === 'OPEN' || bill.status === 'PARTIAL') && can('restaurant.bills.pay') && dueOf(bill) > 0; }
     function paint() {
       if (!el || !el.isConnected) return;
@@ -260,7 +259,7 @@
       const more = [act('disc', 'Discount', open && can('restaurant.orders.discount')), act('split', 'Split bill', open && can('restaurant.bills.split')), act('sc', b.scWaived ? 'Restore service charge' : 'Waive service charge', open && b.serviceCharge > 0 && can('restaurant.bills.waive_service_charge')), act('tip', 'Add tip', ['PAID', 'PARTIAL', 'OPEN'].includes(b.status) && can('restaurant.bills.pay')), act('refund', 'Refund', b.status === 'PAID' && can('restaurant.bills.refund')), act('void', 'Void bill', open && can('restaurant.bills.generate'))].join('');
       el.querySelector('.hx-billbody').innerHTML = `<div class="hx-paper">${paperHtml(billDoc(b, ctx, sale))}</div><div class="hx-billstat">${HX.pill(b.status, BILL_TONE[b.status])}${open ? `<span>Amount due <b>${M(dueOf(b))}</b></span>` : ''}</div>${more ? `<details class="hx-more"><summary>More actions</summary><div class="hx-morerow">${more}</div></details>` : ''}`;
       el.querySelector('.hx-foot').innerHTML = `<button type="button" class="btn btn-secondary" data-a="close">Close</button><button type="button" class="btn btn-secondary" data-a="print">${open ? 'Print bill' : 'Print receipt'}</button>${payable() ? `<button type="button" class="btn btn-primary" data-a="pay">${b.status === 'PARTIAL' ? 'Pay balance' : 'Take payment'}</button>` : ''}`;
-      const H = { close: mm.close, print: () => receipt.print(billDoc(bill, ctx, sale)), pay: takePayment, disc: discount, split, sc: waive, tip, refund, void: voidIt };
+      const H = { close: () => mm && mm.close(), print: () => receipt.print(billDoc(bill, ctx, sale)), pay: () => takePayment(), disc: () => discount(), split: () => split(), sc: () => waive(), tip: () => tip(), refund: () => refund(), void: () => voidIt() };
       el.querySelectorAll('[data-a]').forEach((x) => x.addEventListener('click', () => (H[x.dataset.a] || (() => {}))()));
     }
     function takePayment() {
@@ -274,7 +273,7 @@
     const tip = () => F({ title: 'Add a tip', maxWidth: '400px', fields: [{ name: 'amount', label: 'Tip amount', type: 'number', min: 0, step: '0.01', required: true }, { name: 'method', label: 'Paid by', type: 'select', options: ['CASH', 'MPESA', 'CARD', 'MOBILE_MONEY', 'BANK'].map((x) => [x, HX.payLabel(x)]) }, { name: 'reference', label: 'Reference (optional)' }], onSubmit: async (v) => { if (await HX.send('post', `/restaurant/bills/${bill._id}/tips`, v)) { toast().success('Tip recorded'); reload(); return true; } return false; } });
     const refund = () => F({ title: 'Refund', maxWidth: '400px', fields: [{ name: 'amount', label: 'Amount', type: 'number', value: bill.paid, step: '0.01', required: true }, { name: 'method', label: 'Refund by', type: 'select', options: ['CASH', 'MPESA', 'CARD', 'BANK'].map((x) => [x, HX.payLabel(x)]) }, { name: 'reason', label: 'Reason', required: true }], onSubmit: async (v) => { if (await HX.send('post', `/restaurant/bills/${bill._id}/refund`, v)) { reload(); return true; } return false; } });
     const voidIt = async () => { const r = await HX.ask('Void this bill', 'Reason'); if (r && await HX.send('post', `/restaurant/bills/${bill._id}/void`, { reason: r })) reload(); };
-    return { close: mm.close, reload };
+    return { close: () => mm.close(), reload };
   }
   async function forOrder(orderId, opts = {}) {
     try { await window.Api.post(`/restaurant/orders/${orderId}/bills`, {}); } catch (e) { /* use existing bills */ }
@@ -296,7 +295,7 @@
       return out.sort((a, b) => new Date(b.at) - new Date(a.at));
     },
     async render(box, onChange) {
-      box.innerHTML = '<div class="hx-card"><p class="hx-sub">Loading…</p></div>';
+      box.innerHTML = window.HX.skel('rows');
       const rows = await verify.load();
       box.innerHTML = rows.length ? `<div class="hx-card flush">${rows.map((r, i) => `<div class="hx-row hx-verifyrow"><div class="grow"><b>${E(r.number)} · ${E(r.label)}</b><small class="hx-sub">${E(String(r.network || 'Mobile money').replace(/_/g, ' '))} · code <span class="hx-mono">${E(r.reference || '')}</span>${r.payerPhone ? ' · ' + E(r.payerPhone) : ''} · ${dt(r.at)}</small></div><span class="hx-money">${M(r.amount)}</span><button class="btn btn-sm btn-primary" data-ok="${i}">Verified</button><button class="btn btn-sm btn-secondary" data-no="${i}">Not found</button></div>`).join('')}</div>` : HX.empty('Nothing to verify', 'Mobile-money payments recorded by staff appear here for you to check against your phone or statement.');
       const call = async (r, approve, note) => {

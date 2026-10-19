@@ -8,15 +8,19 @@
   const { E, M, can, get, send, pill, formModal, unwrap } = HX;
   const menuCache = {};
   async function loadMenu(branchId, orderType) {
-    const k = branchId + orderType, c = menuCache[k]; if (c && Date.now() - c.t < 60000) return c.d;
+    const k = branchId + orderType, c = menuCache[k]; if (c && Date.now() - c.t < 120000) return c.d;
     const d = (await get('/restaurant/menu', { branchId, orderType })) || { categories: [] }; menuCache[k] = { t: Date.now(), d }; return d;
   }
   async function open(id, opts = {}) {
-    const od = await get('/restaurant/orders/' + id); if (!od) { window.UI.toast.error('Could not open that order'); return null; }
+    const [od, warm] = await Promise.all([get('/restaurant/orders/' + id), loadMenu(HX.branchId(), 'DINE_IN').catch(() => null)]); if (!od) { window.UI.toast.error('Could not open that order'); return null; }
     let order = unwrap(od, 'order'); const type = order.orderType || 'DINE_IN';
-    const menu = await loadMenu(order.branchId || HX.branchId(), type);
+    const menu = (type === 'DINE_IN' && (!order.branchId || String(order.branchId) === String(HX.branchId())) && warm) ? warm : await loadMenu(order.branchId || HX.branchId(), type);
     let draft = [], cat = 0, q = '', root = null, timer = null, busy = false;
     const title = `${order.tableName ? 'Table ' + order.tableName : (order.orderType || '').replace('_', ' ')} · ${order.orderNumber}`;
+    const modalAbove = () => { const all = document.querySelectorAll('.modal-backdrop'); return all.length && all[all.length - 1] !== root.closest('.modal-backdrop'); };
+    const $ = (s) => root.querySelector(s);
+    const live = () => (order.items || []).filter((i) => i.status !== 'CANCELLED');
+    const lineTotal = (i) => (i.unitPrice || 0) * (i.quantity || 1);
     const m = HX.modal({ title, maxWidth: '1120px', cls: 'hx-modal-order',
       body: '<div class="hx-ow"><div class="hx-order-menu"><div class="hx-owbar"></div><div class="hx-cats" id="ow-cats"></div><div class="hx-dishes" id="ow-dishes"></div></div><aside class="hx-cart" id="ow-cart"></aside></div>',
       onMount(el) {
@@ -25,10 +29,6 @@
         const obs = new MutationObserver(() => { if (!root.isConnected) { obs.disconnect(); clearInterval(timer); if (opts.onClose) opts.onClose(); } });
         obs.observe(document.body, { childList: true });
       } });
-    const modalAbove = () => { const all = document.querySelectorAll('.modal-backdrop'); return all.length && all[all.length - 1] !== root.closest('.modal-backdrop'); };
-    const $ = (s) => root.querySelector(s);
-    const live = () => (order.items || []).filter((i) => i.status !== 'CANCELLED');
-    const lineTotal = (i) => (i.unitPrice || 0) * (i.quantity || 1);
     async function refresh() { const r = await get('/restaurant/orders/' + order._id); if (r && root.isConnected) { order = unwrap(r, 'order'); paintBar(); paintCart(); if (opts.onChange) opts.onChange(order); } }
     const act = (path, body) => send('post', '/restaurant/orders/' + order._id + path, body);
     function paintBar() {
@@ -134,5 +134,5 @@
       if (o && o._id) { if (opts.onChange) opts.onChange(o); setTimeout(() => open(o._id, opts), 120); return true; } return false;
     } });
   }
-  HX.order = { open, openTable, start, TYPES };
+  HX.order = { open, openTable, start, TYPES, prefetch: () => { try { loadMenu(HX.branchId(), 'DINE_IN'); } catch (e) { /* ignore */ } } };
 })(window);

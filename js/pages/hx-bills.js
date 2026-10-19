@@ -17,7 +17,7 @@
     const tabs = [['TOPAY', 'To pay'], ['PAID', 'Paid'], ['VOID', 'Void']]; if (canVerify()) tabs.push(['VERIFY', 'Verify mobile money']);
     el.innerHTML = head('Bills & payments', 'Everything waiting for payment, in one place.', can('restaurant.orders.create') ? '<a class="btn btn-secondary" href="hx-floor.html">Tables &amp; orders</a>' : '') + window.HX.tabs(tabs, tab) + '<div id="bl"></div>';
     el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; show(); }));
-    const box = el.querySelector('#bl'); if (!quiet) box.innerHTML = '<div class="hx-card"><p class="hx-sub">Loading…</p></div>';
+    const box = el.querySelector('#bl'); if (!quiet) box.innerHTML = window.HX.skel('rows');
     const bid = window.HX.branchId();
     if (tab === 'VERIFY') return window.HX.verify.render(box, () => {});
     if (tab === 'PAID' || tab === 'VOID') {

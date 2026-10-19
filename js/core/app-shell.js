@@ -325,7 +325,7 @@
     return profilePromise;
   }
 
-  function whenProfileReady() { return loadBusinessProfile(); }
+  function whenProfileReady() { return profile ? Promise.resolve(profile) : loadBusinessProfile(); } // cached copy is used at once; mount() already refreshes it in the background
 
   /** Re-fetch after the owner changes type/features (settings, picker). */
   function refreshBusinessProfile() { return loadBusinessProfile({ force: true }); }
