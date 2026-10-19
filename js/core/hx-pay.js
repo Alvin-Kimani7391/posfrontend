@@ -38,6 +38,7 @@
     const bz = d.business || {};
     return `<div class="hx-paper-doc"><div class="hd">${bz.name ? `<b class="nm">${E(bz.name)}</b>` : ''}${bz.address ? `<div>${E(bz.address)}</div>` : ''}${bz.phone ? `<div>Tel ${E(bz.phone)}</div>` : ''}${bz.pin ? `<div>PIN ${E(bz.pin)}</div>` : ''}</div>
       <div class="ttl">${E(d.title)}</div>
+      ${d.highlight ? `<div class="hl" style="text-align:center;border:2px solid #000;border-radius:6px;padding:6px 4px;margin:6px 0"><div>${E(d.highlight.label)}</div><b style="display:block;font-size:${d.big ? '1.6' : '2.3'}em;letter-spacing:${d.big ? '.05' : '.35'}em">${E(d.highlight.value)}</b>${d.highlight.note ? `<small style="display:block">${E(d.highlight.note)}</small>` : ''}</div>` : ''}
       <div class="meta">${(d.meta || []).filter((m) => m[1] !== '' && m[1] != null).map((m) => row(E(m[0]), E(m[1]))).join('')}</div>
       <div class="ln">${(d.lines || []).map((l) => `<div class="it"><span class="q">${E(l.qty)}</span><span class="n">${E(l.name)}${l.sub ? `<small>${E(l.sub)}</small>` : ''}</span><span class="a">${M(l.total)}</span></div>`).join('') || '<div class="it"><span class="n">No items</span></div>'}</div>
       <div class="tt">${(d.totals || []).map((t) => row(E(t[0]), E(t[1]), t[2] === true)).join('')}</div>
@@ -74,7 +75,15 @@
       totals: [['Charges', M(t.charges != null ? t.charges : t.total)], t.tax ? ['VAT included', M(t.tax)] : null, ['Paid', M(t.paid)], t.waived ? ['Written off', M(t.waived)] : null, ['BALANCE', M(t.balance), true]].filter(Boolean),
       payments: (s.payments || []).map((p) => ({ label: payMethodText(p), value: (p.kind === 'REFUND' ? '−' : '') + M(p.amount), sub: paySub(p) })), footer: 'Thank you for staying with us!' };
   }
-  HX.billDoc = billDoc; HX.stayDoc = stayDoc;
+  /** Booking confirmation / guest card: the folio plus the room PIN the guest types after scanning the QR code in the room. */
+  function guestCardDoc(s, pin, ctx) {
+    const d = stayDoc(s, ctx); const t = s.totals || {};
+    return Object.assign(d, { title: 'Booking confirmation', meta: d.meta.concat([['Booking code', s.bookingCode]]),
+      highlight: pin ? { label: 'YOUR ROOM PIN', value: pin, note: 'Scan the QR code in your room and enter this PIN' } : null,
+      totals: [['Charges', M(t.charges != null ? t.charges : t.total)], ['Paid', M(t.paid)], ['BALANCE', M(t.balance), true]],
+      footer: 'Scan the QR code in your room to order food and drinks, track your order, pay with M-PESA and request services. Keep this PIN private.' });
+  }
+  HX.billDoc = billDoc; HX.stayDoc = stayDoc; HX.guestCardDoc = guestCardDoc;
   const receipt = {
     print: (doc) => printHtml(paperHtml(doc)),
     show(doc, { title = 'Receipt', auto = true } = {}) {

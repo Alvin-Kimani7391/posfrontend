@@ -54,8 +54,15 @@
       if (v.checkInNow && !v.idNumber) { window.UI.toast.warning('Enter the guest’s ID or passport number to check in now, or untick “Check the guest in now”.'); return false; }
       const body = { branchId: window.HX.branchId(), roomTypeId: v.roomTypeId, checkInDate: dates.checkInDate, checkOutDate: dates.checkOutDate, adults: dates.adults || 1, children: dates.children || 0, mealPlan: v.mealPlan, source: v.source, guest: { name: v.name, ...(v.phone ? { phone: v.phone } : {}), ...(v.email ? { email: v.email } : {}), ...(v.idNumber ? { idType: v.idType || 'NATIONAL_ID', idNumber: v.idNumber } : {}) }, ...(v.specialRequests ? { specialRequests: v.specialRequests } : {}), ...(v.checkInNow ? { checkInNow: true } : {}) };
       const r = await send('post', '/accommodation/stays', body); const s = r && unwrap(r, 'stay');
-      if (s && s._id) { window.UI.toast.success('Booking created'); setTimeout(() => { location.hash = 'stay=' + s._id; }, 100); return true; } return false;
+      if (s && s._id) { window.UI.toast.success('Booking created'); const pin = pinOf(r); setTimeout(async () => { location.hash = 'stay=' + s._id; if (pin) { const c = await window.HX.pay.ctx('accommodation'); window.HX.receipt.show(window.HX.guestCardDoc(s, pin, c), { title: 'Booking confirmation (with room PIN)' }); } }, 100); return true; } return false;
     } });
+  }
+
+  const pinOf = (r) => (r && (r.pin || (r.data && r.data.pin))) || null;
+  async function showGuestCard() {
+    const d = await get(`/accommodation/stays/${stay._id}/guest-card`); const pin = d && (d.pin || (d.data && d.data.pin)); const c = await window.HX.pay.ctx('accommodation');
+    if (!pin) return window.UI.toast.info('Room PINs are switched off in accommodation settings');
+    window.HX.receipt.show(window.HX.guestCardDoc(stay, pin, c), { title: 'Booking confirmation (with room PIN)', auto: false });
   }
 
   /* ---------- detail ---------- */
@@ -78,9 +85,9 @@
         <div style="display:grid;gap:var(--space-3);align-content:start">
           <div class="hx-card"><div class="hx-folio-sum" style="grid-template-columns:1fr 1fr 1fr"><div><small>Charges</small><b>${M(t.total != null ? t.total : t.charges)}</b></div><div><small>Paid</small><b>${M(t.paid != null ? t.paid : t.payments)}</b></div><div><small>Balance</small><b>${M(t.balance)}</b></div></div></div>
           <div class="hx-card"><h3>Guest</h3><p>${E(g.name || '')}</p><p class="hx-sub">${E(g.phone || '')} ${E(g.email || '')}</p><p class="hx-sub">${s.adults || 1} adult${(s.adults || 1) > 1 ? 's' : ''}${s.children ? ', ' + s.children + ' children' : ''} · ${E((s.mealPlan || '').replace(/_/g, ' ').toLowerCase())}</p>${s.specialRequests ? `<p class="hx-sub">“${E(s.specialRequests)}”</p>` : ''}</div>
-          <div class="hx-card" style="display:grid;gap:var(--space-2)">${B('ci', 'Check in', booked && can('accommodation.stays.checkin'), 'btn-primary')}${B('co', 'Check out', live && can('accommodation.stays.checkout'), 'btn-primary')}${B('ch', 'Add charge', live && can('accommodation.folio.charge'))}${B('py', 'Take payment', (live || booked) && can('accommodation.folio.pay'), 'btn-primary')}${B('pf', 'Print folio', true)}${B('mv', 'Move room', (live || booked) && can('accommodation.stays.manage'))}${B('cn', 'Cancel booking', booked && can('accommodation.stays.manage'))}${B('ns', 'Mark no-show', booked && can('accommodation.stays.manage'))}</div></div></div>`;
+          <div class="hx-card" style="display:grid;gap:var(--space-2)">${B('ci', 'Check in', booked && can('accommodation.stays.checkin'), 'btn-primary')}${B('co', 'Check out', live && can('accommodation.stays.checkout'), 'btn-primary')}${B('ch', 'Add charge', live && can('accommodation.folio.charge'))}${B('py', 'Take payment', (live || booked) && can('accommodation.folio.pay'), 'btn-primary')}${B('gc', 'Guest card (room PIN)', (live || booked) && can('accommodation.stays.checkin'))}${B('pf', 'Print folio', true)}${B('mv', 'Move room', (live || booked) && can('accommodation.stays.manage'))}${B('cn', 'Cancel booking', booked && can('accommodation.stays.manage'))}${B('ns', 'Mark no-show', booked && can('accommodation.stays.manage'))}</div></div></div>`;
     const on = (id, f) => el.querySelector('#' + id)?.addEventListener('click', f);
-    on('pf', printFolio); on('ci', checkIn); on('co', checkOut); on('ch', charge); on('py', pay); on('mv', move);
+    on('pf', printFolio); on('gc', showGuestCard); on('ci', checkIn); on('co', checkOut); on('ch', charge); on('py', pay); on('mv', move);
     on('cn', async () => { const r = await window.HX.ask('Cancel booking', 'Reason'); if (r && await send('post', `/accommodation/stays/${s._id}/cancel`, { reason: r })) reload(); });
     on('ns', async () => { if (await window.UI.confirmDialog({ title: 'Mark as no-show?', message: 'A no-show fee may apply.', confirmText: 'Mark no-show', danger: true }) && await send('post', `/accommodation/stays/${s._id}/no-show`, {})) reload(); });
     el.querySelectorAll('[data-v]').forEach((b) => b.addEventListener('click', async () => { const r = await window.HX.ask('Void charge', 'Reason'); if (r && await send('post', `/accommodation/stays/${s._id}/charges/${b.dataset.v}/void`, { reason: r })) reload(); }));
@@ -89,7 +96,7 @@
   function checkIn() {
     const g = stay.guest || {};
     formModal({ title: 'Check in', intro: 'Confirm who is arriving. ID details may be required by your settings.', fields: [{ row: [{ name: 'idType', label: 'ID type', type: 'select', options: [['NATIONAL_ID', 'National ID'], ['PASSPORT', 'Passport'], ['DRIVING_LICENCE', 'Driving licence'], ['OTHER', 'Other']], value: g.idType }, { name: 'idNumber', label: 'ID number', value: g.idNumber }] }, { name: 'phone', label: 'Phone', type: 'tel', value: g.phone }],
-      onSubmit: async (v) => { const guest = {}; ['idType', 'idNumber', 'phone'].forEach((k) => { if (v[k]) guest[k] = v[k]; }); if (await send('post', `/accommodation/stays/${stay._id}/check-in`, { guest })) { window.UI.toast.success('Checked in'); reload(); return true; } return false; } });
+      onSubmit: async (v) => { const guest = {}; ['idType', 'idNumber', 'phone'].forEach((k) => { if (v[k]) guest[k] = v[k]; }); const r = await send('post', `/accommodation/stays/${stay._id}/check-in`, { guest }); if (r) { window.UI.toast.success('Checked in'); const pin = pinOf(r); await reload(); if (pin) { const c = await window.HX.pay.ctx('accommodation'); window.HX.receipt.show(window.HX.guestCardDoc(stay, pin, c), { title: 'Guest card (room PIN)' }); } return true; } return false; } });
   }
   function charge() {
     formModal({ title: 'Add a charge', fields: [{ name: 'type', label: 'Type', type: 'select', options: [['FNB', 'Food & drink'], ['MINIBAR', 'Minibar'], ['LAUNDRY', 'Laundry'], ['TRANSPORT', 'Transport'], ['SERVICE', 'Service'], ['DAMAGE', 'Damage'], ['EXTRA_PERSON', 'Extra person'], ['OTHER', 'Other']] }, { name: 'description', label: 'Description', required: true }, { row: [{ name: 'quantity', label: 'Quantity', type: 'number', value: 1, min: 1 }, { name: 'unitPrice', label: 'Price each', type: 'number', step: '0.01', required: true }] }],

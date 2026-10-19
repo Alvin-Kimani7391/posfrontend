@@ -18,7 +18,7 @@
   function paint() {
     const f = rooms.filter((r) => !filter || (filter === 'occupied' ? r.inHouse : filter === 'ready' ? !r.inHouse && r.sellable : filter === 'dirty' ? !r.inHouse && r.status === 'AVAILABLE' && !r.sellable : r.status === 'OUT_OF_ORDER'));
     const chips = [['', `All · ${summary.total || rooms.length}`], ['occupied', `Occupied · ${summary.occupied || 0}`], ['ready', `Ready · ${summary.vacantReady || 0}`], ['dirty', `Needs cleaning · ${summary.vacantDirty || 0}`], ['ooo', `Out of order · ${summary.outOfOrder || 0}`]];
-    el.innerHTML = head('Room board', 'Tap a room for its details and actions.', '<span class="hx-live">Live</span>') + `<div class="hx-cats hx-tabs">${chips.map(([k, l]) => `<button class="hx-chip ${k === filter ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}</div>` +
+    el.innerHTML = head('Room board', 'Tap a room for its details and actions.', (can('accommodation.rooms.manage') ? '<button class="btn btn-secondary" id="deals">Room deals</button>' : '') + '<span class="hx-live">Live</span>') + `<div class="hx-cats hx-tabs">${chips.map(([k, l]) => `<button class="hx-chip ${k === filter ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}</div>` +
       (f.length ? `<div class="hx-rooms">${f.map((r) => { const [s, t] = state(r); return `<button class="hx-room hx-st-${t}" data-r="${r._id}" style="border-left:4px solid var(--st)"><span class="no">${E(r.number)}</span><span class="ty">${E(r.roomType || '')}</span><span>${pill(s, t)}</span><span class="who">${r.inHouse ? E(r.inHouse.guest && r.inHouse.guest.name) : r.arrivingToday ? 'Arriving today' : ''}${r.dueOutToday ? ' · due out' : ''}</span></button>`; }).join('')}</div>` : window.HX.empty('No rooms', 'Add rooms in the Setup guide.'));
     el.querySelectorAll('[data-f]').forEach((b) => b.addEventListener('click', () => { filter = b.dataset.f; paint(); }));
     el.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => open(rooms.find((x) => x._id === b.dataset.r))));
@@ -35,4 +35,22 @@
     m.querySelectorAll('[data-st]').forEach((b) => b.addEventListener('click', async () => { const reason = b.dataset.st === 'OUT_OF_ORDER' ? await window.HX.ask('Out of service', 'What is wrong?') : ''; if (b.dataset.st === 'OUT_OF_ORDER' && !reason) return; if (await send('post', `/accommodation/rooms/${r._id}/status`, { status: b.dataset.st, ...(reason ? { reason } : {}) })) { window.UI.closeModal(); load(); } }));
     m.querySelector('#tk')?.addEventListener('click', () => formModal({ title: `Task for room ${r.number}`, maxWidth: '400px', fields: [{ name: 'type', label: 'Type', type: 'select', options: [['DEPARTURE_CLEAN', 'Departure clean'], ['STAYOVER_CLEAN', 'Stayover clean'], ['TURNDOWN', 'Turndown'], ['DEEP_CLEAN', 'Deep clean'], ['INSPECTION', 'Inspection'], ['MAINTENANCE', 'Maintenance']] }, { name: 'priority', label: 'Priority', type: 'select', options: [['NORMAL', 'Normal'], ['URGENT', 'Urgent']] }, { name: 'note', label: 'Note', type: 'textarea' }], onSubmit: async (v) => { if (await send('post', '/accommodation/housekeeping/tasks', { ...v, roomId: r._id })) { window.UI.toast.success('Task created'); return true; } return false; } }));
   }
+
+  /* Deals shown to guests on the QR page: pick a room type, set a percentage off and the dates. */
+  async function dealsDialog() {
+    const d = await get('/accommodation/room-types'); const types = (d && (d.roomTypes || d.data && d.data.roomTypes)) || [];
+    if (!types.length) return window.UI.toast.info('Create a room type first');
+    const m = window.UI.openModal({ title: 'Room deals for guests', maxWidth: '520px', bodyHtml: `<p class="hx-sub">Guests scanning a QR code see these deals with live availability. Reception confirms the price when they enquire.</p>${types.map((t) => { const p = t.promo || {}; return `<div class="hx-row"><div class="grow"><b>${E(t.name)}</b><small class="hx-sub">${p.active && p.percentOff ? E(p.title || '') + ' · ' + p.percentOff + '% off' + (p.validTo ? ' until ' + E(p.validTo) : '') : 'No deal'}</small></div><button class="btn btn-sm btn-secondary" data-t="${t._id}">${p.active ? 'Edit' : 'Add deal'}</button></div>`; }).join('')}` });
+    m.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => {
+      const t = types.find((x) => x._id === b.dataset.t), p = t.promo || {};
+      formModal({ title: 'Deal: ' + t.name, submitText: 'Save deal', fields: [
+        { name: 'active', label: 'Show this deal to guests', type: 'checkbox', value: !!p.active },
+        { name: 'title', label: 'Deal name', value: p.title || '', placeholder: 'Weekend escape' },
+        { name: 'percentOff', label: 'Percent off', type: 'number', min: 0, max: 90, value: p.percentOff || 10 },
+        { name: 'description', label: 'Details (optional)', type: 'textarea', value: p.description || '', placeholder: 'Free breakfast included' },
+        { row: [{ name: 'validFrom', label: 'From', type: 'date', value: p.validFrom || '' }, { name: 'validTo', label: 'Until', type: 'date', value: p.validTo || '' }] },
+      ], onSubmit: async (v) => { if (await send('put', `/accommodation/room-types/${t._id}`, { promo: { active: !!v.active, title: v.title || '', percentOff: v.percentOff || 0, description: v.description || '', validFrom: v.validFrom || '', validTo: v.validTo || '' } })) { window.UI.toast.success('Deal saved'); return true; } return false; } });
+    }));
+  }
+  document.addEventListener('click', (e) => { if (e.target && e.target.id === 'deals') dealsDialog(); });
 })();
