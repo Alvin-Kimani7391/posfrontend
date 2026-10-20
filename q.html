@@ -222,6 +222,14 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 .deal .pr{display:flex;align-items:flex-end;justify-content:space-between;margin-top:14px;gap:10px}
 .deal .pr .big{font-size:24px;font-weight:800;color:var(--brand-d);line-height:1}.deal .pr small{display:block;color:var(--mut);font-size:12px;margin-top:3px}
 
+/* account */
+.seg{display:grid;grid-template-columns:1fr 1fr;background:#eef2f0;border-radius:14px;padding:4px;margin-bottom:6px}
+.seg button{padding:11px;border-radius:11px;font-weight:700;color:var(--mut)}.seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.12)}
+.or{display:flex;align-items:center;gap:12px;color:var(--mut);font-size:12.5px;margin:16px 0 4px}.or:before,.or:after{content:"";flex:1;height:1px;background:var(--line)}
+.perk{display:flex;gap:12px;align-items:flex-start;padding:7px 0;font-size:14px}.perk span.ic{width:34px;height:34px;border-radius:11px;background:var(--brand-l);color:var(--brand);display:grid;place-items:center;flex:none}
+.avatar{width:58px;height:58px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-size:24px;font-weight:700;overflow:hidden;flex:none}.avatar img{width:100%;height:100%;object-fit:cover}
+.rowbtn{display:flex;gap:12px;align-items:center;width:100%;text-align:left;padding:12px 4px;border-bottom:1px solid var(--line)}.rowbtn:last-child{border:0}
+.card .okring svg,.rowbtn .okring svg{width:20px;height:20px;stroke-width:2}
 /* pin pad */
 .pinwrap{text-align:center;padding:6px 0 4px}
 .pinboxes{display:flex;justify-content:center;gap:10px;margin:16px 0 6px}
@@ -292,14 +300,15 @@ function ic(n, cls) { return '<svg class="i ' + (cls || '') + '" viewBox="0 0 24
 function amIcon(t) { t = String(t || '').toLowerCase(); return /wi-?fi|internet/.test(t) ? 'wifi' : /tv|television/.test(t) ? 'tv' : /a\/?c|air|cool/.test(t) ? 'snow' : /break|coffee|tea|bar/.test(t) ? 'coffee' : /park|car/.test(t) ? 'car' : /bed|king|queen/.test(t) ? 'bed' : 'sparkles'; }
 
 /* ---------- state ---------- */
-var CK = 'q.cart.' + token.slice(0, 40), GK = 'q.guest', PK = 'q.pin.' + token.slice(0, 40), RK = 'q.rc.' + token.slice(0, 40);
+var acctRc = null, CK = 'q.cart.' + token.slice(0, 40), GK = 'q.guest', PK = 'q.pin.' + token.slice(0, 40), RK = 'q.rc.' + token.slice(0, 40);
 var ctx = null, menu = null, cart = [], query = '', pin = '', guest = { name: '', phone: '' }, sending = false, clientRef = null;
-var tab = 'menu', status = null, billData = null, stayData = null, dealData = null, receipts = [], timers = {}, lastStages = {};
+var acct = sg('q.acct', localStorage), tab = 'menu', status = null, billData = null, stayData = null, dealData = null, receipts = [], timers = {}, lastStages = {};
 function sg(k, s) { try { return JSON.parse((s || sessionStorage).getItem(k) || 'null'); } catch (e) { return null; } }
 function ss(k, v, s) { try { (s || sessionStorage).setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } }
 cart = sg(CK) || []; pin = sg(PK) || ''; guest = Object.assign(guest, sg(GK, localStorage) || {}); receipts = sg(RK, localStorage) || [];
 function saveCart() { ss(CK, cart); }
 
+function gid() { return (ctx && ctx.googleClientId) || (window.APP_CONFIG && window.APP_CONFIG.GOOGLE_CLIENT_ID) || ''; }
 function cur() { return (ctx && ctx.business && ctx.business.currency) || 'KES'; }
 function money(n) { n = +n || 0; var c = cur(), s; try { s = n.toLocaleString('en-KE', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 }); } catch (e) { s = String(n); } return (c === 'KES' ? 'KSh ' : c + ' ') + s; }
 function showPrices() { return !ctx || !ctx.options || ctx.options.showPrices !== false; }
@@ -310,7 +319,7 @@ function ftime(d) { try { return new Date(d).toLocaleTimeString('en-KE', { hour:
 async function call(path, method, body) {
   var q = '';
   var r;
-  try { r = await fetch(API + token + path + q, { method: method || 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); }
+  try { r = await fetch(API + token + path + q, { method: method || 'GET', headers: Object.assign({ 'Content-Type': 'application/json' }, acct && acct.token ? { Authorization: 'Bearer ' + acct.token } : {}), body: body ? JSON.stringify(body) : undefined }); }
   catch (e) { var er = new Error('No connection. Please check your internet and try again.'); er.code = 'NETWORK'; throw er; }
   var j = await r.json().catch(function () { return {}; });
   if (!r.ok || j.success === false) { var er2 = new Error(j.message || 'Something went wrong. Please try again.'); er2.code = j.code || ('HTTP_' + r.status); er2.status = r.status; throw er2; }
@@ -336,6 +345,7 @@ async function init() {
   if (!token) return fail({ message: 'This link is incomplete. Please scan the QR code on your table or room again.', code: 'NO_TOKEN' });
   try {
     ctx = await call('');
+    if (acct) { try { var m = await call('/account/me'); acct.account = m.account; } catch (e) { if (e.status === 401 || e.status === 404) { acct = null; ss('q.acct', null, localStorage); } } }
     paintHero(); buildNav();
     var mp = call('/menu'); call('/deals').then(function (d) { dealData = d; buildNav(); if (tab === 'offers') render(); }).catch(function () { dealData = { available: false, rooms: [] }; });
     menu = await mp; cart = cart.filter(function (c) { return c && c.menuItemId; }); saveCart();
@@ -355,7 +365,8 @@ function paintHero() {
   document.title = (b.name || 'Welcome') + ' · ' + (pl.label || '');
   $('#bn').textContent = b.name || 'Welcome'; $('#br').textContent = [ctx.branch, b.phone].filter(Boolean).join(' · ');
   var lg = $('#logo'); if (b.logo) { lg.innerHTML = '<img alt="" src="' + E(b.logo) + '">'; lg.firstChild.onerror = function () { lg.textContent = String(b.name || '?').charAt(0).toUpperCase(); }; } else lg.textContent = String(b.name || '?').charAt(0).toUpperCase();
-  $('#chips').innerHTML = '<span class="pill"><span class="live ' + (ctx.canOrder ? '' : 'off') + '"></span>' + ic(room ? 'bed' : 'utensils') + E(pl.label || '') + '</span>' + (ctx.guest && ctx.guest.firstName ? '<span class="pill">' + ic('user') + 'Hello, ' + E(ctx.guest.firstName) + '</span>' : '') + (ctx.options && ctx.options.showPrices === false ? '' : '');
+  $('#chips').innerHTML = '<span class="pill"><span class="live ' + (ctx.canOrder ? '' : 'off') + '"></span>' + ic(room ? 'bed' : 'utensils') + E(pl.label || '') + '</span>' + (ctx.guest && ctx.guest.firstName ? '<span class="pill">' + ic('user') + 'Hello, ' + E(ctx.guest.firstName) + '</span>' : '') + '<button class="pill" id="acctBtn">' + (acct ? ic('user') + E(String(acct.account.name).split(' ')[0]) : ic('user') + 'Sign in') + '</button>';
+  $('#acctBtn').onclick = function () { go('account'); };
   if (ctx.welcome) { var w = $('#welcome'); w.hidden = false; w.textContent = ctx.welcome; }
   $('#foot').innerHTML = '<b>' + E(b.name || '') + '</b>' + (ctx.room && ctx.room.roomServiceHours ? ' · Room service ' + E(ctx.room.roomServiceHours) : '') + '<br>Secure ordering and payments';
   paintLock();
@@ -375,7 +386,7 @@ function buildNav() {
 }
 function activeCount() { if (!status) return 0; return (status.orders || []).filter(function (o) { return o.stage !== 'SERVED'; }).length + (status.requests || []).filter(function (r) { return r.status === 'PENDING'; }).length; }
 function go(t) { tab = t; clearInterval(timers.view); window.scrollTo({ top: 0 }); buildNav(); render(); if (t === 'orders') timers.view = setInterval(function () { if (!document.hidden && tab === 'orders') pollOrders(); }, 6000); }
-function render() { ({ menu: vMenu, orders: vOrders, bill: vBill, stay: vStay, offers: vOffers, help: vHelp })[tab](); paintBar(); }
+function render() { ({ account: vAccount, menu: vMenu, orders: vOrders, bill: vBill, stay: vStay, offers: vOffers, help: vHelp })[tab](); paintBar(); }
 function needPinView(what) {
   return '<div class="card">' + empty('lock', 'Unlock your room', 'Enter the ' + (ctx.pinLength || 4) + '-digit PIN from your booking confirmation to see ' + what + '.', '<div style="margin-top:16px"><button class="btn" id="unlock">' + ic('key') + 'Enter PIN</button></div>') + '</div>';
 }
@@ -547,7 +558,7 @@ async function vBill() {
   var v = $('#view'); v.classList.add('pull');
   if (needsUnlock()) { v.innerHTML = needPinView('your bill'); return bindUnlock(); }
   if (!billData) v.innerHTML = '<div class="card"><div class="sk" style="height:140px"></div></div>';
-  await loadBill(); if (tab !== 'bill') return;
+  await loadBill(); if (acct) { try { acctRc = (await call('/account/history')).receipts.slice().reverse(); } catch (e) { acctRc = null; } } if (tab !== 'bill') return;
   if (billData.error) { v.innerHTML = '<div class="card">' + empty('alert', 'Could not load your bill', E(billData.error.message), '<div style="margin-top:14px"><button class="btn" id="rl">Try again</button></div>') + '</div>'; $('#rl').onclick = vBill; return; }
   var html = '', any = false;
   billData.orders.forEach(function (o) {
@@ -556,8 +567,10 @@ async function vBill() {
     if (o.unbilled) { any = true; html += billCard(o, { number: 'Current order', lines: o.unbilled.lines, serviceCharge: o.unbilled.serviceCharge, tax: o.unbilled.tax, total: o.unbilled.total, balance: o.unbilled.total, paid: 0 }, true); }
     paid.forEach(function (b) { html += '<div class="card" style="display:flex;gap:12px;align-items:center">' + ic('check', 'ok') + '<div style="flex:1"><b>' + E(b.number) + ' paid</b><div class="fine">' + money(b.total) + '</div></div><span class="badge gr">Paid</span></div>'; });
   });
-  if (!any && !receipts.length) html += '<div class="card">' + empty('receipt', 'Nothing to pay yet', 'Once you have ordered, your bill appears here and you can pay with M-PESA in seconds.', '<div style="margin-top:16px"><button class="btn" id="tomenu">' + ic('utensils') + 'Browse the menu</button></div>') + '</div>';
-  if (receipts.length) { html += '<div class="sec">Your receipts</div>' + receipts.slice().reverse().map(function (r, i) { return '<button class="card" style="display:flex;gap:12px;align-items:center;width:100%;text-align:left" data-rc="' + E(r.ref) + '"><span class="okring" style="margin:0;width:42px;height:42px;animation:none">' + ic('receipt') + '</span><span style="flex:1"><b>' + E(r.number || 'Receipt') + '</b><span class="fine" style="display:block">' + E(r.when) + (r.amount ? ' · ' + money(r.amount) : '') + '</span></span>' + ic('chev') + '</button>'; }).join(''); }
+  if (!any && !receipts.length && !(acctRc && acctRc.length)) html += '<div class="card">' + empty('receipt', 'Nothing to pay yet', 'Once you have ordered, your bill appears here and you can pay with M-PESA in seconds.', '<div style="margin-top:16px"><button class="btn" id="tomenu">' + ic('utensils') + 'Browse the menu</button></div>') + '</div>';
+  var rlist = acct && acctRc ? acctRc.map(function (r) { return { ref: r.reference, number: r.number, when: new Date(r.at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }), amount: r.paid }; }) : receipts;
+  if (acct) html += '<div class="note info" style="margin-top:12px">' + ic('shield') + '<div><b>Saved to your account</b>Every receipt you pay for is kept here and in My account.</div></div>';
+  if (rlist.length) { html += '<div class="sec">Your receipts</div>' + rlist.slice().reverse().map(function (r, i) { return '<button class="card" style="display:flex;gap:12px;align-items:center;width:100%;text-align:left" data-rc="' + E(r.ref) + '"><span class="okring" style="margin:0;width:42px;height:42px;animation:none">' + ic('receipt') + '</span><span style="flex:1"><b>' + E(r.number || 'Receipt') + '</b><span class="fine" style="display:block">' + E(r.when) + (r.amount ? ' · ' + money(r.amount) : '') + '</span></span>' + ic('chev') + '</button>'; }).join(''); }
   html += '<p class="fine center" style="margin-top:16px">' + ic('shield') + ' Payments are processed securely by M-PESA. We never see your PIN.</p>';
   v.innerHTML = html; var tm = $('#tomenu'); if (tm) tm.onclick = function () { go('menu'); };
   $$('[data-pay]', v).forEach(function (b) { b.onclick = function () { startPay(b.dataset.pay, b.dataset.bill); }; });
@@ -609,8 +622,9 @@ async function paySuccess(ref, s, kind) {
   var rc = null; try { rc = await call('/receipt/' + ref + (pin ? '?pin=' + encodeURIComponent(pin) : '')); } catch (e) { /* show simple success */ }
   if (rc) { receipts = receipts.filter(function (x) { return x.ref !== ref; }); receipts.push({ ref: ref, number: rc.number, when: new Date().toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }), amount: rc.paidAmount }); ss(RK, receipts.slice(-12), localStorage); }
   sheet('<div class="bd center" style="padding-top:22px"><div class="okring">' + ic('check') + '</div><h2 class="serif">Payment received</h2><p class="muted" style="margin:6px 0 0">' + (s.mpesaReceipt ? 'M-PESA ' + E(s.mpesaReceipt) : 'Thank you!') + '</p></div>' + (rc ? '<div class="bd" style="padding-top:18px">' + receiptHtml(rc) + '</div>' : '') +
-    '<div class="fx" style="flex-wrap:wrap">' + (rc ? '<button class="btn alt sm" id="dl" style="flex:1">' + ic('download') + 'Download</button><button class="btn alt sm" id="pr" style="flex:1">' + ic('printer') + 'Print</button>' : '') + '<button class="btn" id="dn" style="flex:1 0 100%">Done</button></div>', function (o) {
+    (rc ? (acct ? '<p class="fine center" style="margin:0 0 6px">' + ic('shield') + ' Saved to your account. Find it any time under My account.</p>' : '<div class="bd"><div class="note info" style="margin:0">' + ic('user') + '<div><b>Keep this receipt</b>Create a free account to find your receipts and orders any time.<br><button class="btn sm" id="mk" style="margin-top:8px">Create account</button></div></div></div>') : '') + '<div class="fx" style="flex-wrap:wrap">' + (rc ? '<button class="btn alt sm" id="dl" style="flex:1">' + ic('download') + 'Download</button><button class="btn alt sm" id="pr" style="flex:1">' + ic('printer') + 'Print</button>' : '') + '<button class="btn" id="dn" style="flex:1 0 100%">Done</button></div>', function (o) {
     if (rc) { $('#dl', o).onclick = function () { downloadReceipt(rc); }; $('#pr', o).onclick = function () { printReceipt(rc); }; }
+    var mk = $('#mk', o); if (mk) mk.onclick = function () { closeSheet(); go('account'); };
     $('#dn', o).onclick = function () { closeSheet(); if (tab === 'bill' || tab === 'stay') render(); };
   });
 }
@@ -623,7 +637,7 @@ async function chargeRoom(orderId, billId) {
 }
 async function openReceipt(ref) {
   sheet(shd('Receipt') + '<div class="bd"><div class="sk" style="height:260px"></div></div>');
-  try { var rc = await call('/receipt/' + ref + (pin ? '?pin=' + encodeURIComponent(pin) : ''));
+  try { var rc; if (acct) { try { rc = await call('/account/receipts/' + ref); } catch (x) { rc = null; } } if (!rc) rc = await call('/receipt/' + ref + (pin ? '?pin=' + encodeURIComponent(pin) : ''));
     sheet(shd('Your receipt') + '<div class="bd" style="padding-top:14px">' + receiptHtml(rc) + '</div><div class="fx"><button class="btn alt sm" id="dl" style="flex:1">' + ic('download') + 'Download</button><button class="btn alt sm" id="pr" style="flex:1">' + ic('printer') + 'Print</button></div>', function (o) { $('#dl', o).onclick = function () { downloadReceipt(rc); }; $('#pr', o).onclick = function () { printReceipt(rc); }; });
   } catch (e) { closeSheet(); toast(e.message, true); }
 }
@@ -711,6 +725,56 @@ function bindEnquiry(v) {
       };
     });
   }; });
+}
+
+/* ---------- ACCOUNT ---------- */
+var authMode = 'login', gisLoaded = false;
+function setAcct(r) {
+  acct = { token: r.token, account: r.account }; ss('q.acct', acct, localStorage); acctRc = null; paintHero();
+  var refs = receipts.map(function (x) { return x.ref; }); if (refs.length) call('/account/claim', 'POST', { references: refs }).catch(function () { /* ignore */ });
+  toast('Welcome, ' + String(r.account.name).split(' ')[0]); render();
+}
+function perks() {
+  return [['receipt', 'Electronic receipts', 'Every bill you pay is saved. Download or print it any time.'], ['clock', 'Order history', 'See what you ordered and when, across visits.'], ['phone', 'Faster checkout', 'Your name and number are filled in for you.']].map(function (x) { return '<div class="perk"><span class="ic">' + ic(x[0]) + '</span><span><b>' + x[1] + '</b><br><span class="muted">' + x[2] + '</span></span></div>'; }).join('');
+}
+function loadGoogle(cb) {
+  if (gisLoaded) return cb(); var sc = document.createElement('script'); sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true; sc.onload = function () { gisLoaded = true; cb(); }; document.head.appendChild(sc);
+}
+async function vAccount() {
+  var v = $('#view'); v.classList.add('pull');
+  if (!acct) {
+    var reg = authMode === 'register';
+    v.innerHTML = '<div class="card"><h3 class="serif" style="font-size:21px">' + (reg ? 'Create your account' : 'Welcome back') + '</h3><p class="muted" style="margin:4px 0 14px">Keep your orders and electronic receipts in one place.</p>' +
+      '<div class="seg"><button data-m="login" class="' + (reg ? '' : 'on') + '">Sign in</button><button data-m="register" class="' + (reg ? 'on' : '') + '">Create account</button></div>' +
+      (gid() ? '<div id="gbtn" style="display:flex;justify-content:center;margin-top:14px;min-height:44px"></div><div class="or">or use your details</div>' : '') +
+      '<form id="af" novalidate>' + (reg ? '<label class="lbl" for="an">Full name</label><input class="field" id="an" autocomplete="name" value="' + E(guest.name) + '"><label class="lbl" for="ae">Email (optional if you add a phone)</label><input class="field" id="ae" type="email" autocomplete="email"><label class="lbl" for="ap">Phone (optional if you add an email)</label><input class="field" id="ap" type="tel" autocomplete="tel" value="' + E(guest.phone) + '">'
+        : '<label class="lbl" for="ai">Email or phone number</label><input class="field" id="ai" autocomplete="username">') +
+      '<label class="lbl" for="aw">Password' + (reg ? ' (at least 6 characters)' : '') + '</label><input class="field" id="aw" type="password" autocomplete="' + (reg ? 'new-password' : 'current-password') + '"><div class="fine" id="ae2" style="color:var(--bad);min-height:20px;margin-top:6px"></div><button class="btn block" id="as" type="submit">' + (reg ? 'Create account' : 'Sign in') + '</button></form></div><div class="card">' + perks() + '</div>';
+    $$('[data-m]', v).forEach(function (b) { b.onclick = function () { authMode = b.dataset.m; vAccount(); }; });
+    $('#af').onsubmit = async function (e) {
+      e.preventDefault(); var er = $('#ae2'); er.textContent = '';
+      try {
+        var body, path; if (reg) { body = { name: $('#an').value.trim(), password: $('#aw').value }; var em = $('#ae').value.trim(), ph = $('#ap').value.trim(); if (em) body.email = em; if (ph) body.phone = ph; if (body.name.length < 2) throw new Error('Please enter your name'); if (!em && !ph) throw new Error('Add an email or a phone number'); path = '/account/register'; }
+        else { body = { identifier: $('#ai').value.trim(), password: $('#aw').value }; path = '/account/login'; }
+        if ((body.password || '').length < (reg ? 6 : 1)) throw new Error(reg ? 'Password must be at least 6 characters' : 'Enter your password');
+        $('#as').disabled = true; setAcct(await call(path, 'POST', body));
+      } catch (x) { er.textContent = x.message; $('#as').disabled = false; }
+    };
+    if (gid()) loadGoogle(function () {
+      try { window.google.accounts.id.initialize({ client_id: gid(), callback: async function (resp) { try { setAcct(await call('/account/google', 'POST', { credential: resp.credential })); } catch (e) { toast(e.message, true); } } });
+        window.google.accounts.id.renderButton($('#gbtn'), { theme: 'outline', size: 'large', shape: 'pill', text: reg ? 'signup_with' : 'continue_with', width: 300 }); } catch (e) { /* ignore */ }
+    });
+    return;
+  }
+  var a = acct.account; v.innerHTML = '<div class="card"><div style="display:flex;gap:14px;align-items:center"><div class="avatar">' + (a.picture ? '<img alt="" src="' + E(a.picture) + '" referrerpolicy="no-referrer" onerror="this.remove()">' : E(String(a.name).charAt(0).toUpperCase())) + '</div><div style="flex:1;min-width:0"><b style="font-size:18px">' + E(a.name) + '</b><div class="fine">' + E([a.email, a.phone].filter(Boolean).join(' · ')) + '</div></div></div></div><div class="card"><div class="sk" style="height:120px"></div></div>';
+  var h; try { h = await call('/account/history'); } catch (e) { if (e.status === 401) { acct = null; ss('q.acct', null, localStorage); paintHero(); return vAccount(); } toast(e.message, true); return; }
+  if (tab !== 'account') return;
+  var STX = { PENDING: 'Waiting', ACCEPTED: 'Sent to kitchen', AUTO_ACCEPTED: 'Sent to kitchen', REJECTED: 'Declined', EXPIRED: 'Expired', FAILED: 'Failed' };
+  v.innerHTML = '<div class="card"><div style="display:flex;gap:14px;align-items:center"><div class="avatar">' + (a.picture ? '<img alt="" src="' + E(a.picture) + '" referrerpolicy="no-referrer" onerror="this.remove()">' : E(String(a.name).charAt(0).toUpperCase())) + '</div><div style="flex:1;min-width:0"><b style="font-size:18px">' + E(a.name) + '</b><div class="fine">' + E([a.email, a.phone].filter(Boolean).join(' · ')) + '</div></div><button class="btn alt sm" id="so">' + ic('logout') + 'Sign out</button></div></div>' +
+    '<div class="sec">My receipts</div><div class="card" style="padding:6px 12px">' + (h.receipts.length ? h.receipts.map(function (r) { return '<button class="rowbtn" data-rc="' + E(r.reference) + '"><span class="okring" style="margin:0;width:42px;height:42px;animation:none">' + ic('receipt') + '</span><span style="flex:1"><b>' + E(r.number || 'Receipt') + '</b><span class="fine" style="display:block">' + E(r.place || '') + ' · ' + new Date(r.at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) + '</span></span><b>' + money(r.paid) + '</b>' + ic('chev') + '</button>'; }).join('') : empty('receipt', 'No receipts yet', 'When you pay a bill from your phone, the electronic receipt is saved here.')) + '</div>' +
+    '<div class="sec">My orders</div><div class="card" style="padding:6px 12px">' + (h.orders.length ? h.orders.map(function (o) { return '<div class="rowbtn" style="align-items:flex-start;cursor:default"><span class="okring" style="margin:0;width:42px;height:42px;animation:none;background:var(--brand-l);color:var(--brand)">' + ic('utensils') + '</span><span style="flex:1"><b>' + E(o.place) + '</b><span class="fine" style="display:block">' + E(o.items.map(function (i) { return i.quantity + '× ' + i.name; }).join(', ')) + '</span><span class="fine">' + new Date(o.at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + '</span></span><span class="badge ' + (o.status === 'REJECTED' || o.status === 'FAILED' ? 'rd' : o.status === 'PENDING' ? 'go' : 'gr') + '">' + (STX[o.status] || o.status) + '</span></div>'; }).join('') : empty('clock', 'No orders yet', 'Orders you place while signed in are listed here.')) + '</div>';
+  $$('[data-rc]', v).forEach(function (b) { b.onclick = function () { openReceipt(b.dataset.rc); }; });
+  $('#so').onclick = function () { acct = null; acctRc = null; ss('q.acct', null, localStorage); paintHero(); toast('Signed out'); go('menu'); };
 }
 
 /* ---------- HELP ---------- */

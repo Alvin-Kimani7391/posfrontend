@@ -18,5 +18,8 @@
     // Public address of THIS web app, printed inside receipt QR codes (e.g. 'https://pos.example.com').
     // Leave empty to use the address the app is opened from.
     PUBLIC_APP_URL: '',
+    // Google sign-in on the QR guest page. Paste your OAuth "Web application" client ID here (looks like 123-abc.apps.googleusercontent.com).
+    // Leave empty to hide the Google button. The SAME id must be set as GOOGLE_CLIENT_ID on the backend.
+    GOOGLE_CLIENT_ID: '',
   });
 })(window);
