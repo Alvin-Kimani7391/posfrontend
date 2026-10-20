@@ -33,13 +33,13 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 .logo img{width:100%;height:100%;object-fit:cover}
 .hero h1{font-size:23px;line-height:1.15}
 .hero .sub{color:#b9d3cd;font-size:13px;margin-top:2px}
-.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;position:relative}
+.chips{display:flex;flex-wrap:nowrap;gap:8px;margin:16px -16px 0;padding:0 16px;position:relative;overflow-x:auto;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}.chips .pill{flex:none;white-space:nowrap;color:#fff;font-family:inherit;padding:6px 11px;font-size:13px;gap:6px}
 .pill{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);padding:7px 13px;border-radius:99px;font-weight:600;font-size:13.5px;backdrop-filter:blur(6px)}
 .live{width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 0 rgba(74,222,128,.6);animation:pulse 2s infinite}
 .live.off{background:#fbbf24;animation:none}
 @keyframes pulse{70%{box-shadow:0 0 0 8px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
 .welcome{margin:14px 0 0;color:#d5e7e3;font-size:14px;position:relative;max-width:46ch}
-.lockbtn{position:absolute;right:0;top:0;z-index:3;display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);padding:7px 12px;border-radius:99px}
 
 .pull{margin-top:-40px;position:relative;z-index:2}
 .pull>.sec:first-child{color:#cfe3de}
@@ -255,8 +255,7 @@ footer b{color:var(--ink2)}
 </head>
 <body>
 <header class="hero"><div class="wrap" style="position:relative">
-  <button class="lockbtn" id="lockBtn" hidden></button>
-  <div class="row"><div class="logo" id="logo">·</div><div style="min-width:0;padding-right:84px"><h1 class="serif" id="bn">Loading…</h1><div class="sub" id="br"></div></div></div>
+  <div class="row"><div class="logo" id="logo">·</div><div style="min-width:0"><h1 class="serif" id="bn">Loading…</h1><div class="sub" id="br"></div></div></div>
   <div class="chips" id="chips"></div><p class="welcome" id="welcome" hidden></p>
 </div></header>
 <main class="wrap pull" id="view"><div class="card"><div class="sk" style="height:22px;width:50%;margin-bottom:12px"></div><div class="sk" style="height:90px"></div></div></main>
@@ -365,15 +364,15 @@ function paintHero() {
   document.title = (b.name || 'Welcome') + ' · ' + (pl.label || '');
   $('#bn').textContent = b.name || 'Welcome'; $('#br').textContent = [ctx.branch, b.phone].filter(Boolean).join(' · ');
   var lg = $('#logo'); if (b.logo) { lg.innerHTML = '<img alt="" src="' + E(b.logo) + '">'; lg.firstChild.onerror = function () { lg.textContent = String(b.name || '?').charAt(0).toUpperCase(); }; } else lg.textContent = String(b.name || '?').charAt(0).toUpperCase();
-  $('#chips').innerHTML = '<span class="pill"><span class="live ' + (ctx.canOrder ? '' : 'off') + '"></span>' + ic(room ? 'bed' : 'utensils') + E(pl.label || '') + '</span>' + (ctx.guest && ctx.guest.firstName ? '<span class="pill">' + ic('user') + 'Hello, ' + E(ctx.guest.firstName) + '</span>' : '') + '<button class="pill" id="acctBtn">' + (acct ? ic('user') + E(String(acct.account.name).split(' ')[0]) : ic('user') + 'Sign in') + '</button>';
+  $('#chips').innerHTML = '<span class="pill"><span class="live ' + (ctx.canOrder ? '' : 'off') + '"></span>' + ic(room ? 'bed' : 'utensils') + E(pl.label || '') + '</span>' + (ctx.guest && ctx.guest.firstName && !acct ? '<span class="pill">' + ic('user') + 'Hello, ' + E(ctx.guest.firstName) + '</span>' : '') + (ctx.needsPin ? '<button class="pill" id="lockBtn"></button>' : '') + '<button class="pill" id="acctBtn">' + (acct ? ic('user') + E(String(acct.account.name).split(' ')[0]) : ic('user') + 'Sign in') + '</button>';
   $('#acctBtn').onclick = function () { go('account'); };
   if (ctx.welcome) { var w = $('#welcome'); w.hidden = false; w.textContent = ctx.welcome; }
   $('#foot').innerHTML = '<b>' + E(b.name || '') + '</b>' + (ctx.room && ctx.room.roomServiceHours ? ' · Room service ' + E(ctx.room.roomServiceHours) : '') + '<br>Secure ordering and payments';
   paintLock();
 }
 function paintLock() {
-  var b = $('#lockBtn'); if (!ctx.needsPin) { b.hidden = true; return; }
-  b.hidden = false; b.innerHTML = pin ? ic('shield') + 'Room unlocked' : ic('lock') + 'Unlock room'; b.onclick = function () { if (!pin) askPin(); };
+  var b = $('#lockBtn'); if (!b) return;
+  b.innerHTML = pin ? ic('shield') + 'Unlocked' : ic('lock') + 'Unlock'; b.onclick = function () { if (!pin) askPin(); };
 }
 function buildNav() {
   var t = [['menu', 'utensils', 'Menu'], ['orders', 'clock', 'Orders'], ['bill', 'receipt', 'Bill']];
@@ -385,7 +384,8 @@ function buildNav() {
   $$('#navIn [data-t]').forEach(function (b) { b.onclick = function () { go(b.dataset.t); }; });
 }
 function activeCount() { if (!status) return 0; return (status.orders || []).filter(function (o) { return o.stage !== 'SERVED'; }).length + (status.requests || []).filter(function (r) { return r.status === 'PENDING'; }).length; }
-function go(t) { tab = t; clearInterval(timers.view); window.scrollTo({ top: 0 }); buildNav(); render(); if (t === 'orders') timers.view = setInterval(function () { if (!document.hidden && tab === 'orders') pollOrders(); }, 6000); }
+var returnTab = 'menu';
+function go(t) { if (t === 'account' && tab !== 'account') returnTab = tab; tab = t; clearInterval(timers.view); window.scrollTo({ top: 0 }); buildNav(); render(); if (t === 'orders') timers.view = setInterval(function () { if (!document.hidden && tab === 'orders') pollOrders(); }, 6000); }
 function render() { ({ account: vAccount, menu: vMenu, orders: vOrders, bill: vBill, stay: vStay, offers: vOffers, help: vHelp })[tab](); paintBar(); }
 function needPinView(what) {
   return '<div class="card">' + empty('lock', 'Unlock your room', 'Enter the ' + (ctx.pinLength || 4) + '-digit PIN from your booking confirmation to see ' + what + '.', '<div style="margin-top:16px"><button class="btn" id="unlock">' + ic('key') + 'Enter PIN</button></div>') + '</div>';
@@ -732,7 +732,7 @@ var authMode = 'login', gisLoaded = false;
 function setAcct(r) {
   acct = { token: r.token, account: r.account }; ss('q.acct', acct, localStorage); acctRc = null; paintHero();
   var refs = receipts.map(function (x) { return x.ref; }); if (refs.length) call('/account/claim', 'POST', { references: refs }).catch(function () { /* ignore */ });
-  toast('Welcome, ' + String(r.account.name).split(' ')[0]); render();
+  toast('Welcome, ' + String(r.account.name).split(' ')[0]); go('menu');
 }
 function perks() {
   return [['receipt', 'Electronic receipts', 'Every bill you pay is saved. Download or print it any time.'], ['clock', 'Order history', 'See what you ordered and when, across visits.'], ['phone', 'Faster checkout', 'Your name and number are filled in for you.']].map(function (x) { return '<div class="perk"><span class="ic">' + ic(x[0]) + '</span><span><b>' + x[1] + '</b><br><span class="muted">' + x[2] + '</span></span></div>'; }).join('');
