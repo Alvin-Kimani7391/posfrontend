@@ -771,10 +771,32 @@ async function vAccount() {
   if (tab !== 'account') return;
   var STX = { PENDING: 'Waiting', ACCEPTED: 'Sent to kitchen', AUTO_ACCEPTED: 'Sent to kitchen', REJECTED: 'Declined', EXPIRED: 'Expired', FAILED: 'Failed' };
   v.innerHTML = '<div class="card"><div style="display:flex;gap:14px;align-items:center"><div class="avatar">' + (a.picture ? '<img alt="" src="' + E(a.picture) + '" referrerpolicy="no-referrer" onerror="this.remove()">' : E(String(a.name).charAt(0).toUpperCase())) + '</div><div style="flex:1;min-width:0"><b style="font-size:18px">' + E(a.name) + '</b><div class="fine">' + E([a.email, a.phone].filter(Boolean).join(' · ')) + '</div></div><button class="btn alt sm" id="so">' + ic('logout') + 'Sign out</button></div></div>' +
+    '<div class="sec">My profile</div><div class="card"><div class="kv" style="grid-template-columns:1fr">' + [['Full name', a.name], ['Phone', a.phone || 'Not added'], ['Email', a.email || 'Not added'], ['Sign-in method', a.google ? 'Google' : 'Password'], ['Member since', a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-KE', { month: 'long', year: 'numeric' }) : '']].filter(function (x) { return x[1]; }).map(function (x) { return '<div><small>' + x[0] + '</small><b>' + E(x[1]) + '</b></div>'; }).join('') + '</div><button class="btn alt block" id="ep" style="margin-top:12px">' + ic('user') + 'Edit profile</button></div>' +
     '<div class="sec">My receipts</div><div class="card" style="padding:6px 12px">' + (h.receipts.length ? h.receipts.map(function (r) { return '<button class="rowbtn" data-rc="' + E(r.reference) + '"><span class="okring" style="margin:0;width:42px;height:42px;animation:none">' + ic('receipt') + '</span><span style="flex:1"><b>' + E(r.number || 'Receipt') + '</b><span class="fine" style="display:block">' + E(r.place || '') + ' · ' + new Date(r.at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) + '</span></span><b>' + money(r.paid) + '</b>' + ic('chev') + '</button>'; }).join('') : empty('receipt', 'No receipts yet', 'When you pay a bill from your phone, the electronic receipt is saved here.')) + '</div>' +
     '<div class="sec">My orders</div><div class="card" style="padding:6px 12px">' + (h.orders.length ? h.orders.map(function (o) { return '<div class="rowbtn" style="align-items:flex-start;cursor:default"><span class="okring" style="margin:0;width:42px;height:42px;animation:none;background:var(--brand-l);color:var(--brand)">' + ic('utensils') + '</span><span style="flex:1"><b>' + E(o.place) + '</b><span class="fine" style="display:block">' + E(o.items.map(function (i) { return i.quantity + '× ' + i.name; }).join(', ')) + '</span><span class="fine">' + new Date(o.at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + '</span></span><span class="badge ' + (o.status === 'REJECTED' || o.status === 'FAILED' ? 'rd' : o.status === 'PENDING' ? 'go' : 'gr') + '">' + (STX[o.status] || o.status) + '</span></div>'; }).join('') : empty('clock', 'No orders yet', 'Orders you place while signed in are listed here.')) + '</div>';
   $$('[data-rc]', v).forEach(function (b) { b.onclick = function () { openReceipt(b.dataset.rc); }; });
+  $('#ep').onclick = function () { editProfile(); };
   $('#so').onclick = function () { acct = null; acctRc = null; ss('q.acct', null, localStorage); paintHero(); toast('Signed out'); go('menu'); };
+}
+
+function editProfile() {
+  var a = acct.account;
+  sheet(shd('Edit profile') + '<div class="bd"><label class="lbl" for="pn1">Full name</label><input class="field" id="pn1" value="' + E(a.name) + '" autocomplete="name"><label class="lbl" for="pp1">Phone number</label><div class="phonef"><span>+254</span><input id="pp1" type="tel" inputmode="numeric" placeholder="712 345 678" value="' + E(localPhone(a.phone)) + '"></div><div class="fine" style="margin-top:4px">Used to pre-fill your M-PESA number.</div>' +
+    '<label class="lbl" for="pe1">Email' + (a.google ? ' (from Google)' : '') + '</label><input class="field" id="pe1" type="email" value="' + E(a.email || '') + '"' + (a.google ? ' disabled' : '') + ' autocomplete="email">' +
+    (a.google ? '' : '<div class="sec" style="margin:18px 0 0">Change password (optional)</div><label class="lbl" for="pc1">Current password</label><input class="field" id="pc1" type="password" autocomplete="current-password"><label class="lbl" for="pw1">New password</label><input class="field" id="pw1" type="password" autocomplete="new-password">') +
+    '<div class="fine" id="pme" style="color:var(--bad);min-height:20px;margin-top:8px"></div></div><div class="fx"><button class="btn alt" data-close>Cancel</button><button class="btn" id="psv" style="flex:1">Save changes</button></div>', function (o) {
+    $('#psv', o).onclick = async function () {
+      var er = $('#pme', o); er.textContent = ''; var ph = $('#pp1', o).value.replace(/\D/g, ''); if (ph.indexOf('254') === 0) ph = ph.slice(3); if (ph.indexOf('0') === 0) ph = ph.slice(1);
+      var body = { name: $('#pn1', o).value.trim() };
+      if (ph && !/^[17]\d{8}$/.test(ph)) { er.textContent = 'Enter a valid Kenyan phone number, e.g. 0712 345 678'; return; }
+      body.phone = ph ? '0' + ph : '';
+      if (!a.google) { body.email = $('#pe1', o).value.trim(); var np = $('#pw1', o).value; if (np) { if (np.length < 6) { er.textContent = 'New password must be at least 6 characters'; return; } body.newPassword = np; body.currentPassword = $('#pc1', o).value; } }
+      if (body.name.length < 2) { er.textContent = 'Please enter your name'; return; }
+      this.disabled = true; this.textContent = 'Saving…';
+      try { var r = await call('/account/profile', 'PUT', body); acct.account = r.account; ss('q.acct', acct, localStorage); if (r.account.phone) { guest.phone = r.account.phone; ss(GK, guest, localStorage); } if (r.account.name) guest.name = r.account.name; ss(GK, guest, localStorage); paintHero(); closeSheet(); toast('Profile updated'); vAccount(); }
+      catch (e) { er.textContent = e.message; this.disabled = false; this.textContent = 'Save changes'; }
+    };
+  });
 }
 
 /* ---------- HELP ---------- */
