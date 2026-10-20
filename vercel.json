@@ -40,12 +40,16 @@
   ],
   "rewrites": [
     {
-      "source": "/q/:token",
-      "destination": "/q.html"
+      "source": "/q/:token(b_.*)",
+      "destination": "/store.html"
     },
     {
       "source": "/s/:token",
       "destination": "/store.html"
+    },
+    {
+      "source": "/q/:token",
+      "destination": "/q.html"
     }
   ]
 }

@@ -24,7 +24,9 @@
   function paint() {
     const d = st.delivery || {}, t = st.tables || {};
     const loc = (id) => (st.branchLocations || []).find((x) => String(x.branchId) === String(id)) || {};
-    const url = qrInfo && qrInfo.url ? (qrInfo.url.startsWith('http') ? qrInfo.url : location.origin + qrInfo.url) : '';
+    // Same proven pattern as the table/room codes: a direct link to a real file (store.html?t=<token>) on THIS site - no dependence on rewrites or on a server-side base URL.
+    const tk = qrInfo && (qrInfo.token || String(qrInfo.url || '').split(/\/(?:q|s)\//)[1] || '');
+    const url = tk ? location.origin + '/store.html?t=' + encodeURIComponent(tk) : '';
     el.innerHTML = head('Online storefront', 'One QR code for delivery, table reservations and room booking.', '<button class="btn btn-primary" id="save">Save settings</button>') + `
     <div class="hx-card"><h3>Your storefront QR</h3>
       <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center"><div id="qr" style="background:#fff;padding:10px;border-radius:10px"></div>
@@ -46,7 +48,7 @@
     draw(url);
     const $ = (s) => el.querySelector(s); const val = (s) => $(s).value;
     $('#cp').onclick = () => { navigator.clipboard?.writeText(url); window.UI.toast.success('Link copied'); };
-    $('#pr').onclick = () => { const w = window.open('', '_blank'); const img = $('#qr canvas')?.toDataURL() || $('#qr img')?.src; w.document.write(`<body style="font-family:sans-serif;text-align:center;padding:40px"><h1>${E(qrInfo.businessName)}</h1><p style="font-size:20px">Scan to order delivery, reserve a table or book a room</p><img src="${img}" style="width:340px"><p>${E(url)}</p></body>`); w.document.close(); w.print(); };
+    $('#pr').onclick = () => { const w = window.open('', '_blank'); if (!w) return window.UI.toast.warning('Allow pop-ups to print'); const svg = window.QREncoder ? window.QREncoder.toSvg(url, { ecl: 'M', border: 1 }) : ''; w.document.write(`<body style="font-family:sans-serif;text-align:center;padding:40px"><h1>${E(qrInfo.businessName)}</h1><p style="font-size:20px">Scan to order delivery, reserve a table or book a room</p><div style="width:340px;margin:0 auto">${svg}</div><p>${E(url)}</p></body>`); w.document.close(); w.print(); };
     $('#rot').onclick = async () => { if (!confirm('Every printed storefront QR will stop working. Continue?')) return; const r = await send('post', '/restaurant/storefront/qr/rotate'); if (r) { qrInfo = r; paint(); } };
     el.querySelectorAll('.here').forEach((b) => b.addEventListener('click', () => navigator.geolocation.getCurrentPosition((p) => { const row = b.closest('[data-b]'); row.querySelector('.la').value = p.coords.latitude.toFixed(6); row.querySelector('.ln').value = p.coords.longitude.toFixed(6); }, () => window.UI.toast.error('Allow location access first'), { enableHighAccuracy: true })));
     $('#save').onclick = async () => {
@@ -58,5 +60,5 @@
       const r = await send('put', '/restaurant/settings', body); if (r) { window.UI.toast.success('Storefront saved'); await load(); paint(); }
     };
   }
-  function draw(url) { const box = el.querySelector('#qr'); if (!url || !window.QRCode) { box.textContent = 'QR appears once the link is ready'; return; } new window.QRCode(box, { text: url, width: 200, height: 200 }); }
+  function draw(url) { const box = el.querySelector('#qr'); if (!url || !window.QREncoder) { box.textContent = 'QR appears once the link is ready'; return; } box.innerHTML = '<div style="width:200px">' + window.QREncoder.toSvg(url, { ecl: 'M', border: 1 }) + '</div>'; }
 })();

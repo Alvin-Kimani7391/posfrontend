@@ -40,7 +40,7 @@ input,select,textarea{width:100%;padding:11px;border:1px solid var(--ln);border-
 <script>
 (function () {
 'use strict';
-var TOKEN = (location.pathname.match(/\/s\/([^\/?#]+)/) || [])[1] || new URLSearchParams(location.search).get('t') || '';
+var TOKEN = new URLSearchParams(location.search).get('t') || (location.pathname.match(/\/(?:s|q)\/([^\/?#]+)/) || [])[1] || '';
 var API = ((window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || 'https://posbackend-5jaq.onrender.com/api/v1') + '/public/store/' + TOKEN;
 var $ = function (s, r) { return (r || document).querySelector(s); }, $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 var E = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
@@ -57,7 +57,7 @@ function q(o) { return '?' + Object.keys(o).filter(function (k) { return o[k] !=
 
 // ---------- install (PWA): the manifest is generated for THIS business so "Add to home screen" opens its storefront
 function setupInstall() {
-  var base = location.origin, start = base + '/s/' + TOKEN, m = { name: ctx.business.name, short_name: ctx.business.name.slice(0, 12), start_url: start, scope: base + '/s/', display: 'standalone', background_color: '#ffffff', theme_color: ctx.store.themeColor, icons: [{ src: base + '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: base + '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }, { src: base + '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }] };
+  var base = location.origin, start = base + '/store.html?t=' + encodeURIComponent(TOKEN), m = { name: ctx.business.name, short_name: ctx.business.name.slice(0, 12), start_url: start, scope: base + '/store', display: 'standalone', background_color: '#ffffff', theme_color: ctx.store.themeColor, icons: [{ src: base + '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: base + '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }, { src: base + '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }] };
   var l = document.createElement('link'); l.rel = 'manifest'; l.href = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: 'application/manifest+json' })); document.head.appendChild(l);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
   if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone || localStorage.getItem('store:noinstall')) return;
