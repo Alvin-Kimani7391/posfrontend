@@ -42,6 +42,10 @@
     {
       "source": "/q/:token",
       "destination": "/q.html"
+    },
+    {
+      "source": "/s/:token",
+      "destination": "/store.html"
     }
   ]
 }
