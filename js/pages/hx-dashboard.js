@@ -40,26 +40,32 @@
 
     if (d) {
       const t = d.tables || {}, total = Object.values(t).reduce((a, b) => a + b, 0);
+      const COL = { AVAILABLE: '#20b04a', OCCUPIED: '#f59e0b', RESERVED: '#a23ae6', NEEDS_CLEANING: '#64748b', CLEANING: '#64748b', BILL_REQUESTED: '#e8590c', AWAITING_BILL: '#e8590c', PAYMENT_PENDING: '#e8590c', OUT_OF_SERVICE: '#94a3b8' };
+      const nice = (k) => k.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
+      const parts = Object.entries(t).map(([k, n]) => ({ label: nice(k), value: n, color: COL[k] || '#1570ef' }));
+      const busyN = (t.OCCUPIED || 0) + (t.BILL_REQUESTED || 0) + (t.AWAITING_BILL || 0);
       h += `<div class="hx-section"><h2>Restaurant today</h2>
-        <div class="hx-grid2" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
-          ${kpi('Sales', M(d.today && d.today.revenue), `${(d.today && d.today.orders) || 0} orders`)}
-          ${kpi('Average order', M(d.today && d.today.averageOrderValue))}
-          ${kpi('Open orders', d.openOrders ?? 0, 'being served now')}
-          ${kpi('In the kitchen', d.kitchenQueue ?? 0, 'tickets waiting')}
-          ${d.today && d.today.foodCostPercent != null ? kpi('Food cost', d.today.foodCostPercent + '%') : ''}
+        <div class="hx-kpis">
+          ${window.HX.kpi('Total orders', (d.today && d.today.orders) || 0, 'since opening', 'purple', 'receipt')}
+          ${window.HX.kpi('Total sales', M(d.today && d.today.revenue), 'today', 'blue', 'cash')}
+          ${window.HX.kpi('Average value', M(d.today && d.today.averageOrderValue), 'per order', 'ember', 'tag')}
+          ${window.HX.kpi('In the kitchen', d.kitchenQueue ?? 0, `${d.openOrders ?? 0} open orders`, 'green', 'flame')}
+          ${d.today && d.today.foodCostPercent != null ? window.HX.kpi('Food cost', d.today.foodCostPercent + '%', 'of sales', 'slate', 'pulse') : ''}
         </div>
-        ${total ? `<div class="hx-card" style="margin-top:var(--space-3)"><h3>Tables <small class="hx-sub">${total} in service</small></h3>
-          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-2)">${Object.entries(t).map(([k, n]) => `<span>${pill(k, TABLE_TONE[k])} <b>${n}</b></span>`).join('')}</div></div>` : ''}
+        ${total ? `<div class="hx-dgrid"><div class="hx-card"><h3>Tables <small>${total} in service · ${busyN} busy</small></h3>
+          <div class="hx-donutwrap">${window.HX.art.donut(parts, total, 'tables')}<div class="hx-legendrow">${parts.map((p) => `<div><i style="background:${p.color}"></i>${E(p.label)}<b>${p.value}</b></div>`).join('')}</div></div></div>
+          <div class="hx-card"><h3>Floor status <small>live</small></h3><div class="hx-tstrip">${Object.entries(t).map(([k, n]) => `<div class="hx-tmini hx-st-${TABLE_TONE[k] || 'mute'}"><b>${n}</b><small>${E(nice(k))}</small></div>`).join('')}</div>
+          ${can('restaurant.orders.view') ? '<a class="btn btn-primary" style="margin-top:14px;width:100%" href="hx-floor.html">Open tables &amp; orders</a>' : ''}</div></div>` : ''}
       </div>`;
     }
 
     if (ad) {
       h += `<div class="hx-section"><h2>Rooms today</h2>
-        <div class="hx-grid2" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
-          ${kpi('Occupancy', (ad.occupancyPercent ?? 0) + '%', `${ad.occupied ?? 0} of ${ad.rooms ?? 0} rooms`)}
-          ${kpi('Arriving', (ad.arrivals || []).length, 'checking in today')}
-          ${kpi('Leaving', (ad.departures || []).length, 'checking out today')}
-          ${kpi('Out of order', ad.outOfOrder ?? 0)}
+        <div class="hx-kpis">
+          ${window.HX.kpi('Occupancy', (ad.occupancyPercent ?? 0) + '%', `${ad.occupied ?? 0} of ${ad.rooms ?? 0} rooms`, 'blue', 'bed')}
+          ${window.HX.kpi('Arriving', (ad.arrivals || []).length, 'checking in today', 'green', 'key')}
+          ${window.HX.kpi('Leaving', (ad.departures || []).length, 'checking out today', 'amber', 'calendar')}
+          ${window.HX.kpi('Out of order', ad.outOfOrder ?? 0, 'not for sale', 'red', 'wrench')}
         </div>
         ${alertsHtml(ad)}
       </div>`;

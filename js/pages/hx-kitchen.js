@@ -5,8 +5,8 @@
  * API: GET /restaurant/kitchen/queue, POST /restaurant/kitchen/tickets/:id/bump|expo|priority, PUT .../items/:itemId
  */
 (function () {
-  const { E, can, get, send, list, head, pill, mins } = window.HX;
-  let el, closed = new Set(), tickets = [], stations = [], stationId = '', known = new Set(), first = true, sound = true;
+  const { E, can, get, send, list, head, pill, mins, icon } = window.HX;
+  let el, flt = '', closed = new Set(), tickets = [], stations = [], stationId = '', known = new Set(), first = true, sound = true;
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
@@ -19,10 +19,8 @@
 
   function shell() {
     el.innerHTML = head('Kitchen & bar', 'Oldest tickets first. Tap the button on a ticket to move it along.',
-      `<button class="btn btn-secondary" id="xall">Collapse all</button><button class="btn btn-secondary" id="snd">Sound on</button><button class="btn btn-secondary" id="full">Full screen</button><span class="hx-live">Live</span>`) +
-      `<div id="stn"></div><div class="hx-kds" id="kds"></div>`;
-    el.querySelector('#xall').addEventListener('click', (e) => { const collapse = e.target.textContent === 'Collapse all'; closed = collapse ? new Set(tickets.map((t) => t._id)) : new Set(); e.target.textContent = collapse ? 'Expand all' : 'Collapse all'; paint(); });
-    el.addEventListener('click', (e) => { const h = e.target.closest('[data-tk]'); if (!h || e.target.closest('button,a')) return; setTimeout(() => { if (h.classList.contains('open')) closed.delete(h.dataset.tk); else closed.add(h.dataset.tk); }, 0); });
+      `<button class="btn btn-secondary" id="snd">Sound on</button><button class="btn btn-secondary" id="full">Full screen</button><span class="hx-live">Live</span>`) +
+      `<div id="kst" class="hx-kstats"></div><div id="stn"></div><div class="hx-kds" id="kds"></div>`;
     el.querySelector('#snd').addEventListener('click', (e) => { sound = !sound; e.target.textContent = sound ? 'Sound on' : 'Sound off'; });
     el.querySelector('#full').addEventListener('click', () => { const k = el.querySelector('#kds'); k.classList.toggle('full'); document.body.style.overflow = k.classList.contains('full') ? 'hidden' : ''; });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { el.querySelector('#kds')?.classList.remove('full'); document.body.style.overflow = ''; } });
@@ -40,14 +38,16 @@
 
   function beep() { try { const c = new (window.AudioContext || window.webkitAudioContext)(), o = c.createOscillator(), g = c.createGain(); o.connect(g); g.connect(c.destination); o.frequency.value = 880; g.gain.value = 0.15; o.start(); o.stop(c.currentTime + 0.25); } catch { /* audio blocked */ } }
 
+  const stOf = (t) => (t.status === 'READY' ? 'READY' : t.overdue ? 'LATE' : t.status === 'PREPARING' ? 'COOK' : 'NEW');
   function paint() {
-    el.querySelector('#stn').innerHTML = stations.length > 1 ? `<div class="hx-cats hx-tabs"><button class="hx-chip ${stationId ? '' : 'on'}" data-s="">All stations</button>${stations.map((s) => `<button class="hx-chip ${stationId === s._id ? 'on' : ''}" data-s="${s._id}">${E(s.name)}</button>`).join('')}</div>` : '';
+    el.querySelector('#stn').innerHTML = stations.length > 1 ? `<div class="hx-cats hx-tabs" style="margin-bottom:14px"><button class="hx-chip ${stationId ? '' : 'on'}" data-s="">All stations</button>${stations.map((s) => `<button class="hx-chip ${stationId === s._id ? 'on' : ''}" data-s="${s._id}">${E(s.name)}</button>`).join('')}</div>` : '';
     el.querySelectorAll('[data-s]').forEach((b) => b.addEventListener('click', () => { stationId = b.dataset.s; load(); }));
-    const cols = [['NEW', 'New', ['NEW', 'ACCEPTED']], ['PREPARING', 'Cooking', ['PREPARING']], ['READY', 'Ready', ['READY']]];
-    el.querySelector('#kds').innerHTML = cols.map(([k, label, sts]) => {
-      const t = tickets.filter((x) => sts.includes(x.status));
-      return `<div class="hx-kds-col"><h3>${label} · ${t.length}</h3>${t.map(card).join('') || '<p class="hx-sub" style="text-align:center;padding:var(--space-4)">Nothing here</p>'}</div>`;
-    }).join('');
+    const cnt = (k) => tickets.filter((t) => stOf(t) === k).length;
+    const chips = [['NEW', 'New order', '#64748b', 'bellRing'], ['COOK', 'In kitchen', '#f5a524', 'flame'], ['LATE', 'Delayed', '#ef3b3b', 'clock'], ['READY', 'Ready', '#22a447', 'check']];
+    el.querySelector('#kst').innerHTML = chips.map(([k, l, c, ic]) => `<button type="button" class="hx-kstat" style="--c:${c};cursor:pointer;${flt === k ? `outline:3px solid ${c}55` : ''}" data-f="${k}"><i>${icon(ic)}</i>${l}<b>${String(cnt(k)).padStart(2, '0')}</b></button>`).join('');
+    el.querySelectorAll('[data-f]').forEach((b) => b.addEventListener('click', () => { flt = flt === b.dataset.f ? '' : b.dataset.f; paint(); }));
+    const shown = tickets.filter((t) => !flt || stOf(t) === flt).sort((a, b) => (a.status === 'READY') - (b.status === 'READY') || new Date(a.receivedAt || 0) - new Date(b.receivedAt || 0));
+    el.querySelector('#kds').innerHTML = shown.map(card).join('') || `<div class="hx-empty-kds">${window.HX.empty('No tickets', flt ? 'Nothing in this state right now.' : 'New orders from the floor appear here.')}</div>`;
     el.querySelectorAll('[data-bump]').forEach((b) => b.addEventListener('click', () => bump(b.dataset.bump, b.dataset.to)));
     el.querySelectorAll('[data-expo]').forEach((b) => b.addEventListener('click', async () => { if (await send('post', `/restaurant/kitchen/tickets/${b.dataset.expo}/expo`, {})) load(); }));
     el.querySelectorAll('[data-urgent]').forEach((b) => b.addEventListener('click', async () => { if (await send('post', `/restaurant/kitchen/tickets/${b.dataset.urgent}/priority`, { priority: b.dataset.p })) load(); }));
@@ -55,22 +55,26 @@
   }
 
   function card(t) {
-    const age = t.ageMinutes != null ? t.ageMinutes : mins(t.receivedAt), late = t.overdue;
-    const where = t.tableName ? 'Table ' + t.tableName : (t.pickupNumber ? 'Pickup ' + t.pickupNumber : (t.orderType || '').replace('_', ' ').toLowerCase());
-    const open = !closed.has(t._id); const next = t.status === 'READY' ? null : t.status === 'PREPARING' ? ['READY', 'Mark ready'] : ['PREPARING', 'Start cooking'];
-    return `<div class="hx-tk ${late ? 'late' : ''} ${t.priority && t.priority !== 'NORMAL' ? 'urgent' : ''}">
-      <div class="hx-tk-top hx-xhead ${open ? 'open' : ''}" data-xtoggle data-tk="${t._id}"><span class="hx-caret"></span><b>${E(where)}</b><span class="hx-tk-sum">${(t.items || []).filter((i) => !i.cancelled).length} item(s)</span><span class="hx-tk-age ${late ? 'late' : ''}">${age} min</span></div><div class="hx-xbody ${open ? 'open' : ''}">
-      <small class="hx-sub">#${E(t.orderNumber || t.ticketNumber)} · ${E(t.stationName || '')}${t.waiterName ? ' · ' + E(t.waiterName) : ''}</small>
-      ${t.allergyAlert ? '<div class="al" style="color:var(--color-danger);font-weight:600;margin-top:4px">Allergy alert</div>' : ''}
-      ${(t.items || []).filter((i) => !i.cancelled).map((i) => `<div class="hx-tk-item ${i.status === 'READY' || i.status === 'SERVED' ? 'done' : ''}" ${t.status === 'PREPARING' && i.status !== 'READY' ? `data-item="${t.orderId}:${i.orderItemId}" style="cursor:pointer"` : ''}>
-        <span class="q">${i.quantity}×</span><span><b>${E(i.name)}</b>${i.variantName ? ' · ' + E(i.variantName) : ''}${i.modifiersText ? `<small>${E(i.modifiersText)}</small>` : ''}${i.notes ? `<small>“${E(i.notes)}”</small>` : ''}${i.allergyNotes ? `<small class="al">Allergy: ${E(i.allergyNotes)}</small>` : ''}</span></div>`).join('')}
-      ${t.notes ? `<small class="hx-sub">${E(t.notes)}</small>` : ''}
-      ${next && can('restaurant.kitchen.update') ? `<button class="btn btn-primary" data-bump="${t._id}" data-to="${next[0]}">${next[1]}</button>` : ''}
-      ${t.status === 'READY' && can('restaurant.kitchen.expedite') ? `<button class="btn btn-success" data-expo="${t._id}">Handed to waiter</button>` : ''}
-      ${t.status === 'READY' && !can('restaurant.kitchen.expedite') ? '<small class="hx-sub">Waiting for the waiter</small>' : ''}
-      ${can('restaurant.kitchen.expedite') && t.status !== 'READY' ? `<button class="btn btn-sm btn-secondary" data-urgent="${t._id}" data-p="${t.priority === 'NORMAL' || !t.priority ? 'URGENT' : 'NORMAL'}" style="margin-top:var(--space-2)">${t.priority === 'NORMAL' || !t.priority ? 'Mark urgent' : 'Remove urgent'}</button>` : ''}
-      </div>
-    </div>`;
+    const age = t.ageMinutes != null ? t.ageMinutes : mins(t.receivedAt), late = t.overdue, k = stOf(t);
+    const where = t.tableName ? 'Table ' + t.tableName : (t.pickupNumber ? 'Pickup ' + t.pickupNumber : (t.orderType || '').replace('_', ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase()));
+    const kind = (t.orderType || 'DINE_IN').replace('_', ' ').toLowerCase();
+    const items = (t.items || []).filter((i) => !i.cancelled);
+    const next = t.status === 'READY' ? null : t.status === 'PREPARING' ? ['READY', 'Mark done'] : ['PREPARING', 'Start cooking'];
+    const target = Number(t.targetMinutes || t.prepMinutes || 20), pct = Math.min(100, Math.round((age / (target || 20)) * 100));
+    const cls = { NEW: 's-new', COOK: 's-cook', LATE: 's-late', READY: 's-ready' }[k];
+    return `<div class="hx-tk ${cls} ${t.priority && t.priority !== 'NORMAL' ? 'urgent' : ''}">
+      <div class="hd"><span class="av">${icon(t.orderType === 'DELIVERY' ? 'bike' : t.orderType === 'TAKEAWAY' || t.orderType === 'PICKUP' ? 'bag' : 'utensils')}</span><div class="wh"><b>${E(where)}</b><small>${E(kind)}${t.waiterName ? ' · ' + E(t.waiterName) : ''}</small></div><span class="no">${E(String(t.orderNumber || t.ticketNumber || '').replace(/^#?/, '#'))}</span></div>
+      <div class="tm"><span>${t.stationName ? E(t.stationName) + ' · ' : ''}${items.length} item${items.length === 1 ? '' : 's'}</span><span>${window.HX.hm(t.receivedAt)}</span></div>
+      ${t.allergyAlert ? '<div class="al-top">Allergy alert on this order</div>' : ''}
+      <div class="bd">${items.map((i) => `<div class="hx-tk-item ${i.status === 'READY' || i.status === 'SERVED' ? 'done' : ''}" ${t.status === 'PREPARING' && i.status !== 'READY' ? `data-item="${t.orderId}:${i.orderItemId}" style="cursor:pointer" title="Tap when this item is ready"` : ''}><span class="vd"></span><span><b>${E(i.name)}</b>${i.variantName ? ' · ' + E(i.variantName) : ''}${i.modifiersText ? `<small>${E(i.modifiersText)}</small>` : ''}${i.notes ? `<small>Notes: ${E(i.notes)}</small>` : ''}${i.allergyNotes ? `<small class="al">Allergy: ${E(i.allergyNotes)}</small>` : ''}</span><span class="q">×${i.quantity}</span></div>`).join('')}${t.notes ? `<small class="hx-sub">${E(t.notes)}</small>` : ''}</div>
+      <div class="prog"><span class="tr"><i style="width:${t.status === 'READY' ? 100 : pct}%"></i></span><span>${age} min</span></div>
+      ${late ? `<div class="late-note">Delayed by ${Math.max(1, age - target)} min</div>` : t.status === 'READY' ? '<div class="ok-note">Ready to serve</div>' : ''}
+      <div class="ac">
+        ${next && can('restaurant.kitchen.update') ? `<button class="btn btn-primary" data-bump="${t._id}" data-to="${next[0]}">${next[1]}</button>` : ''}
+        ${t.status === 'READY' && can('restaurant.kitchen.expedite') ? `<button class="btn btn-success" data-expo="${t._id}">Handed to waiter</button>` : ''}
+        ${t.status === 'READY' && !can('restaurant.kitchen.expedite') ? '<small class="hx-sub">Waiting for the waiter</small>' : ''}
+        ${can('restaurant.kitchen.expedite') && t.status !== 'READY' ? `<button class="btn btn-secondary" data-urgent="${t._id}" data-p="${t.priority === 'NORMAL' || !t.priority ? 'URGENT' : 'NORMAL'}">${t.priority === 'NORMAL' || !t.priority ? 'Mark urgent' : 'Remove urgent'}</button>` : ''}
+      </div></div>`;
   }
 
   async function bump(id, to) { if (await send('post', `/restaurant/kitchen/tickets/${id}/bump`, { status: to })) load(); }
