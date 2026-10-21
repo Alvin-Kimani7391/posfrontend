@@ -4,14 +4,17 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v3.6.3-storefront-app';
+const VERSION = 'v3.6.4-storefront-app';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
 const CDN_HOSTS = /^(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|fonts\.googleapis\.com|fonts\.gstatic\.com|(.+\.)?fontawesome\.com)$/;
 
 
-// Missing files are skipped (allSettled), so listing a file that does not exist is harmless.
+
+
+// Missing files are skipped (all
+// Settled), so listing a file that does not exist is harmless.
 const PRECACHE = [
   'hx-floor.html', 'hx-kitchen.html', 'hx-bills.html', 'hx-reservations.html', 'hx-delivery.html', 'hx-storefront.html', 'js/pages/hx-storefront.js', 'store.html', 'hx-menu.html', 'hx-stock.html', 'hx-guest.html', 'hx-staff.html', 'hx-desk.html', 'hx-rooms.html', 'hx-stays.html', 'hx-housekeeping.html', 'hx-reports.html', 'js/pages/hx-floor.js', 'js/pages/hx-kitchen.js', 'js/pages/hx-bills.js', 'js/pages/hx-reservations.js', 'js/pages/hx-delivery.js', 'js/pages/hx-menu.js', 'js/pages/hx-stock.js', 'js/pages/hx-guest.js', 'js/pages/hx-staff.js', 'js/pages/hx-desk.js', 'js/pages/hx-rooms.js', 'js/pages/hx-stays.js', 'js/pages/hx-housekeeping.js', 'js/pages/hx-reports.js', 'js/core/qr-encoder.js',
   'hx-dashboard.html', 'hx-services.html', 'js/pages/hx-services.js', 'js/core/business-types.js', 'hx-setup.html', 'hx-settings.html', 'css/hospitality.css', 'css/hx-redesign.css', 'css/hx-pro.css', 'css/hx-fixes.css', 'js/core/hx-art.js', 'js/core/home-route.js', 'js/core/hx-kit.js', 'js/core/hx-pay.js', 'js/core/hx-order.js', 'js/core/hx-recipe.js', 'js/pages/hx-dashboard.js', 'js/pages/hx-setup.js', 'js/pages/hx-settings.js',
