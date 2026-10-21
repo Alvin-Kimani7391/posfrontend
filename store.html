@@ -4,261 +4,841 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Order online</title>
-<meta name="theme-color" content="#0f766e" id="themeMeta" />
+<meta name="theme-color" content="#F26A21" id="themeMeta" />
 <meta name="apple-mobile-web-app-capable" content="yes" /><meta name="mobile-web-app-capable" content="yes" />
+<meta name="robots" content="noindex,nofollow" />
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <link rel="icon" href="/icons/favicon-32.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <style>
-:root{--b:#0f766e;--bd:#0b5a54;--bg:#f6f7f8;--c:#fff;--t:#16202a;--m:#64707d;--ln:#e3e7ea;--ok:#15803d;--bad:#b91c1c;--wn:#b45309;--r:14px}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--t);padding-bottom:84px}
-header{background:var(--b);color:#fff;padding:18px 16px 14px;padding-top:max(18px,env(safe-area-inset-top))}header h1{margin:0;font-size:21px}header p{margin:4px 0 0;opacity:.92;font-size:13px}
-.logo{width:42px;height:42px;border-radius:10px;object-fit:cover;background:#fff;margin-right:10px}.hrow{display:flex;align-items:center}
-nav.tabs{display:flex;position:sticky;top:0;z-index:20;background:var(--c);border-bottom:1px solid var(--ln)}nav.tabs button{flex:1;padding:12px 4px;border:0;background:none;font:600 13px inherit;color:var(--m);border-bottom:3px solid transparent}nav.tabs button.on{color:var(--b);border-color:var(--b)}
-main{padding:12px;max-width:760px;margin:auto}.card{background:var(--c);border:1px solid var(--ln);border-radius:var(--r);padding:12px;margin-bottom:10px}
-.row{display:flex;gap:10px;align-items:center}.grow{flex:1;min-width:0}.muted{color:var(--m);font-size:13px}.price{font-weight:800;color:var(--bd)}.was{text-decoration:line-through;color:var(--m);font-weight:400;margin-right:6px}
-button.p,button.s{border:0;border-radius:10px;padding:11px 16px;font:700 14px inherit}button.p{background:var(--b);color:#fff}button.s{background:#e6f2f1;color:var(--bd)}button:disabled{opacity:.5}
-input,select,textarea{width:100%;padding:11px;border:1px solid var(--ln);border-radius:10px;font:inherit;background:#fff;margin-top:4px}label{display:block;font-weight:600;font-size:13px;margin-top:10px}
-.chips{display:flex;gap:8px;overflow-x:auto;padding:4px 0 8px}.chip{white-space:nowrap;padding:7px 13px;border-radius:99px;border:1px solid var(--ln);background:#fff;font-size:13px}.chip.on{background:var(--b);color:#fff;border-color:var(--b)}
-.item img{width:74px;height:74px;border-radius:10px;object-fit:cover;background:#eef1f3}.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:#eef1f3;color:var(--m);margin-right:4px}.tag.o{background:#fff1d6;color:var(--wn)}.tag.g{background:#dcfce7;color:var(--ok)}.tag.r{background:#fee2e2;color:var(--bad)}
-.qty{display:flex;align-items:center;gap:10px}.qty button{width:32px;height:32px;border-radius:50%;border:1px solid var(--ln);background:#fff;font-size:18px}
-.bar{position:fixed;left:0;right:0;bottom:0;padding:10px 12px max(10px,env(safe-area-inset-bottom));background:var(--c);border-top:1px solid var(--ln);z-index:30}.bar button{width:100%}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:50;display:flex;align-items:flex-end;justify-content:center}.sheet{background:var(--c);width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px}
-#map{height:230px;border-radius:12px;margin-top:6px;border:1px solid var(--ln)}.steps{display:flex;margin:14px 0}.steps div{flex:1;text-align:center;font-size:11px;color:var(--m)}.steps i{display:block;width:22px;height:22px;border-radius:50%;background:#dfe5e8;margin:0 auto 4px;line-height:22px;font-style:normal;color:#fff}.steps .d i{background:var(--b)}
-.banner{display:none;background:#fff;border:1px solid var(--ln);border-radius:var(--r);margin:10px 12px;padding:10px;align-items:center;gap:10px}.err{color:var(--bad);font-size:13px;margin-top:8px}.ok{color:var(--ok)}.empty{text-align:center;color:var(--m);padding:26px 8px}
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:96px;background:#16202a;color:#fff;padding:10px 16px;border-radius:99px;z-index:90;font-size:13px}
+:root{--o:#F26A21;--od:#D9560F;--ol:#FFF1E8;--ink:#14171A;--ink2:#3B424A;--mut:#7A828A;--line:#ECEEF0;--bg:#F5F5F6;--card:#fff;--ok:#1F9D55;--okl:#E3F6EA;--blue:#3B82F6;--bluel:#E5EFFE;--bad:#D92D20;--badl:#FEE4E2;--warn:#B45309;--warnl:#FEF3C7;--r:16px;--sh:0 1px 2px rgba(20,23,26,.05),0 6px 18px rgba(20,23,26,.06);--nav:64px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{scroll-behavior:smooth}
+body{margin:0;background:#e9eaec;color:var(--ink);font:15px/1.45 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit;padding:0}
+input,textarea,select{font:inherit;color:inherit}
+h1,h2,h3,h4,p{margin:0}
+svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none;vertical-align:-.2em}
+#app{max-width:480px;min-height:100vh;margin:0 auto;background:var(--bg);position:relative;box-shadow:0 0 40px rgba(0,0,0,.12)}
+#view{padding-bottom:calc(var(--nav) + 28px + env(safe-area-inset-bottom))}
+#view.nonav{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+#view.full{padding-bottom:0}
+.pad{padding:0 16px}
+.muted{color:var(--mut)}.fine{color:var(--mut);font-size:12.5px}
+.row{display:flex;align-items:center;gap:10px}.grow{flex:1;min-width:0}
+.sp{height:14px}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.96);backdrop-filter:blur(10px);display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) 14px 12px;border-bottom:1px solid var(--line)}
+.top h1{font-size:18px;font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex:none;position:relative}
+.ib:active{background:#eef0f2}
+.ib .dot{position:absolute;top:3px;right:2px;min-width:18px;height:18px;border-radius:99px;background:var(--o);color:#fff;font-size:10.5px;font-weight:800;display:grid;place-items:center;padding:0 4px}
+
+/* buttons / fields */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;background:var(--o);color:#fff;border-radius:14px;padding:14px 20px;font-weight:700;min-height:52px;transition:transform .1s,background .15s;width:100%}
+.btn:active{transform:scale(.98);background:var(--od)}.btn:disabled{opacity:.55}
+.btn.ghost{background:#fff;color:var(--ink);border:1px solid #cfd4d9}
+.btn.dark{background:#111;color:#fff}.btn.sm{min-height:40px;padding:8px 14px;font-size:14px;border-radius:12px;width:auto}
+.btn.green{background:var(--ok)}.btn.line{background:var(--ol);color:var(--od)}
+.field{width:100%;padding:14px;border:1px solid #d8dde1;border-radius:13px;background:#fff;outline:0;margin-top:6px}
+.field:focus{border-color:var(--o);box-shadow:0 0 0 3px rgba(242,106,33,.15)}
+.lbl{font-size:12.5px;font-weight:600;color:var(--ink2);margin-top:14px;display:block}
+.phonef{display:flex;margin-top:6px;border:1px solid #d8dde1;border-radius:13px;background:#fff;overflow:hidden}
+.phonef:focus-within{border-color:var(--o);box-shadow:0 0 0 3px rgba(242,106,33,.15)}
+.phonef span{padding:0 12px;font-weight:700;color:var(--ink2);background:#f0f2f4;display:flex;align-items:center}
+.phonef input{border:0;outline:0;padding:14px;flex:1;min-width:0;background:transparent}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);padding:16px}
+.card+.card{margin-top:12px}
+.sec{display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px;font-weight:700;font-size:16px}
+.sec a,.sec button{font-size:13px;color:var(--o);font-weight:600}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px;background:var(--warnl);color:var(--warn)}
+.tag.gr{background:var(--okl);color:var(--ok)}.tag.rd{background:var(--badl);color:var(--bad)}.tag.bl{background:var(--bluel);color:#1d4ed8}.tag.or{background:var(--ol);color:var(--od)}
+.note{display:flex;gap:10px;border-radius:14px;padding:12px 14px;font-size:13.5px;background:var(--warnl);color:#6b3f08;margin-top:12px}
+.note.info{background:var(--ol);color:#8a3a0c}
+.err{color:var(--bad);font-size:13px;margin-top:8px;min-height:18px}
+.empty{text-align:center;padding:44px 18px;color:var(--mut)}
+.empty .ring{width:68px;height:68px;border-radius:50%;background:var(--ol);color:var(--o);display:grid;place-items:center;margin:0 auto 14px}
+.empty .ring svg{width:30px;height:30px}.empty h3{color:var(--ink);font-size:17px;margin-bottom:4px}
+.sk{background:linear-gradient(90deg,#e9ecee 25%,#f5f6f7 37%,#e9ecee 63%);background-size:400% 100%;animation:sk 1.3s infinite;border-radius:14px}
+@keyframes sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
+.spin{width:22px;height:22px;border:3px solid rgba(242,106,33,.2);border-top-color:var(--o);border-radius:50%;animation:rot .8s linear infinite;flex:none}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* splash */
+.splash{min-height:100vh;background:radial-gradient(120% 90% at 80% 10%,#7a3410 0%,#2a1408 45%,#0d0907 100%);color:#fff;display:flex;flex-direction:column;padding:calc(28px + env(safe-area-inset-top)) 24px calc(28px + env(safe-area-inset-bottom));position:relative;overflow:hidden}
+.splash:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg,rgba(255,255,255,.03) 0 2px,transparent 2px 16px)}
+.brand{display:flex;align-items:center;gap:12px;position:relative}
+.brand .lg{width:52px;height:52px;border-radius:15px;background:var(--o);display:grid;place-items:center;font-weight:800;font-size:24px;overflow:hidden;flex:none;box-shadow:0 6px 18px rgba(0,0,0,.4)}
+.brand .lg img{width:100%;height:100%;object-fit:cover}
+.brand b{font-size:21px;display:block;line-height:1.1}.brand small{color:#e0cfc4;font-size:13px}
+.splash .art{flex:1;display:grid;place-items:center;position:relative}
+.splash .art .plate{width:190px;height:190px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffb27d,#F26A21 55%,#9a3a08);display:grid;place-items:center;box-shadow:0 20px 60px rgba(242,106,33,.45)}
+.splash .art .plate svg{width:84px;height:84px;stroke-width:1.4}
+.splash h1{font-size:34px;line-height:1.1;font-weight:800;position:relative}.splash h1 em{font-style:normal;color:var(--o);display:block}
+.splash p{color:#e0cfc4;margin:12px 0 22px;position:relative}
+.splash .btn{margin-top:10px;position:relative}
+
+/* home */
+.hhead{background:#fff;padding:calc(14px + env(safe-area-inset-top)) 16px 16px;border-bottom:1px solid var(--line)}
+.hhead .brandrow{display:flex;align-items:center;gap:10px}
+.hhead .lg{width:34px;height:34px;border-radius:10px;background:var(--o);color:#fff;display:grid;place-items:center;font-weight:800;overflow:hidden;flex:none}.hhead .lg img{width:100%;height:100%;object-fit:cover}
+.hhead .bn{font-weight:800;font-size:17px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hhead h2{font-size:21px;margin-top:14px}.hhead p{color:var(--mut);font-size:13.5px}
+.qa{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.qa button{display:flex;flex-direction:column;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--ink2);text-align:center}
+.qa .ico{width:56px;height:56px;border-radius:16px;background:#fff;border:1px solid var(--line);display:grid;place-items:center;color:var(--ink2);box-shadow:var(--sh)}
+.qa .ico.on{background:var(--o);color:#fff;border-color:var(--o)}.qa .ico svg{width:25px;height:25px}
+.hstrip{display:flex;gap:12px;overflow-x:auto;margin:0 -16px;padding:2px 16px 8px;scrollbar-width:none}.hstrip::-webkit-scrollbar{display:none}
+.mini{flex:none;width:118px;text-align:left}
+.mini .im{width:118px;height:92px;border-radius:14px;background:linear-gradient(135deg,#fde2cf,#f7c9a6);position:relative;overflow:hidden;display:grid;place-items:center;color:rgba(138,58,12,.35)}
+.mini .im img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.mini b{display:block;font-size:13px;margin-top:6px;line-height:1.25}.mini span{font-size:12.5px;color:var(--mut)}
+.stat{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.stat .card{display:flex;gap:10px;align-items:center;padding:14px}
+.stat .ic{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--ol);color:var(--o);flex:none}
+.stat small{display:block;color:var(--mut);font-size:12px}.stat b{font-size:15px}
+.live{background:linear-gradient(135deg,var(--o),#ff8a4a);color:#fff;border-radius:var(--r);padding:16px;box-shadow:0 10px 24px rgba(242,106,33,.35)}
+.live small{opacity:.9}.live b{font-size:17px}
+
+/* chips + menu */
+.chips{display:flex;gap:8px;overflow-x:auto;padding:12px 16px;scrollbar-width:none;background:var(--bg);position:sticky;top:calc(65px + env(safe-area-inset-top));z-index:20}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:7px 15px;border-radius:99px;background:#fff;border:1px solid var(--line);font-weight:600;font-size:13px;color:var(--ink2);white-space:nowrap}
+.chip.on{background:var(--o);color:#fff;border-color:var(--o)}
+.search{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:0 14px;margin:12px 16px 0}
+.search input{flex:1;border:0;outline:0;padding:13px 0;background:transparent;min-width:0}
+.dish{display:flex;gap:12px;padding:12px;background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);margin:0 16px 12px;position:relative;text-align:left;width:calc(100% - 32px)}
+.dish .im{width:92px;height:92px;border-radius:14px;flex:none;background:linear-gradient(135deg,#fde2cf,#f7c9a6);position:relative;overflow:hidden;display:grid;place-items:center;color:rgba(138,58,12,.35)}
+.dish .im img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.dish .tx{flex:1;min-width:0;display:flex;flex-direction:column}
+.dish h3{font-size:15px;line-height:1.25}.dish p{margin-top:3px;color:var(--mut);font-size:12.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dish .ft{margin-top:auto;padding-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.price{font-weight:800;color:var(--ink)}
+.add{width:34px;height:34px;border-radius:50%;background:var(--o);color:#fff;display:grid;place-items:center;position:absolute;right:12px;bottom:12px;box-shadow:0 4px 10px rgba(242,106,33,.4)}
+.dish.out{opacity:.55}.dish.out .add{background:#c7ccd1;box-shadow:none}
+.catt{margin:18px 16px 10px;font-size:17px;font-weight:700}
+
+/* floating cart bar + nav */
+.cartbar{position:fixed;left:50%;transform:translateX(-50%);width:min(480px,100%);bottom:calc(var(--nav) + env(safe-area-inset-bottom));z-index:39;padding:8px 14px}
+.cartbar.nonav{bottom:0;padding-bottom:calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 35%)}
+.cartbtn{width:100%;display:flex;align-items:center;gap:12px;background:var(--ink);color:#fff;border-radius:16px;padding:12px 14px;font-weight:700;box-shadow:0 10px 28px rgba(20,23,26,.35)}
+.cartbtn .cc{width:38px;height:38px;border-radius:12px;background:var(--o);display:grid;place-items:center}
+.cartbtn .arrow{margin-left:auto}
+.nav{position:fixed;left:50%;transform:translateX(-50%);width:min(480px,100%);bottom:0;z-index:40;background:rgba(255,255,255,.97);backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:6px 6px calc(6px + env(safe-area-inset-bottom));display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.nav button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 2px;font-size:11px;font-weight:600;color:var(--mut);position:relative}
+.nav button svg{width:23px;height:23px}.nav button.on{color:var(--o)}
+.nav .bd{position:absolute;top:1px;left:calc(50% + 6px);min-width:16px;height:16px;border-radius:99px;background:var(--o);color:#fff;font-size:10px;font-weight:800;display:grid;place-items:center;padding:0 4px}
+
+/* cart + totals */
+.line{display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.line:last-child{border:0}.line .im{width:60px;height:60px;border-radius:12px;background:linear-gradient(135deg,#fde2cf,#f7c9a6);overflow:hidden;position:relative;flex:none}.line .im img{width:100%;height:100%;object-fit:cover}
+.line .t{flex:1;min-width:0}.line .t small{display:block;color:var(--mut);font-size:12px}
+.qty{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:99px;padding:3px 4px;background:#fff}
+.qty button{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:var(--o);font-size:18px;font-weight:700}
+.qty b{min-width:18px;text-align:center}
+.tot{display:flex;justify-content:space-between;padding:6px 0;font-size:14.5px;color:var(--ink2)}
+.tot.big{font-size:18px;font-weight:800;color:var(--ink);border-top:1px dashed #d4d9dd;margin-top:8px;padding-top:12px}
+.tot.big b:last-child{color:var(--o)}
+
+/* sheets */
+.ov{position:fixed;inset:0;background:rgba(10,12,14,.55);z-index:60;display:flex;align-items:flex-end;justify-content:center;animation:fade .18s}
+@keyframes fade{from{opacity:0}}
+.sheet{background:#fff;width:min(480px,100%);max-height:92vh;border-radius:24px 24px 0 0;display:flex;flex-direction:column;animation:up .26s cubic-bezier(.2,.8,.2,1);overflow:hidden}
+@keyframes up{from{transform:translateY(40px);opacity:.4}}
+.sheet .hd{padding:18px 18px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px}.sheet .hd h2{font-size:19px}
+.sheet .bd{padding:4px 18px 14px;overflow:auto;flex:1;-webkit-overflow-scrolling:touch}
+.sheet .fx{padding:12px 18px calc(14px + env(safe-area-inset-bottom));border-top:1px solid var(--line);display:flex;gap:10px}
+.x{width:36px;height:36px;border-radius:50%;background:#eef0f2;display:grid;place-items:center;flex:none}
+.opt{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:13px;margin-bottom:8px;cursor:pointer}
+.opt:has(input:checked){border-color:var(--o);background:var(--ol);box-shadow:0 0 0 1px var(--o) inset}
+.opt input{accent-color:var(--o);width:19px;height:19px;flex:none}.opt .n{flex:1}.opt .p{color:var(--mut);font-size:13px;font-weight:600}
+.grp h4{margin:16px 0 8px;font-size:14px}
+
+/* payment */
+.method{display:flex;align-items:center;gap:12px;padding:14px;border:1.5px solid var(--line);border-radius:14px;background:#fff;margin-bottom:10px;cursor:pointer;width:100%;text-align:left}
+.method .mi{width:40px;height:40px;border-radius:11px;background:#f0f2f4;display:grid;place-items:center;color:var(--ink2)}
+.method.on{border-color:var(--o);background:var(--ol)}.method.on .mi{background:var(--ok);color:#fff}
+.method .ck{margin-left:auto;width:22px;height:22px;border-radius:50%;border:2px solid #cdd2d7;display:grid;place-items:center;color:#fff}
+.method.on .ck{background:var(--o);border-color:var(--o)}
+.okring{width:96px;height:96px;border-radius:50%;background:var(--o);color:#fff;display:grid;place-items:center;margin:8px auto 16px;animation:pop .45s cubic-bezier(.2,1.4,.4,1);box-shadow:0 12px 30px rgba(242,106,33,.4)}
+.okring svg{width:50px;height:50px;stroke-width:3}
+@keyframes pop{from{transform:scale(.3);opacity:0}}
+.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 14px;animation:ring 1.6s infinite}.phone-anim svg{width:40px;height:40px}
+@keyframes ring{0%,100%{transform:rotate(0)}10%,30%{transform:rotate(-8deg)}20%,40%{transform:rotate(8deg)}50%{transform:rotate(0)}}
+.prog{height:5px;background:#e4e8eb;border-radius:9px;overflow:hidden;margin:14px 0 0}.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width 1s linear}
+.center{text-align:center}
+
+/* order status */
+.obanner{background:var(--o);color:#fff;border-radius:14px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.obanner b{font-size:17px;display:block}.obanner small{opacity:.92}
+.tl{position:relative;padding:4px 0 0}
+.ts{display:flex;gap:14px;padding-bottom:22px;position:relative}
+.ts:not(:last-child):before{content:"";position:absolute;left:15px;top:32px;bottom:0;width:2px;background:#dfe3e6}
+.ts.done:not(:last-child):before{background:var(--ok)}
+.ts .dot{width:32px;height:32px;border-radius:50%;background:#eceef0;color:#9aa2a9;display:grid;place-items:center;flex:none;position:relative;z-index:1}
+.ts.done .dot{background:var(--ok);color:#fff}.ts.now .dot{background:var(--o);color:#fff;box-shadow:0 0 0 6px rgba(242,106,33,.18);animation:glow 1.8s infinite}
+@keyframes glow{50%{box-shadow:0 0 0 10px rgba(242,106,33,.06)}}
+.ts b{display:block;font-size:15px}.ts small{color:var(--mut)}.ts.todo b{color:var(--mut);font-weight:600}
+
+/* floor */
+.fgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:0 16px}
+.tb{background:#fff;border:1.5px solid var(--line);border-radius:16px;padding:12px 6px 10px;text-align:center;font-size:12.5px;position:relative}
+.tb .sq{width:62px;height:62px;border-radius:14px;margin:0 auto 6px;display:grid;place-items:center;background:var(--okl);color:var(--ok);border:2px solid #b8e6c9}
+.tb .sq svg{width:30px;height:30px}
+.tb b{display:block;font-size:13.5px}.tb small{font-weight:600}
+.tb.free small{color:var(--ok)}.tb.free:active{border-color:var(--o)}
+.tb.busy .sq{background:var(--ol);color:var(--o);border-color:#fbc9a8}.tb.busy small{color:var(--od)}
+.tb.rsv .sq{background:var(--bluel);color:var(--blue);border-color:#bcd3fb}.tb.rsv small{color:#1d4ed8}
+.tb.small .sq{background:#f0f2f4;color:#9aa2a9;border-color:#e0e3e6}.tb.small small{color:var(--mut)}
+.tb.sel{border-color:var(--o);box-shadow:0 0 0 2px rgba(242,106,33,.25)}
+.legend{display:flex;gap:16px;justify-content:center;font-size:12px;color:var(--ink2);margin:16px 0 0}.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+
+/* rooms */
+.room{display:flex;gap:12px;padding:12px;background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);margin:0 16px 12px;text-align:left;width:calc(100% - 32px)}
+.room .im{width:96px;height:96px;border-radius:12px;background:linear-gradient(135deg,#dfe6ee,#c9d4e2);position:relative;overflow:hidden;flex:none;display:grid;place-items:center;color:rgba(20,23,26,.25)}.room .im img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.room .tx{flex:1;min-width:0}.room h3{font-size:16px}.room .meta{display:flex;gap:10px;color:var(--mut);font-size:12px;margin-top:6px;flex-wrap:wrap}
+.gal{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;height:240px;background:linear-gradient(135deg,#dfe6ee,#c9d4e2)}.gal::-webkit-scrollbar{display:none}
+.gal img{flex:none;width:100%;height:100%;object-fit:cover;scroll-snap-align:center}
+.gal .ph{flex:none;width:100%;display:grid;place-items:center;color:rgba(20,23,26,.25)}.gal .ph svg{width:60px;height:60px}
+.am{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.am div{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:11.5px;color:var(--ink2);text-align:center;padding:8px 2px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.am svg{width:22px;height:22px;color:var(--ink2)}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:#e8eaec;border-radius:13px;padding:4px;margin-bottom:6px}
+.seg button{padding:11px;border-radius:10px;font-weight:700;color:var(--mut)}.seg button.on{background:var(--o);color:#fff}
+
+/* profile */
+.avatar{width:76px;height:76px;border-radius:50%;background:#111;color:#fff;display:grid;place-items:center;font-size:28px;font-weight:700;overflow:hidden;margin:0 auto 8px}.avatar img{width:100%;height:100%;object-fit:cover}
+.mrow{display:flex;align-items:center;gap:14px;padding:15px 14px;width:100%;text-align:left;border-bottom:1px solid var(--line);background:#fff}
+.mrow:first-child{border-radius:14px 14px 0 0}.mrow:last-child{border:0;border-radius:0 0 14px 14px}
+.mrow .ic{color:var(--ink2)}.mrow .go{margin-left:auto;color:var(--mut)}
+.mlist{border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--sh)}
+.or{display:flex;align-items:center;gap:12px;color:var(--mut);font-size:12.5px;margin:16px 0 4px}.or:before,.or:after{content:"";flex:1;height:1px;background:var(--line)}
+.bk{padding:14px}.bk+.bk{margin-top:12px}
+.bk .hd2{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+
+/* receipt */
+.rcpt{background:#fff;border:1px solid var(--line);border-radius:8px;padding:22px 20px;box-shadow:var(--sh);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;color:#111}
+.rcpt .h{text-align:center;border-bottom:1px dashed #999;padding-bottom:10px;margin-bottom:10px}.rcpt .h b{font:800 18px Inter,sans-serif;display:block}
+.rcpt .paid{display:inline-block;margin-top:8px;border:2px solid var(--ok);color:var(--ok);font-weight:800;letter-spacing:.14em;padding:2px 12px;border-radius:6px;transform:rotate(-3deg)}
+.rcpt .r{display:flex;justify-content:space-between;gap:10px;padding:2px 0}.rcpt .r.s{font-weight:800;font-size:15px;border-top:1px solid #111;margin-top:6px;padding-top:7px}
+.rcpt .li{display:grid;grid-template-columns:auto 1fr auto;gap:8px;padding:2px 0}.rcpt .li small{display:block;opacity:.65}
+.rcpt hr{border:0;border-top:1px dashed #999;margin:10px 0}.rcpt .ft{text-align:center;margin-top:12px;opacity:.75}
+#map{height:210px;border-radius:14px;margin-top:8px;border:1px solid var(--line);z-index:1}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav) + 90px);background:#14171A;color:#fff;padding:12px 18px;border-radius:14px;z-index:90;font-size:14px;box-shadow:0 10px 28px rgba(0,0,0,.3);max-width:90vw;display:flex;gap:9px;align-items:center}.toast.bad{background:var(--bad)}
+.banner{display:none;background:#fff;border:1px solid var(--line);border-radius:14px;margin:12px 16px 0;padding:12px;align-items:center;gap:10px}
+@media print{body>*:not(#printarea){display:none!important}#printarea{display:block!important}}
+#printarea{display:none}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<header><div class="hrow"><img id="logo" class="logo" alt="" hidden /><div><h1 id="bn">Loading…</h1><p id="tag"></p></div></div></header>
-<div class="banner" id="install"><div class="grow"><b>Install this app</b><div class="muted" id="installTxt">Order faster next time.</div></div><button class="p" id="installBtn">Install</button><button class="s" id="installX">Not now</button></div>
-<nav class="tabs" id="tabs"></nav>
-<main id="main"><div class="empty">Loading…</div></main>
-<div class="bar" id="bar" hidden><button class="p" id="barBtn"></button></div>
+<div id="app">
+  <main id="view"><div class="pad" style="padding-top:60px"><div class="sk" style="height:26px;width:55%;margin-bottom:14px"></div><div class="sk" style="height:110px"></div></div></main>
+  <div class="banner" id="install"><div class="grow"><b>Install this app</b><div class="muted" id="installTxt" style="font-size:13px">Order faster next time.</div></div><button class="btn sm" id="installBtn">Install</button><button class="btn sm ghost" id="installX">Not now</button></div>
+  <div class="cartbar" id="cartbar"></div>
+  <nav class="nav" id="nav" hidden></nav>
+</div>
+<div id="layer"></div><div id="printarea"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="/js/core/config.js"></script>
 <script>
 (function () {
 'use strict';
-var TOKEN = new URLSearchParams(location.search).get('t') || (location.pathname.match(/\/(?:s|q)\/([^\/?#]+)/) || [])[1] || '';
-var API = ((window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || 'https://posbackend-5jaq.onrender.com/api/v1') + '/public/store/' + TOKEN;
+var TOKEN = decodeURIComponent((location.pathname.match(/\/(?:s|q)\/([^\/?#]+)/) || [])[1] || new URLSearchParams(location.search).get('t') || '');
+var BASE = ((window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || 'https://posbackend-5jaq.onrender.com/api/v1') + '/public/store/' + encodeURIComponent(TOKEN);
 var $ = function (s, r) { return (r || document).querySelector(s); }, $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 var E = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
-var ctx, menu, cart = [], tab = 'menu', cat = 'all', branchId = '', S = { orders: [], bookings: [] }, timer;
-try { S = JSON.parse(localStorage.getItem('store:' + TOKEN) || 'null') || S; } catch (e) {}
-function save() { try { localStorage.setItem('store:' + TOKEN, JSON.stringify(S)); } catch (e) {} }
-function money(n) { n = +n || 0; return ((ctx && ctx.business.currency) || 'KES') + ' ' + n.toLocaleString('en-KE', { maximumFractionDigits: 2 }); }
-function toast(m) { var t = document.createElement('div'); t.className = 'toast'; t.textContent = m; document.body.appendChild(t); setTimeout(function () { t.remove(); }, 3200); }
-function uid() { return 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
-function api(path, method, body) {
-  return fetch(API + path, { method: method || 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || j.success === false) { var e = new Error(j.message || 'Something went wrong. Please try again.'); e.code = j.code; throw e; } return j.data !== undefined ? j.data : j; }); });
-}
-function q(o) { return '?' + Object.keys(o).filter(function (k) { return o[k] != null && o[k] !== ''; }).map(function (k) { return k + '=' + encodeURIComponent(o[k]); }).join('&'); }
+function sg(k, st) { try { return JSON.parse((st || localStorage).getItem(k) || 'null'); } catch (e) { return null; } }
+function ss(k, v, st) { try { (st || localStorage).setItem(k, JSON.stringify(v)); } catch (e) { /* storage blocked */ } }
 
-// ---------- install (PWA): the manifest is generated for THIS business so "Add to home screen" opens its storefront
+/* ---------- icons ---------- */
+var IC = {
+  home: '<path d="M3 11 12 3l9 8M5 9.5V21h14V9.5M10 21v-6h4v6"/>', utensils: '<path d="M5 3v6a3 3 0 0 0 3 3v9M8 3v6M11 3v6a3 3 0 0 1-3 3"/><path d="M18 21V3c-2.6 1.6-4 4.6-4 8.5V14h4"/>',
+  bed: '<path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11.5" r="1.7"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"/>', users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.8c2 .6 3.5 2.2 3.5 5.2"/>',
+  back: '<path d="m15 6-6 6 6 6"/>', chev: '<path d="m9 6 6 6-6 6"/>', plus: '<path d="M12 5v14M5 12h14"/>', minus: '<path d="M5 12h14"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>', check: '<path d="M5 12.5 10 17.5 19 7"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', cart: '<path d="M3 4h2l2.4 11h10.2L20 7H6.2"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>', bag: '<path d="M5 8h14l-1 12H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>', phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>', call: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
+  pin: '<path d="M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>', card: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/>', cash: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/>', bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17v.3"/>', gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>',
+  logout: '<path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"/>', cal: '<rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>', tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
+  table: '<rect x="3" y="9" width="18" height="4" rx="1.5"/><path d="M6 13v6M18 13v6M7 9V6M17 9V6"/>', wifi: '<path d="M2 9a15 15 0 0 1 20 0M5 12.5a10.5 10.5 0 0 1 14 0M8.5 16a5.5 5.5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8"/>',
+  tv: '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>', snow: '<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/>', coffee: '<path d="M4 8h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5zM17 10h2a2 2 0 0 1 0 4h-2M7 3v2M11 3v2"/>',
+  car: '<path d="M5 16V11l2-5h10l2 5v5M3 16h18M7 16v2M17 16v2"/><circle cx="8" cy="13" r=".8"/><circle cx="16" cy="13" r=".8"/>', sparkles: '<path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8z"/>',
+  star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>', alert: '<path d="M12 3 2.5 20h19z"/><path d="M12 10v4.5M12 17.2v.3"/>', print: '<path d="M7 9V3h10v6M7 17H4v-7h16v7h-3"/><rect x="7" y="14" width="10" height="7"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14-4M4 4v4h4M4 13a8 8 0 0 0 14 4M20 20v-4h-4"/>', shield: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>', truck: '<path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.6"/><circle cx="17" cy="17.5" r="1.6"/>', door: '<path d="M6 21V4h12v17M4 21h16"/>'
+};
+function ic(n, c) { return '<svg class="i ' + (c || '') + '" viewBox="0 0 24 24" aria-hidden="true">' + (IC[n] || IC.sparkles) + '</svg>'; }
+function amIcon(t) { t = String(t || '').toLowerCase(); return /wi-?fi|internet/.test(t) ? 'wifi' : /tv|television/.test(t) ? 'tv' : /a\/?c|air|cool/.test(t) ? 'snow' : /break|coffee|tea|bar/.test(t) ? 'coffee' : /park|car/.test(t) ? 'car' : /bed|king|queen/.test(t) ? 'bed' : 'sparkles'; }
+
+/* ---------- state ---------- */
+var CK = 'sx.cart.' + TOKEN.slice(0, 40), TK = 'sx.orders.' + TOKEN.slice(0, 40);
+var ctx = null, menu = null, cart = sg(CK, sessionStorage) || [], acct = sg('q.acct'), branchId = '', cur = { v: 'home', p: {} }, stack = [], hist = null, tmr = null, mapObj = null, marker = null;
+var DT = { name: '', phone: '', address: '', landmark: '', ins: '', pin: null, quote: null, ref: null, method: '' };
+var MAIN = ['home', 'menu', 'orders', 'rooms', 'more'];
+var THEME = '#F26A21';
+
+function cur$() { return (ctx && ctx.business && ctx.business.currency) || 'KES'; }
+function money(n) { n = +n || 0; var c = cur$(), s; try { s = n.toLocaleString('en-KE', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 }); } catch (e) { s = String(n); } return (c === 'KES' ? 'KSh ' : c + ' ') + s; }
+function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function fdate(d) { try { return new Date(String(d).length === 10 ? d + 'T12:00:00' : d).toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric', month: 'short' }); } catch (e) { return d; } }
+function ftime(d) { try { return new Date(d).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+function fdt(d) { return fdate(d) + ' · ' + ftime(d); }
+function localPhone(p) { var d = String(p || '').replace(/\D/g, ''); if (d.startsWith('254')) d = d.slice(3); if (d.startsWith('0')) d = d.slice(1); return d; }
+function initials(n) { return String(n || '?').trim().split(/\s+/).slice(0, 2).map(function (x) { return x[0]; }).join('').toUpperCase(); }
+function greet() { var h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
+
+async function call(path, method, body) {
+  var r;
+  try { r = await fetch(BASE + path, { method: method || 'GET', headers: Object.assign({ 'Content-Type': 'application/json' }, acct && acct.token ? { Authorization: 'Bearer ' + acct.token } : {}), body: body ? JSON.stringify(body) : undefined }); }
+  catch (e) { var n = new Error('No connection. Please check your internet and try again.'); n.code = 'NETWORK'; throw n; }
+  var j = await r.json().catch(function () { return {}; });
+  if (!r.ok || j.success === false) {
+    var er = new Error((j.errors && j.errors[0] && j.errors[0].message) || j.message || 'Something went wrong. Please try again.'); er.code = j.code || ('HTTP_' + r.status); er.status = r.status;
+    if (r.status === 401 && acct) { acct = null; ss('q.acct', null); }
+    throw er;
+  }
+  return j.data !== undefined ? j.data : j;
+}
+var tt;
+function toast(msg, bad) { $$('.toast').forEach(function (x) { x.remove(); }); var d = document.createElement('div'); d.className = 'toast' + (bad ? ' bad' : ''); d.innerHTML = ic(bad ? 'alert' : 'check') + '<span>' + E(msg) + '</span>'; document.body.appendChild(d); clearTimeout(tt); tt = setTimeout(function () { d.remove(); }, 3400); }
+function sheet(html, onMount, keep) {
+  closeSheet(); var o = document.createElement('div'); o.className = 'ov'; o.innerHTML = '<div class="sheet" role="dialog" aria-modal="true">' + html + '</div>';
+  if (!keep) o.addEventListener('mousedown', function (e) { if (e.target === o) closeSheet(); });
+  $('#layer').appendChild(o); document.body.style.overflow = 'hidden';
+  $$('[data-close]', o).forEach(function (b) { b.addEventListener('click', closeSheet); });
+  if (onMount) onMount(o); return o;
+}
+function closeSheet() { $('#layer').innerHTML = ''; document.body.style.overflow = ''; }
+function shd(t) { return '<div class="hd"><h2>' + t + '</h2><button class="x" data-close aria-label="Close">' + ic('x') + '</button></div>'; }
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheet(); });
+function empty(icon, h, p, btn) { return '<div class="empty"><div class="ring">' + ic(icon) + '</div><h3>' + h + '</h3><p>' + p + '</p>' + (btn || '') + '</div>'; }
+function top(title, o) { o = o || {}; return '<div class="top">' + (o.noBack ? '' : '<button class="ib" data-back aria-label="Back">' + ic('back') + '</button>') + '<h1>' + title + '</h1>' + (o.right || '') + '</div>'; }
+function cartCount() { return cart.reduce(function (a, c) { return a + c.qty; }, 0); }
+function cartTotal() { return cart.reduce(function (a, c) { return a + c.unit * c.qty; }, 0); }
+function saveCart() { ss(CK, cart, sessionStorage); }
+function trackedKeys() { return sg(TK) || []; }
+function rememberOrder(o) { var l = trackedKeys().filter(function (x) { return x.key !== o.key; }); l.unshift(o); ss(TK, l.slice(0, 15)); }
+function dishPic(it, cls) { return it.image ? '<img src="' + E(it.image) + '" alt="" loading="lazy">' : ic('utensils'); }
+function setAcct(a) { acct = a; ss('q.acct', a); if (a && a.account) { DT.name = DT.name || a.account.name; DT.phone = DT.phone || a.account.phone || ''; } }
+
+/* ---------- navigation ---------- */
+function nav(v, p, o) { o = o || {}; if (!o.replace) stack.push(cur); cur = { v: v, p: p || {} }; render(); window.scrollTo(0, 0); }
+function back() { var b = stack.pop(); if (!b) b = { v: 'home', p: {} }; cur = b; render(); window.scrollTo(0, 0); }
+function tab(v) { stack = []; cur = { v: v, p: {} }; render(); window.scrollTo(0, 0); }
+function drawNav() {
+  var n = $('#nav'); var show = MAIN.indexOf(cur.v) >= 0; n.hidden = !show; if (!show) return;
+  var t = [['home', 'home', 'Home'], ['menu', 'utensils', 'Menu'], ['orders', 'receipt', 'Orders'], ['rooms', 'bed', 'Rooms'], ['more', 'user', 'More']];
+  if (ctx && ctx.rooms && !ctx.rooms.enabled) t.splice(3, 1);
+  n.style.gridAutoColumns = '1fr'; n.innerHTML = t.map(function (x) { var a = x[0] === 'orders' && activeOrders(); return '<button data-t="' + x[0] + '" class="' + (cur.v === x[0] ? 'on' : '') + '">' + ic(x[1]) + '<span>' + x[2] + '</span>' + (a ? '<span class="bd">' + a + '</span>' : '') + '</button>'; }).join('');
+  $$('[data-t]', n).forEach(function (b) { b.onclick = function () { tab(b.dataset.t); }; });
+}
+function activeOrders() { return ((hist && hist.orders) || []).filter(function (o) { return ['DELIVERED', 'CANCELLED', 'FAILED'].indexOf(o.stage) < 0; }).length; }
+function cartBar() {
+  var b = $('#cartbar'); var n = cartCount(); var onMenu = cur.v === 'menu' || cur.v === 'home';
+  if (!n || !onMenu) { b.innerHTML = ''; return; }
+  b.className = 'cartbar' + (MAIN.indexOf(cur.v) >= 0 ? '' : ' nonav');
+  b.innerHTML = '<button class="cartbtn" id="cb"><span class="cc">' + ic('cart') + '</span><span>Cart (' + n + ')<br><small style="opacity:.8;font-weight:500">' + money(cartTotal()) + '</small></span><span class="arrow">' + ic('chev') + '</span></button>';
+  $('#cb').onclick = function () { nav('cart'); };
+}
+var VIEWS = {};
+function render() {
+  clearInterval(tmr); var v = $('#view'); v.className = MAIN.indexOf(cur.v) < 0 ? 'nonav' : ''; if (cur.v === 'splash') v.className = 'full';
+  try { (VIEWS[cur.v] || VIEWS.home)(cur.p || {}); } catch (e) { console.error(e); v.innerHTML = empty('help', 'Something went wrong', E(e.message || ''), '<button class="btn sm" style="margin-top:14px" id="rl">Reload</button>'); var r = $('#rl'); if (r) r.onclick = function () { location.reload(); }; }
+  $$('[data-back]').forEach(function (b) { b.onclick = back; }); drawNav(); cartBar();
+}
+function needAuth(fn, why) {
+  if (acct || !ctx.requireAccount) return fn();
+  nav('auth', { after: fn, why: why || 'Sign in to place your order and track it.' });
+}
+async function loadHist(force) { if (!acct) { hist = null; return null; } try { hist = await call('/account/history'); } catch (e) { if (e.status === 401) acct = null; } return hist; }
+
+/* ---------- boot ---------- */
+async function init() {
+  if (!TOKEN) return fail({ message: 'This link is not valid. Please scan the QR code again.', code: 'NO_TOKEN' });
+  try {
+    ctx = await call('');
+    var tc = ctx.store && ctx.store.themeColor; THEME = tc && tc.toLowerCase() !== '#0f766e' ? tc : '#F26A21';
+    document.documentElement.style.setProperty('--o', THEME); $('#themeMeta').content = THEME; document.title = ctx.business.name;
+    branchId = ctx.branches[0] && ctx.branches[0].id;
+    if (acct) { try { var m = await call('/account/me'); acct.account = m.account; ss('q.acct', acct); } catch (e) { if (e.status === 401 || e.status === 404) { acct = null; ss('q.acct', null); } } }
+    if (acct) { DT.name = acct.account.name; DT.phone = acct.account.phone || ''; loadHist().then(function () { drawNav(); }); }
+    try { setupInstall(); } catch (e) { /* install prompt is optional */ }
+    var q = new URLSearchParams(location.search), t = q.get('track');
+    if (t) { cur = { v: 'track', p: { key: t } }; render(); return; }
+    var seen = sg('sx.seen', sessionStorage);
+    if (!acct && !seen) { cur = { v: 'splash', p: {} }; ss('sx.seen', 1, sessionStorage); } else cur = { v: q.get('tab') || 'home', p: {} };
+    render();
+  } catch (e) { fail(e); }
+}
+function fail(e) { var net = e.code === 'NETWORK'; $('#view').className = ''; $('#view').innerHTML = '<div class="pad" style="padding-top:60px"><div class="card">' + empty(net ? 'refresh' : 'help', net ? 'You are offline' : 'We could not open this page', E(e.message || '') + (net ? '' : '<br>Please ask a member of staff for help.'), '<div style="margin-top:16px"><button class="btn sm" id="rt">Try again</button></div>') + '</div></div>'; $('#rt').onclick = function () { location.reload(); }; }
 function setupInstall() {
-  var base = location.origin, start = base + '/store.html?t=' + encodeURIComponent(TOKEN), m = { name: ctx.business.name, short_name: ctx.business.name.slice(0, 12), start_url: start, scope: base + '/store', display: 'standalone', background_color: '#ffffff', theme_color: ctx.store.themeColor, icons: [{ src: base + '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: base + '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }, { src: base + '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }] };
+  var base = location.origin, m = { name: ctx.business.name, short_name: ctx.business.name.slice(0, 12), start_url: base + '/s/' + TOKEN, scope: base + '/s/', display: 'standalone', background_color: '#ffffff', theme_color: THEME, icons: [{ src: base + '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: base + '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }, { src: base + '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }] };
   var l = document.createElement('link'); l.rel = 'manifest'; l.href = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: 'application/manifest+json' })); document.head.appendChild(l);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
   if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone || localStorage.getItem('store:noinstall')) return;
   var dp; window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); dp = e; $('#install').style.display = 'flex'; });
-  $('#installBtn').onclick = function () { if (dp) { dp.prompt(); dp.userChoice.then(function () { $('#install').style.display = 'none'; }); } else { toast('Tap Share, then "Add to Home Screen"'); } };
-  $('#installX').onclick = function () { $('#install').style.display = 'none'; try { localStorage.setItem('store:noinstall', '1'); } catch (e) {} };
-  if (/iphone|ipad|ipod/i.test(navigator.userAgent)) { $('#installTxt').textContent = 'Tap the Share button, then "Add to Home Screen".'; $('#installBtn').style.display = 'none'; $('#install').style.display = 'flex'; }
+  $('#installBtn').onclick = function () { if (dp) { dp.prompt(); dp.userChoice.then(function () { $('#install').style.display = 'none'; }); } };
+  $('#installX').onclick = function () { $('#install').style.display = 'none'; try { localStorage.setItem('store:noinstall', '1'); } catch (e) { /* ignore */ } };
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent)) { $('#installTxt').textContent = 'Tap Share, then "Add to Home Screen".'; $('#installBtn').style.display = 'none'; $('#install').style.display = 'flex'; }
 }
-
-// ---------- shell
-function tabs() {
-  var t = [['menu', 'Order'], ['tables', 'Tables']]; if (ctx.rooms.enabled) t.push(['rooms', 'Rooms']); t.push(['mine', 'My orders']);
-  $('#tabs').innerHTML = t.map(function (x) { return '<button data-t="' + x[0] + '" class="' + (x[0] === tab ? 'on' : '') + '">' + x[1] + '</button>'; }).join('');
-  $$('#tabs button').forEach(function (b) { b.onclick = function () { tab = b.dataset.t; go(); }; });
-}
-function branchPicker(onch) {
-  if (ctx.branches.length < 2) return '';
-  return '<label>Branch<select id="brSel">' + ctx.branches.map(function (b) { return '<option value="' + b.id + '"' + (b.id === branchId ? ' selected' : '') + '>' + E(b.name) + '</option>'; }).join('') + '</select></label>';
-}
+function logoHtml(c) { var b = ctx.business; return '<div class="' + (c || 'lg') + '">' + (b.logo ? '<img alt="" src="' + E(b.logo) + '" onerror="this.parentNode.textContent=\'' + E(String(b.name || '?').charAt(0).toUpperCase()) + '\'">' : E(String(b.name || '?').charAt(0).toUpperCase())) + '</div>'; }
+function branchSel() { if (!ctx.branches || ctx.branches.length < 2) return ''; return '<label class="lbl">Branch<select class="field" id="brSel">' + ctx.branches.map(function (b) { return '<option value="' + b.id + '"' + (b.id === branchId ? ' selected' : '') + '>' + E(b.name) + '</option>'; }).join('') + '</select></label>'; }
 function bindBranch(fn) { var s = $('#brSel'); if (s) s.onchange = function () { branchId = s.value; menu = null; fn(); }; }
-function bar(text, fn) { var b = $('#bar'); if (!text) { b.hidden = true; return; } b.hidden = false; $('#barBtn').textContent = text; $('#barBtn').onclick = fn; }
-function go() { clearInterval(timer); tabs(); bar(); ({ menu: viewMenu, tables: viewTables, rooms: viewRooms, mine: viewMine })[tab](); window.scrollTo(0, 0); }
 
-// ---------- menu + delivery
-function viewMenu() {
-  var d = ctx.delivery;
-  if (!menu) { $('#main').innerHTML = '<div class="empty">Loading menu…</div>'; return api('/menu' + q({ branchId: branchId })).then(function (m) { menu = m; viewMenu(); }).catch(function (e) { $('#main').innerHTML = '<div class="empty">' + E(e.message) + '</div>'; }); }
-  var closed = !d.enabled || d.paused || !d.openNow, note = !d.enabled ? 'Delivery is not offered.' : d.paused ? 'Delivery is paused right now - we are very busy.' : !d.openNow ? 'Delivery hours: ' + d.hours : '';
-  var h = (ctx.store.welcomeMessage ? '<div class="card">' + E(ctx.store.welcomeMessage) + '</div>' : '') + branchPicker();
-  if (note) h += '<div class="card"><span class="tag r">Delivery unavailable</span> ' + E(note) + ' You can still browse and reserve a table.</div>';
-  else h += '<div class="muted" style="margin:6px 2px">' + (d.minOrder ? 'Minimum order ' + money(d.minOrder) + '. ' : '') + (d.baseFee != null ? 'Delivery from ' + money(d.baseFee) + '.' : '') + '</div>';
-  if (menu.offers.length) h += '<h3 style="margin:14px 2px 6px">Today\'s offers</h3>' + menu.offers.map(function (i) { return itemCard(i, closed); }).join('');
-  h += '<div class="chips"><button class="chip ' + (cat === 'all' ? 'on' : '') + '" data-c="all">All</button>' + menu.categories.map(function (c) { return '<button class="chip ' + (cat === c.id ? 'on' : '') + '" data-c="' + c.id + '">' + E(c.name) + '</button>'; }).join('') + '</div><input id="srch" placeholder="Search the menu" />';
-  h += '<div id="list"></div>'; $('#main').innerHTML = h; bindBranch(viewMenu);
-  $$('.chip').forEach(function (c) { c.onclick = function () { cat = c.dataset.c; viewMenu(); }; });
-  var draw = function () { var s = ($('#srch').value || '').toLowerCase(), out = ''; menu.categories.forEach(function (c) { if (cat !== 'all' && cat !== c.id) return; var its = c.items.filter(function (i) { return !s || i.name.toLowerCase().indexOf(s) >= 0; }); if (its.length) out += '<h3 style="margin:14px 2px 6px">' + E(c.name) + '</h3>' + its.map(function (i) { return itemCard(i, closed); }).join(''); }); $('#list').innerHTML = out || '<div class="empty">Nothing found.</div>'; bindItems(); };
+/* ---------- splash ---------- */
+VIEWS.splash = function () {
+  var b = ctx.business; $('#view').innerHTML = '<div class="splash"><div class="brand">' + logoHtml() + '<div><b>' + E(b.name) + '</b><small>' + E(ctx.store.tagline || 'Restaurant' + (ctx.rooms.enabled ? ' & Accommodation' : '')) + '</small></div></div>' +
+    '<div class="art"><div class="plate">' + ic('utensils') + '</div></div><h1>Great Food<em>' + (ctx.rooms.enabled ? 'Comfortable Stays' : 'Delivered Fast') + '</em></h1><p>' + (ctx.rooms.enabled ? 'Dine, relax, enjoy - all in one place.' : 'Order from your phone and pay with M-PESA.') + '</p>' +
+    '<button class="btn" id="gs">Get Started</button><button class="btn dark" id="lg" style="border:1px solid rgba(255,255,255,.5);background:transparent">Login</button></div>';
+  $('#gs').onclick = function () { tab('home'); }; $('#lg').onclick = function () { cur = { v: 'home', p: {} }; nav('auth', { why: '' }); };
+};
+
+/* ---------- home ---------- */
+VIEWS.home = async function () {
+  var b = ctx.business, name = acct ? String(acct.account.name).split(' ')[0] : '';
+  var d = ctx.delivery, open = d.enabled && !d.paused && d.openNow;
+  var h = '<div class="hhead"><div class="brandrow">' + logoHtml() + '<div class="bn">' + E(b.name) + '</div><button class="ib" id="hb" aria-label="Account">' + (acct ? '<span class="avatar" style="width:34px;height:34px;font-size:13px;margin:0">' + E(initials(acct.account.name)) + '</span>' : ic('user')) + '</button></div>' +
+    '<h2>' + greet() + (name ? ', ' + E(name) : '') + ' 👋</h2><p>' + E(ctx.store.welcomeMessage || 'What would you like today?') + '</p></div><div class="pad">';
+  h += '<div class="sec">Quick actions</div><div class="qa"><button data-g="menu"><span class="ico on">' + ic('utensils') + '</span>New Order</button>' + (ctx.tables.enabled ? '<button data-g="tables"><span class="ico">' + ic('table') + '</span>Book Table</button>' : '') + (ctx.rooms.enabled ? '<button data-g="rooms"><span class="ico">' + ic('bed') + '</span>Rooms</button>' : '') + '<button data-g="orders"><span class="ico">' + ic('receipt') + '</span>My Orders</button></div>';
+  h += '<div id="liveBox"></div>';
+  h += '<div class="stat" style="margin-top:18px"><div class="card"><span class="ic">' + ic('truck') + '</span><div><small>Delivery</small><b>' + (open ? 'Open now' : d.paused ? 'Paused' : !d.enabled ? 'Not offered' : 'Closed') + '</b></div></div><div class="card"><span class="ic">' + ic('clock') + '</span><div><small>Hours</small><b>' + E(d.hours || 'All day') + '</b></div></div></div>';
+  h += '<div class="sec">Today\'s top items <button id="all">View all</button></div><div class="hstrip" id="top">' + [1, 2, 3].map(function () { return '<div class="mini"><div class="im sk"></div></div>'; }).join('') + '</div>';
+  if (ctx.rooms.enabled) h += '<div class="card" style="margin-top:6px;display:flex;gap:12px;align-items:center"><span class="stat"><span class="ic" style="width:44px;height:44px;display:grid;place-items:center;background:var(--ol);color:var(--o);border-radius:12px">' + ic('bed') + '</span></span><div class="grow"><b>Stay with us</b><div class="fine">' + (ctx.rooms.depositRequired ? 'Secure your room with a small M-PESA deposit.' : 'Book your room online.') + '</div></div><button class="btn sm" data-g="rooms">View</button></div>';
+  h += '<div class="fine center" style="margin:22px 0 6px">' + E(b.name) + (b.phone ? ' · ' + E(b.phone) : '') + '<br>Secure ordering and M-PESA payments</div></div>';
+  $('#view').innerHTML = h;
+  $$('[data-g]').forEach(function (x) { x.onclick = function () { var g = x.dataset.g; if (g === 'tables') nav('tables'); else if (MAIN.indexOf(g) >= 0) tab(g); }; });
+  $('#hb').onclick = function () { tab('more'); }; $('#all').onclick = function () { tab('menu'); };
+  if (acct) loadHist().then(function () { drawNav(); liveCard(); });
+  try { if (!menu) menu = await call('/menu?branchId=' + encodeURIComponent(branchId || '')); } catch (e) { var t0 = $('#top'); if (t0) t0.innerHTML = '<div class="fine">' + E(e.message) + '</div>'; return; }
+  if (cur.v !== 'home') return;
+  var items = (menu.offers || []).slice(); (menu.categories || []).forEach(function (c) { c.items.forEach(function (i) { if (items.length < 8 && items.indexOf(i) < 0 && i.available !== false && !items.some(function (x) { return String(x.id) === String(i.id); })) items.push(i); }); });
+  var t = $('#top'); if (t) { t.innerHTML = items.slice(0, 8).map(function (i) { var p = fromPrice(i); return '<button class="mini" data-i="' + E(i.id) + '"><div class="im">' + dishPic(i) + '</div><b>' + E(i.name) + '</b><span>' + (p ? money(p.v) : '') + '</span></button>'; }).join('') || '<div class="fine">The menu is empty right now.</div>'; $$('[data-i]', t).forEach(function (b) { b.onclick = function () { tab('menu'); }; }); }
+  liveCard();
+};
+function liveCard() {
+  var box = $('#liveBox'); if (!box) return;
+  var o = ((hist && hist.orders) || []).filter(function (x) { return ['DELIVERED', 'CANCELLED', 'FAILED'].indexOf(x.stage) < 0; })[0]; if (!o) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="live" style="margin-top:18px" id="lc"><small>Your order in progress</small><div class="row"><b class="grow">' + E(o.orderNumber) + ' · ' + E(stageName(o.stage)) + '</b>' + ic('chev') + '</div><small>' + E(o.message) + '</small></div>';
+  $('#lc').onclick = function () { nav('track', { key: o.trackKey }); };
+}
+function stageName(s) { return ({ AWAITING_PAYMENT: 'Awaiting payment', RECEIVED: 'Received', CONFIRMED: 'Confirmed', PREPARING: 'Preparing', READY: 'Ready', ON_THE_WAY: 'On the way', DELIVERED: 'Delivered', CANCELLED: 'Cancelled', FAILED: 'Failed' })[s] || s; }
+
+/* ---------- menu ---------- */
+var MC = { cat: 'all', q: '' };
+function fromPrice(it) { if (it.price != null) return { v: it.price, from: false }; var vs = (it.variants || []).map(function (v) { return v.price; }).filter(function (x) { return x != null; }); return vs.length ? { v: Math.min.apply(null, vs), from: vs.length > 1 } : null; }
+function deliveryClosed() { var d = ctx.delivery; return !d.enabled || d.paused || !d.openNow; }
+function dishCard(i) {
+  var out = i.available === false, closed = deliveryClosed(), p = fromPrice(i);
+  return '<div class="dish' + (out ? ' out' : '') + '" data-i="' + E(i.id) + '"><div class="im">' + dishPic(i) + '</div><div class="tx"><h3>' + E(i.name) + '</h3>' + (i.description ? '<p>' + E(i.description) + '</p>' : '') + '<div class="ft"><span class="price">' + (p ? (p.from ? 'From ' : '') + money(p.v) : 'Choose size') + '</span>' + (i.promoLabel ? '<span class="tag or">' + E(i.promoLabel) + '</span>' : '') + '<span class="tag" style="background:#f0f2f4;color:var(--mut)">' + ic('clock') + ' ' + (i.prepMinutes || 10) + ' min</span>' + (out ? '<span class="tag rd">' + (i.unavailableReason === 'OUT_OF_STOCK' ? 'Sold out' : 'Unavailable') + '</span>' : '') + '</div></div>' + (out || closed ? '' : '<button class="add" aria-label="Add">' + ic('plus') + '</button>') + '</div>';
+}
+VIEWS.menu = async function () {
+  var v = $('#view'); var d = ctx.delivery;
+  v.innerHTML = top('Food Menu', { noBack: true, right: '<button class="ib" id="cartTop" aria-label="Cart">' + ic('cart') + (cartCount() ? '<span class="dot">' + cartCount() + '</span>' : '') + '</button>' }) + '<div class="pad">' + '<div class="sk" style="height:56px;margin-top:14px"></div></div>';
+  $('#cartTop').onclick = function () { nav('cart'); };
+  try { if (!menu) menu = await call('/menu?branchId=' + encodeURIComponent(branchId || '')); } catch (e) { v.innerHTML = top('Food Menu', { noBack: true }) + '<div class="pad">' + empty('help', 'Menu unavailable', E(e.message)) + '</div>'; return; }
+  if (cur.v !== 'menu') return;
+  var note = !d.enabled ? 'Delivery is not offered.' : d.paused ? 'Delivery is paused right now - we are very busy.' : !d.openNow ? 'Delivery hours: ' + d.hours : '';
+  var h = top('Food Menu', { noBack: true, right: '<button class="ib" id="cartTop" aria-label="Cart">' + ic('cart') + (cartCount() ? '<span class="dot">' + cartCount() + '</span>' : '') + '</button>' });
+  h += '<div class="search">' + ic('search') + '<input id="srch" placeholder="Search the menu" value="' + E(MC.q) + '"></div>';
+  if (ctx.branches.length > 1) h += '<div class="pad">' + branchSel() + '</div>';
+  if (note) h += '<div class="pad"><div class="note">' + ic('alert') + '<div><b>Delivery unavailable.</b> ' + E(note) + (ctx.tables.enabled ? ' You can still book a table.' : '') + '</div></div></div>';
+  else h += '<div class="pad fine" style="margin-top:10px">' + (d.minOrder ? 'Minimum order ' + money(d.minOrder) + '. ' : '') + (d.baseFee != null ? 'Delivery from ' + money(d.baseFee) + '.' : '') + '</div>';
+  h += '<div class="chips" id="chips"><button class="chip ' + (MC.cat === 'all' ? 'on' : '') + '" data-c="all">All</button>' + (menu.offers.length ? '<button class="chip ' + (MC.cat === 'offers' ? 'on' : '') + '" data-c="offers">Offers</button>' : '') + menu.categories.map(function (c) { return '<button class="chip ' + (MC.cat === String(c.id) ? 'on' : '') + '" data-c="' + E(c.id) + '">' + E(c.name) + '</button>'; }).join('') + '</div><div id="list"></div>';
+  v.innerHTML = h; $('#cartTop').onclick = function () { nav('cart'); }; bindBranch(VIEWS.menu);
+  $$('.chip').forEach(function (c) { c.onclick = function () { MC.cat = c.dataset.c; VIEWS.menu(); }; });
+  var draw = function () {
+    var s = ($('#srch').value || '').toLowerCase(); MC.q = s; var out = '';
+    if (MC.cat === 'offers') out = menu.offers.filter(function (i) { return !s || i.name.toLowerCase().indexOf(s) >= 0; }).map(dishCard).join('');
+    else menu.categories.forEach(function (c) { if (MC.cat !== 'all' && MC.cat !== String(c.id)) return; var its = c.items.filter(function (i) { return !s || i.name.toLowerCase().indexOf(s) >= 0; }); if (its.length) out += '<div class="catt">' + E(c.name) + '</div>' + its.map(dishCard).join(''); });
+    $('#list').innerHTML = out || '<div class="empty">Nothing found.</div>';
+    $$('#list .dish').forEach(function (el) { el.onclick = function () { var it = findItem(el.dataset.i); if (it && it.available !== false && !deliveryClosed()) addItem(it); else if (deliveryClosed()) toast('Delivery is not available right now', true); }; });
+  };
   $('#srch').oninput = draw; draw(); cartBar();
-}
-function itemCard(i, closed) {
-  var p = priceOf(i); var dis = i.available === false;
-  return '<div class="card item row" data-id="' + i.id + '">' + (i.image ? '<img src="' + E(i.image) + '" alt="" loading="lazy" />' : '') + '<div class="grow"><b>' + E(i.name) + '</b>' + (i.description ? '<div class="muted">' + E(i.description) + '</div>' : '') + '<div style="margin-top:4px"><span class="tag">⏱ ' + (i.prepMinutes || 10) + ' min</span>' + (i.promoLabel ? '<span class="tag o">' + E(i.promoLabel) + '</span>' : '') + (dis ? '<span class="tag r">' + E((i.unavailableReason || 'Unavailable').replace(/_/g, ' ').toLowerCase()) + '</span>' : '') + '</div><div class="price" style="margin-top:3px">' + (p.from ? 'from ' : '') + money(p.v) + '</div></div>' + (dis || closed ? '' : '<button class="s add" data-id="' + i.id + '">Add</button>') + '</div>';
-}
-function find(id) { var f; menu.categories.forEach(function (c) { c.items.forEach(function (i) { if (String(i.id) === String(id)) f = i; }); }); return f; }
-function priceOf(i) { if (i.price != null) return { v: i.price, from: false }; var vs = (i.variants || []).map(function (v) { return v.price; }).filter(function (x) { return x != null; }); return { v: vs.length ? Math.min.apply(null, vs) : 0, from: vs.length > 1 }; }
-function bindItems() { $$('.add').forEach(function (b) { b.onclick = function () { addItem(find(b.dataset.id)); }; }); }
-function addItem(it) {
-  var needs = (it.variants && it.variants.length) || (it.modifierGroups && it.modifierGroups.length);
-  if (!needs) { push(it, null, [], ''); return; }
-  var vs = it.variants || [], gs = it.modifierGroups || [];
-  var m = document.createElement('div'); m.className = 'modal';
-  m.innerHTML = '<div class="sheet"><h3 style="margin:0 0 6px">' + E(it.name) + '</h3>' + (vs.length ? '<label>Size</label>' + vs.map(function (v, k) { return '<label class="row" style="font-weight:400"><input type="radio" name="v" style="width:auto" value="' + v.id + '"' + (k === 0 ? ' checked' : '') + '><span class="grow">' + E(v.name) + '</span><span>' + (v.price != null ? money(v.price) : v.priceDelta ? '+' + money(v.priceDelta) : '') + '</span></label>'; }).join('') : '') +
-    gs.map(function (g, gi) { return '<label>' + E(g.name) + (g.required ? ' (required)' : '') + (g.max ? ' - up to ' + g.max : '') + '</label>' + (g.options || []).map(function (o) { return '<label class="row" style="font-weight:400"><input type="' + (g.max === 1 ? 'radio' : 'checkbox') + '" style="width:auto" name="g' + gi + '" data-g="' + gi + '" value="' + o.id + '"><span class="grow">' + E(o.name) + '</span><span>' + (o.priceDelta ? '+' + money(o.priceDelta) : '') + '</span></label>'; }).join(''); }).join('') +
-    '<label>Notes<input id="nt" maxlength="150" placeholder="e.g. no onions" /></label><div class="err" id="er"></div><div class="row" style="margin-top:12px"><button class="s" id="cx">Cancel</button><button class="p grow" id="ok">Add to order</button></div></div>';
-  document.body.appendChild(m); $('#cx', m).onclick = function () { m.remove(); };
-  $('#ok', m).onclick = function () {
-    var vEl = $('[name=v]:checked', m), mods = [], bad = '';
-    gs.forEach(function (g, gi) { var c = $$('[data-g="' + gi + '"]:checked', m); if (g.required && !c.length) bad = 'Choose ' + g.name; if (g.max && c.length > g.max) bad = g.name + ': pick at most ' + g.max; c.forEach(function (x) { var o = g.options.filter(function (z) { return String(z.id) === x.value; })[0]; mods.push({ groupId: g.id, optionId: x.value, name: o && o.name, priceDelta: (o && o.priceDelta) || 0 }); }); });
-    if (bad) { $('#er', m).textContent = bad; return; }
-    push(it, vEl ? vEl.value : null, mods, $('#nt', m).value.trim()); m.remove();
-  };
-}
-function unit(it, vid, mods) { var base = it.price, v = (it.variants || []).filter(function (x) { return String(x.id) === String(vid); })[0]; if (v) base = v.price != null ? v.price : (it.price || 0) + (v.priceDelta || 0); return (base || 0) + mods.reduce(function (a, x) { return a + (x.priceDelta || 0); }, 0); }
-function push(it, vid, mods, notes) {
+};
+function findItem(id) { var f; (menu.categories || []).forEach(function (c) { c.items.forEach(function (i) { if (String(i.id) === String(id)) f = i; }); }); return f; }
+function unitPrice(it, vid, mods) { var base = it.price, v = (it.variants || []).filter(function (x) { return String(x.id) === String(vid); })[0]; if (v) base = v.price != null ? v.price : (it.price || 0) + (v.priceDelta || 0); return (base || 0) + mods.reduce(function (a, x) { return a + (x.priceDelta || 0); }, 0); }
+function pushCart(it, vid, mods, notes) {
   var key = [it.id, vid, mods.map(function (m) { return m.optionId; }).sort().join(','), notes].join('|'), ex = cart.filter(function (c) { return c.key === key; })[0];
-  if (ex) ex.qty++; else cart.push({ key: key, it: it, vid: vid, mods: mods, notes: notes, qty: 1, unit: unit(it, vid, mods) });
-  cartBar(); toast(it.name + ' added');
+  if (ex) ex.qty++; else cart.push({ key: key, id: it.id, name: it.name, image: it.image, prep: it.prepMinutes || 10, vid: vid, mods: mods, notes: notes, qty: 1, unit: unitPrice(it, vid, mods) });
+  saveCart(); cartBar(); toast(it.name + ' added to cart'); if (cur.v === 'menu') { var ct = $('#cartTop'); if (ct) ct.innerHTML = ic('cart') + '<span class="dot">' + cartCount() + '</span>'; }
 }
-function total() { return cart.reduce(function (a, c) { return a + c.unit * c.qty; }, 0); }
-function cartBar() { if (tab !== 'menu') return; var n = cart.reduce(function (a, c) { return a + c.qty; }, 0); bar(n ? 'View order (' + n + ') · ' + money(total()) : '', checkout); }
-var pin = null, quoteData = null, map, marker;
-function checkout() {
-  var m = document.createElement('div'); m.className = 'modal'; var me = S.me || {};
-  m.innerHTML = '<div class="sheet"><h3 style="margin:0">Your order</h3><div id="lines"></div><div id="sum" class="muted"></div>' +
-    '<label>Your name<input id="nm" value="' + E(me.name) + '" autocomplete="name" /></label><label>Phone<input id="ph" type="tel" value="' + E(me.phone) + '" placeholder="0712 345 678" autocomplete="tel" /></label>' +
-    '<label>Delivery location</label><div class="row" style="margin-top:4px"><button class="s" id="gps">📍 Use my location</button><span class="muted" id="pinTxt">Or tap the map to drop the pin</span></div><div id="map"></div>' +
-    '<label>Address / building / house number<input id="ad" value="' + E(me.address) + '" placeholder="e.g. Apartment 4B, Ngong Road" /></label><label>Landmark (optional)<input id="lm" placeholder="Near the green gate" /></label><label>Note for the rider (optional)<input id="ins" /></label>' +
-    '<p class="muted">Payment: cash or M-PESA to the rider on delivery.</p><div class="err" id="er"></div><div class="row" style="margin-top:10px"><button class="s" id="cx">Close</button><button class="p grow" id="pl">Place order</button></div></div>';
-  document.body.appendChild(m); pin = null; quoteData = null;
-  function lines() { $('#lines', m).innerHTML = cart.length ? cart.map(function (c, k) { return '<div class="row" style="padding:8px 0;border-bottom:1px solid var(--ln)"><div class="grow"><b>' + E(c.it.name) + '</b><div class="muted">' + E(c.mods.map(function (x) { return x.name; }).join(', ')) + (c.notes ? ' · ' + E(c.notes) : '') + '</div></div><div class="qty"><button data-k="' + k + '" data-d="-1">−</button><b>' + c.qty + '</b><button data-k="' + k + '" data-d="1">+</button></div><div style="width:72px;text-align:right">' + money(c.unit * c.qty) + '</div></div>'; }).join('') : '<div class="empty">Your order is empty.</div>'; $$('[data-k]', m).forEach(function (b) { b.onclick = function () { var c = cart[+b.dataset.k]; c.qty += +b.dataset.d; if (c.qty < 1) cart.splice(+b.dataset.k, 1); lines(); sum(); cartBar(); }; }); }
-  function sum() { var s = total(), f = quoteData && quoteData.ok ? quoteData.fee : null; $('#sum', m).innerHTML = '<div class="row"><span class="grow">Food</span><b>' + money(s) + '</b></div><div class="row"><span class="grow">Delivery' + (quoteData && quoteData.distanceKm ? ' (' + quoteData.distanceKm + ' km)' : '') + '</span><b>' + (f == null ? 'pin your location' : money(f)) + '</b></div>' + (f != null ? '<div class="row" style="font-size:17px;margin-top:4px"><span class="grow"><b>Total</b></span><b class="price">' + money(s + f) + '</b></div><div>⏱ About ' + eta() + ' minutes</div>' : ''); }
-  function eta() { var mp = Math.max.apply(null, [0].concat(cart.map(function (c) { return c.it.prepMinutes || 10; }))); return Math.round(mp + (quoteData ? quoteData.etaMinutes : 10)); }
-  function requote() { if (!pin) return; $('#er', m).textContent = ''; api('/delivery/quote' + q({ branchId: branchId, lat: pin.lat, lng: pin.lng, subtotal: total() })).then(function (r) { quoteData = r; if (!r.ok) $('#er', m).textContent = r.reason; sum(); }).catch(function (e) { quoteData = null; $('#er', m).textContent = e.message; sum(); }); }
-  function setPin(lat, lng) { pin = { lat: lat, lng: lng }; $('#pinTxt', m).textContent = 'Pin set ✓'; if (marker) marker.setLatLng([lat, lng]); else marker = L.marker([lat, lng], { draggable: true }).addTo(map).on('dragend', function () { var p = marker.getLatLng(); setPin(p.lat, p.lng); }); requote(); }
-  var br = ctx.branches.filter(function (b) { return b.id === branchId; })[0], c0 = br && br.location ? [br.location.lat, br.location.lng] : [-1.2921, 36.8219];
-  map = L.map($('#map', m)).setView(c0, 14); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map); marker = null;
-  map.on('click', function (e) { setPin(e.latlng.lat, e.latlng.lng); }); setTimeout(function () { map.invalidateSize(); }, 200);
-  $('#gps', m).onclick = function () { if (!navigator.geolocation) return toast('Location is not available on this device'); navigator.geolocation.getCurrentPosition(function (p) { map.setView([p.coords.latitude, p.coords.longitude], 17); setPin(p.coords.latitude, p.coords.longitude); }, function () { toast('Allow location access, or tap the map'); }, { enableHighAccuracy: true, timeout: 15000 }); };
-  $('#cx', m).onclick = function () { m.remove(); map.remove(); };
-  lines(); sum();
-  $('#pl', m).onclick = function () {
-    var er = $('#er', m); er.textContent = ''; var name = $('#nm', m).value.trim(), phone = $('#ph', m).value.trim(), ad = $('#ad', m).value.trim();
-    if (!cart.length) return er.textContent = 'Your order is empty.'; if (name.length < 2) return er.textContent = 'Enter your name.'; if (phone.replace(/\D/g, '').length < 9) return er.textContent = 'Enter a valid phone number.';
-    if (!pin) return er.textContent = 'Pin your location on the map.'; if (ad.length < 3) return er.textContent = 'Add your address or building.'; if (quoteData && !quoteData.ok) return er.textContent = quoteData.reason;
-    var btn = $('#pl', m); btn.disabled = true; btn.textContent = 'Placing…'; if (!S.ref) { S.ref = uid(); }
-    api('/delivery', 'POST', { branchId: branchId || undefined, name: name, phone: phone, address: ad, landmark: $('#lm', m).value.trim() || undefined, instructions: $('#ins', m).value.trim() || undefined, lat: pin.lat, lng: pin.lng, clientRef: S.ref,
-      items: cart.map(function (c) { return { menuItemId: c.it.id, quantity: c.qty, variantId: c.vid || undefined, notes: c.notes || undefined, modifiers: c.mods.length ? c.mods.map(function (x) { return { groupId: x.groupId, optionId: x.optionId }; }) : undefined }; }) })
-      .then(function (r) { S.me = { name: name, phone: phone, address: ad }; S.ref = null; S.orders.unshift({ key: r.trackKey, n: r.orderNumber, at: Date.now() }); S.orders = S.orders.slice(0, 20); save(); cart = []; m.remove(); map.remove(); tab = 'mine'; go(); openOrder(r.trackKey); })
-      .catch(function (e) { btn.disabled = false; btn.textContent = 'Place order'; er.textContent = e.message; if (e.code !== 'RATE_LIMITED') S.ref = null; });
+function addItem(it) {
+  var vs = it.variants || [], gs = it.modifierGroups || [];
+  if (!vs.length && !gs.length) return pushCart(it, null, [], '');
+  sheet(shd(E(it.name)) + '<div class="bd">' + (vs.length ? '<div class="grp"><h4>Size</h4>' + vs.map(function (v, k) { return '<label class="opt"><input type="radio" name="v" value="' + E(v.id) + '"' + (k === 0 ? ' checked' : '') + '><span class="n">' + E(v.name) + '</span><span class="p">' + (v.price != null ? money(v.price) : v.priceDelta ? '+' + money(v.priceDelta) : '') + '</span></label>'; }).join('') + '</div>' : '') +
+    gs.map(function (g, gi) { return '<div class="grp"><h4>' + E(g.name) + (g.required ? ' (required)' : '') + (g.max ? ' · up to ' + g.max : '') + '</h4>' + (g.options || []).map(function (o) { return '<label class="opt"><input type="' + (g.max === 1 ? 'radio' : 'checkbox') + '" name="g' + gi + '" data-g="' + gi + '" value="' + E(o.id) + '"><span class="n">' + E(o.name) + '</span><span class="p">' + (o.priceDelta ? '+' + money(o.priceDelta) : '') + '</span></label>'; }).join('') + '</div>'; }).join('') +
+    '<label class="lbl">Notes<input class="field" id="nt" maxlength="150" placeholder="e.g. no onions"></label><div class="err" id="er"></div></div><div class="fx"><button class="btn" id="ok">Add to cart</button></div>', function (o) {
+    $('#ok', o).onclick = function () {
+      var vEl = $('[name=v]:checked', o), mods = [], bad = '';
+      gs.forEach(function (g, gi) { var c = $$('[data-g="' + gi + '"]:checked', o); if (g.required && !c.length) bad = 'Choose ' + g.name; if (g.max && c.length > g.max) bad = g.name + ': pick at most ' + g.max; c.forEach(function (x) { var op = g.options.filter(function (z) { return String(z.id) === x.value; })[0]; mods.push({ groupId: g.id, optionId: x.value, name: op && op.name, priceDelta: (op && op.priceDelta) || 0 }); }); });
+      if (bad) { $('#er', o).textContent = bad; return; }
+      pushCart(it, vEl ? vEl.value : null, mods, $('#nt', o).value.trim()); closeSheet();
+    };
+  });
+}
+
+/* ---------- cart ---------- */
+VIEWS.cart = function () {
+  var d = ctx.delivery, fee = d.baseFee, tot = cartTotal();
+  var h = top('Your Cart', { right: cart.length ? '<button class="ib" id="clr" aria-label="Clear" style="color:var(--bad)">' + ic('x') + '</button>' : '' }) + '<div class="pad">';
+  if (!cart.length) { $('#view').innerHTML = h + empty('cart', 'Your cart is empty', 'Add something tasty from the menu.', '<div style="margin-top:16px"><button class="btn sm" id="gm">Browse menu</button></div>') + '</div>'; $('#gm').onclick = function () { tab('menu'); }; return; }
+  h += '<div class="card" style="margin-top:14px;padding:6px 14px">' + cart.map(function (c, k) { return '<div class="line"><div class="im">' + (c.image ? '<img alt="" src="' + E(c.image) + '">' : '') + '</div><div class="t"><b>' + E(c.name) + '</b><small>' + E(c.mods.map(function (x) { return x.name; }).join(', ')) + (c.notes ? ' · ' + E(c.notes) : '') + '</small><b style="color:var(--o)">' + money(c.unit) + '</b></div><div class="qty"><button data-k="' + k + '" data-d="-1">' + ic('minus') + '</button><b>' + c.qty + '</b><button data-k="' + k + '" data-d="1">' + ic('plus') + '</button></div></div>'; }).join('') + '</div>';
+  h += '<div class="card"><div class="tot"><span>Subtotal</span><b>' + money(tot) + '</b></div><div class="tot"><span>Delivery / service fee</span><b>' + (fee ? 'from ' + money(fee) : 'at checkout') + '</b></div><div class="fine">The exact delivery fee is worked out from your pin location at checkout.</div></div>';
+  if (d.minOrder && tot < d.minOrder) h += '<div class="note">' + ic('alert') + '<div>Minimum delivery order is ' + money(d.minOrder) + '. Add ' + money(d.minOrder - tot) + ' more.</div></div>';
+  h += '<label class="lbl">Special instructions (optional)<textarea class="field" id="ins" rows="2" placeholder="e.g. less salt, extra sauce...">' + E(DT.ins) + '</textarea></label><div class="sp"></div><button class="btn" id="go"' + (d.minOrder && tot < d.minOrder ? ' disabled' : '') + '>Proceed to Checkout</button></div>';
+  $('#view').innerHTML = h;
+  $$('[data-k]').forEach(function (b) { b.onclick = function () { var c = cart[+b.dataset.k]; c.qty += +b.dataset.d; if (c.qty < 1) cart.splice(+b.dataset.k, 1); saveCart(); VIEWS.cart(); drawNav(); }; });
+  var cl = $('#clr'); if (cl) cl.onclick = function () { cart = []; saveCart(); VIEWS.cart(); };
+  $('#ins').oninput = function () { DT.ins = this.value; };
+  $('#go').onclick = function () { if (deliveryClosed()) return toast('Delivery is not available right now', true); needAuth(function () { nav('checkout', {}, { replace: false }); }); };
+};
+
+/* ---------- checkout (delivery details) ---------- */
+VIEWS.checkout = function () {
+  if (!cart.length) return nav('cart', {}, { replace: true });
+  var h = top('Delivery details') + '<div class="pad"><div class="card" style="margin-top:14px"><label class="lbl" style="margin-top:0">Your name<input class="field" id="nm" value="' + E(DT.name) + '" autocomplete="name"></label>' +
+    '<label class="lbl">Phone number<input class="field" id="ph" type="tel" value="' + E(DT.phone) + '" placeholder="0712 345 678" autocomplete="tel"></label>' + branchSel() +
+    '<label class="lbl">Delivery location</label><div class="row" style="margin-top:6px"><button class="btn sm line" id="gps">' + ic('pin') + ' Use my location</button><span class="fine" id="pinTxt">' + (DT.pin ? 'Pin set ✓' : 'or tap the map to drop the pin') + '</span></div><div id="map"></div>' +
+    '<label class="lbl">Address / building / house number<input class="field" id="ad" value="' + E(DT.address) + '" placeholder="e.g. Apartment 4B, Ngong Road"></label>' +
+    '<label class="lbl">Landmark (optional)<input class="field" id="lm" value="' + E(DT.landmark) + '" placeholder="Near the green gate"></label></div>' +
+    '<div class="card" id="sum"></div><div class="err" id="er"></div><button class="btn" id="nx">Continue to payment</button></div>';
+  $('#view').innerHTML = h; bindBranch(VIEWS.checkout);
+  function sum() { var s = cartTotal(), q = DT.quote, f = q && q.ok ? q.fee : null; $('#sum').innerHTML = '<div class="tot"><span>Food</span><b>' + money(s) + '</b></div><div class="tot"><span>Delivery' + (q && q.distanceKm ? ' (' + q.distanceKm + ' km)' : '') + '</span><b>' + (f == null ? 'pin your location' : money(f)) + '</b></div>' + (f != null ? '<div class="tot big"><b>Total</b><b>' + money(s + f) + '</b></div><div class="fine">⏱ About ' + eta() + ' minutes</div>' : ''); }
+  function eta() { var mp = Math.max.apply(null, [0].concat(cart.map(function (c) { return c.prep || 10; }))); return Math.round(mp + (DT.quote ? DT.quote.etaMinutes : 10)); }
+  async function requote() { if (!DT.pin) return; $('#er').textContent = ''; try { DT.quote = await call('/delivery/quote?' + new URLSearchParams({ branchId: branchId || '', lat: DT.pin.lat, lng: DT.pin.lng, subtotal: cartTotal() })); if (!DT.quote.ok) $('#er').textContent = DT.quote.reason; } catch (e) { DT.quote = null; $('#er').textContent = e.message; } sum(); }
+  function setPin(lat, lng) { DT.pin = { lat: lat, lng: lng }; $('#pinTxt').textContent = 'Pin set ✓'; if (marker) marker.setLatLng([lat, lng]); else marker = L.marker([lat, lng], { draggable: true }).addTo(mapObj).on('dragend', function () { var p = marker.getLatLng(); setPin(p.lat, p.lng); }); requote(); }
+  var br = ctx.branches.filter(function (b) { return b.id === branchId; })[0], c0 = DT.pin ? [DT.pin.lat, DT.pin.lng] : br && br.location ? [br.location.lat, br.location.lng] : [-1.2921, 36.8219];
+  if (mapObj) { try { mapObj.remove(); } catch (e) { /* gone */ } } marker = null;
+  if (window.L) { mapObj = L.map($('#map')).setView(c0, 14); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapObj); mapObj.on('click', function (e) { setPin(e.latlng.lat, e.latlng.lng); }); setTimeout(function () { mapObj.invalidateSize(); }, 250); if (DT.pin) { var p0 = DT.pin; DT.pin = null; setPin(p0.lat, p0.lng); } }
+  $('#gps').onclick = function () { if (!navigator.geolocation) return toast('Location is not available on this device', true); navigator.geolocation.getCurrentPosition(function (p) { mapObj.setView([p.coords.latitude, p.coords.longitude], 17); setPin(p.coords.latitude, p.coords.longitude); }, function () { toast('Allow location access, or tap the map', true); }, { enableHighAccuracy: true, timeout: 15000 }); };
+  sum();
+  $('#nx').onclick = function () {
+    var er = $('#er'); er.textContent = ''; DT.name = $('#nm').value.trim(); DT.phone = $('#ph').value.trim(); DT.address = $('#ad').value.trim(); DT.landmark = $('#lm').value.trim();
+    if (DT.name.length < 2) return er.textContent = 'Enter your name.'; if (DT.phone.replace(/\D/g, '').length < 9) return er.textContent = 'Enter a valid phone number.';
+    if (!DT.pin) return er.textContent = 'Pin your location on the map.'; if (DT.address.length < 3) return er.textContent = 'Add your address or building.';
+    if (!DT.quote) return er.textContent = 'We are still checking delivery to your pin. Please wait a moment.'; if (!DT.quote.ok) return er.textContent = DT.quote.reason;
+    nav('payment');
+  };
+};
+
+/* ---------- payment ---------- */
+VIEWS.payment = function () {
+  if (!cart.length || !DT.quote || !DT.quote.ok) return nav('checkout', {}, { replace: true });
+  var food = cartTotal(), fee = DT.quote.fee || 0, total = food + fee, mp = ctx.mpesa, cash = ctx.delivery.allowCash;
+  if (!DT.method || (DT.method === 'MPESA' && !mp) || (DT.method === 'CASH' && !cash)) DT.method = mp ? 'MPESA' : 'CASH';
+  var h = top('Payment') + '<div class="pad"><div class="sec" style="margin-top:16px">Payment Method</div>';
+  if (mp) h += '<button class="method" data-m="MPESA"><span class="mi">' + ic('phone') + '</span><b>M-PESA</b><span class="fine">STK push</span><span class="ck">' + ic('check') + '</span></button>';
+  if (cash) h += '<button class="method" data-m="CASH"><span class="mi">' + ic('cash') + '</span><b>Cash on delivery</b><span class="ck">' + ic('check') + '</span></button>';
+  if (!mp && !cash) h += '<div class="note">' + ic('alert') + '<div>Ordering is not available right now. Please call us.</div></div>';
+  h += '<div id="mp"></div><div class="sec">Order Summary</div><div class="card"><div class="tot"><span>Food Total</span><b>' + money(food) + '</b></div><div class="tot"><span>Delivery / Service Fee</span><b>' + money(fee) + '</b></div><div class="tot big"><b>Total</b><b>' + money(total) + '</b></div></div><div class="err" id="er"></div><button class="btn" id="pay"></button><div class="fine center" style="margin-top:12px">' + ic('lock') + ' Your payment is secure and encrypted</div></div>';
+  $('#view').innerHTML = h;
+  function paint() {
+    $$('.method').forEach(function (m) { m.classList.toggle('on', m.dataset.m === DT.method); });
+    $('#mp').innerHTML = DT.method === 'MPESA' ? '<label class="lbl">M-PESA number<div class="phonef"><span>+254</span><input id="pp" type="tel" inputmode="numeric" placeholder="712 345 678" value="' + E(localPhone(DT.mpesaPhone || DT.phone)) + '"></div></label><div class="fine" style="margin-top:6px">You will get a prompt on your phone to enter your M-PESA PIN. Your food is prepared as soon as the payment is received.</div>' : '<div class="note info">' + ic('cash') + '<div>Pay the rider in cash or M-PESA when your food arrives.</div></div>';
+    $('#pay').innerHTML = DT.method === 'MPESA' ? 'Pay with M-PESA · ' + money(total) : 'Place order · ' + money(total);
+  }
+  $$('.method').forEach(function (m) { m.onclick = function () { DT.method = m.dataset.m; paint(); }; }); paint();
+  $('#pay').onclick = async function () {
+    var er = $('#er'), btn = this; er.textContent = '';
+    var pp = DT.method === 'MPESA' ? '0' + localPhone($('#pp').value) : ''; if (DT.method === 'MPESA') { if (localPhone($('#pp').value).length !== 9) return er.textContent = 'Enter a valid Safaricom number.'; DT.mpesaPhone = pp; }
+    btn.disabled = true; btn.textContent = 'Placing your order…'; if (!DT.ref) DT.ref = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    var o;
+    try {
+      o = await call('/delivery', 'POST', { branchId: branchId || undefined, name: DT.name, phone: DT.phone, address: DT.address, landmark: DT.landmark || undefined, instructions: DT.ins || undefined, lat: DT.pin.lat, lng: DT.pin.lng, clientRef: DT.ref, payMethod: DT.method,
+        items: cart.map(function (c) { return { menuItemId: c.id, quantity: c.qty, variantId: c.vid || undefined, notes: c.notes || undefined, modifiers: c.mods.length ? c.mods.map(function (x) { return { groupId: x.groupId, optionId: x.optionId }; }) : undefined }; }) });
+    } catch (e) { btn.disabled = false; paint(); er.textContent = e.message; if (e.code === 'GUEST_AUTH_REQUIRED') nav('auth', { why: 'Please sign in to continue.' }); if (e.code !== 'RATE_LIMITED') DT.ref = null; return; }
+    DT.ref = null; rememberOrder({ key: o.trackKey, n: o.orderNumber, at: Date.now() }); cart = []; saveCart(); DT.quote = null; DT.pin = null; DT.ins = '';
+    loadHist();
+    if (DT.method === 'CASH' || o.pay.state !== 'AWAITING') { stack = []; cur = { v: 'confirmed', p: { o: o } }; return render(); }
+    payOrder(o);
+  };
+};
+async function payOrder(o) {
+  var phone = DT.mpesaPhone || DT.phone;
+  try { var p = await call('/delivery/' + o.trackKey + '/pay', 'POST', { payerPhone: phone }); waitPay(p.reference, { amount: p.amount, onOk: function () { stack = []; cur = { v: 'confirmed', p: { key: o.trackKey, paid: true } }; render(); }, onClose: function () { stack = []; cur = { v: 'track', p: { key: o.trackKey } }; render(); } }); }
+  catch (e) { toast(e.message, true); stack = []; cur = { v: 'track', p: { key: o.trackKey } }; render(); }
+}
+/* STK push waiting sheet, shared by delivery orders, table bookings and room deposits */
+function waitPay(ref, o) {
+  var n = 0, max = 45, done = false;
+  var m = sheet('<div class="bd center" style="padding-top:26px"><div class="phone-anim">' + ic('phone') + '</div><h2>Check your phone</h2><p class="muted" style="margin:6px 0 0">Enter your M-PESA PIN to pay <b>' + money(o.amount) + '</b>.</p><div class="prog"><i id="pg"></i></div><p class="fine" id="wm" style="margin-top:10px">Waiting for payment…</p></div><div class="fx"><button class="btn ghost" id="wc">Close</button></div>', null, true);
+  $('#wc', m).onclick = function () { done = true; clearInterval(t); closeSheet(); if (o.onClose) o.onClose(); };
+  var t = setInterval(async function () {
+    if (done) return; n++; var pg = $('#pg', m); if (pg) pg.style.width = Math.min(100, n / max * 100) + '%';
+    try {
+      var s = await call('/pay/' + ref);
+      if (s.status === 'SUCCESS' && (s.settled || n > 3)) { done = true; clearInterval(t); paySuccess(ref, s, o); }
+      else if (s.status === 'FAILED' || s.status === 'CANCELLED') { done = true; clearInterval(t); payFail(s.message || 'The payment was not completed.', o); }
+      else if (n > max) { done = true; clearInterval(t); payFail('We are still waiting. If you already paid, it will be confirmed shortly - check My Orders.', o, true); }
+    } catch (e) { if (n > max) { done = true; clearInterval(t); payFail(e.message, o, true); } }
+  }, 3500);
+}
+function paySuccess(ref, s, o) {
+  sheet('<div class="bd center" style="padding-top:24px"><div class="okring">' + ic('check') + '</div><h2>Payment received</h2><p class="muted" style="margin:6px 0 0">' + (s.receipt ? 'M-PESA ' + E(s.receipt) : 'Thank you!') + '</p></div><div class="fx"><button class="btn ghost" id="vr">' + ic('receipt') + ' Receipt</button><button class="btn" id="dn">Continue</button></div>', function (m) {
+    $('#dn', m).onclick = function () { closeSheet(); if (o.onOk) o.onOk(); }; $('#vr', m).onclick = function () { closeSheet(); if (o.onOk) o.onOk(); setTimeout(function () { nav('receipt', { ref: ref }); }, 30); };
+  }, true);
+  loadHist();
+}
+function payFail(msg, o, wait) {
+  sheet('<div class="bd center" style="padding-top:24px"><div class="okring" style="background:' + (wait ? 'var(--warn)' : 'var(--bad)') + '">' + ic(wait ? 'clock' : 'x') + '</div><h2>' + (wait ? 'Still waiting' : 'Payment not completed') + '</h2><p class="muted" style="margin:6px 0 0">' + E(msg) + '</p></div><div class="fx"><button class="btn ghost" id="cl">Close</button>' + (o.retry ? '<button class="btn" id="rt">Try again</button>' : '') + '</div>', function (m) {
+    $('#cl', m).onclick = function () { closeSheet(); if (o.onClose) o.onClose(); }; var r = $('#rt', m); if (r) r.onclick = function () { closeSheet(); o.retry(); };
+  }, true);
+}
+/* ask which number to pay with, then run an action that returns {reference, amount} */
+function payPrompt(title, amount, phone, startFn, o) {
+  sheet(shd(title) + '<div class="bd"><div class="card" style="background:var(--ol);border-color:#fbd5bd"><div class="tot" style="padding:0"><span>Amount to pay</span><b style="font-size:20px">' + money(amount) + '</b></div></div><label class="lbl">M-PESA number<div class="phonef"><span>+254</span><input id="pp" type="tel" inputmode="numeric" placeholder="712 345 678" value="' + E(localPhone(phone)) + '"></div></label><div class="fine" style="margin-top:8px">You will get a prompt on your phone to enter your M-PESA PIN.</div><div class="err" id="er"></div></div><div class="fx"><button class="btn green" id="go">' + ic('phone') + ' Send M-PESA prompt</button></div>', function (m) {
+    $('#go', m).onclick = async function () {
+      var b = this, v = localPhone($('#pp', m).value); if (v.length !== 9) return $('#er', m).textContent = 'Enter a valid Safaricom number.';
+      b.disabled = true; b.textContent = 'Sending…';
+      try { var r = await startFn('0' + v); closeSheet(); waitPay(r.reference, { amount: r.amount || amount, onOk: o.onOk, onClose: o.onClose, retry: function () { payPrompt(title, amount, '0' + v, startFn, o); } }); }
+      catch (e) { b.disabled = false; b.innerHTML = ic('phone') + ' Send M-PESA prompt'; $('#er', m).textContent = e.message; }
+    };
+  });
+}
+
+/* ---------- order placed + tracking ---------- */
+VIEWS.confirmed = async function (p) {
+  var o = p.o; if (!o && p.key) { try { o = await call('/delivery/' + p.key); } catch (e) { return nav('track', { key: p.key }, { replace: true }); } }
+  var paid = o.pay && o.pay.state === 'PAID';
+  $('#view').innerHTML = '<div class="pad" style="padding-top:calc(60px + env(safe-area-inset-top));text-align:center"><div class="okring">' + ic('check') + '</div><h2 style="font-size:24px">Order Placed!</h2><p class="muted" style="margin:8px 0 22px">Your food is being prepared.<br>You will be notified when it is on the way.</p>' +
+    '<div class="card" style="text-align:left;background:var(--ol);border-color:#fbd5bd"><div class="row"><b class="grow">Order ' + E(o.orderNumber) + '</b>' + (paid ? '<span class="tag gr">Paid</span>' : '<span class="tag or">Pay on delivery</span>') + '</div><div class="row fine" style="margin-top:6px"><span class="grow">' + o.items.length + ' item' + (o.items.length > 1 ? 's' : '') + ' · ETA ~' + (o.etaMinutes || 30) + ' min</span><b style="color:var(--ink);font-size:15px">' + money(o.total) + '</b></div></div>' +
+    '<div class="sp"></div><button class="btn" id="vs">View Order Status</button><div class="sp"></div>' + (paid && o.pay.receiptRef ? '<button class="btn ghost" id="vr">' + ic('receipt') + ' View e-receipt</button><div class="sp"></div>' : '') + '<button class="btn ghost" id="bm">Back to Menu</button></div>';
+  $('#vs').onclick = function () { stack = [{ v: 'home', p: {} }]; cur = { v: 'track', p: { key: o.trackKey || p.key } }; render(); };
+  var vr = $('#vr'); if (vr) vr.onclick = function () { nav('receipt', { ref: o.pay.receiptRef }); };
+  $('#bm').onclick = function () { tab('menu'); };
+};
+var STEPS = [['RECEIVED', 'Order Received', 'Your order has been received.'], ['PREPARING', 'Preparing', 'The kitchen is preparing your meal.'], ['READY', 'Ready to Serve', 'Waiting for the rider.'], ['ON_THE_WAY', 'On the way', 'Your rider is on the way.'], ['DELIVERED', 'Delivered', 'Enjoy your meal!']];
+VIEWS.track = function (p) {
+  $('#view').innerHTML = top('Order Status') + '<div class="pad" id="t"><div class="sk" style="height:70px;margin-top:14px"></div></div>';
+  var load = async function () {
+    try {
+      var o = await call('/delivery/' + p.key); if (cur.v !== 'track') return;
+      var bad = o.stage === 'CANCELLED' || o.stage === 'FAILED', wait = o.stage === 'AWAITING_PAYMENT';
+      var map = { RECEIVED: 0, CONFIRMED: 0, PREPARING: 1, READY: 2, ON_THE_WAY: 3, DELIVERED: 4 }, idx = wait ? -1 : map[o.stage];
+      var h = '<div class="obanner" style="margin-top:14px"><div><b>Order ' + E(o.orderNumber) + '</b><small>' + o.items.length + ' item' + (o.items.length > 1 ? 's' : '') + ' · ' + money(o.total) + '</small></div><small>' + ftime(o.placedAt) + '</small></div>';
+      if (wait) h += '<div class="card" style="margin-top:12px;border-color:#fbd5bd;background:var(--ol)"><b>Payment needed</b><p class="muted" style="margin:4px 0 12px;font-size:13.5px">' + E(o.message) + '</p><button class="btn" id="pn">Pay ' + money(o.pay.amountDue) + ' with M-PESA</button></div>';
+      if (bad) h += '<div class="note" style="background:var(--badl);color:#7a1b13">' + ic('alert') + '<div>' + E(o.message) + '</div></div>';
+      else h += '<div class="card" style="margin-top:12px"><div class="tl">' + STEPS.map(function (s, k) { var st = k < idx || (o.stage === 'DELIVERED' && k <= idx) ? 'done' : k === idx ? 'now' : 'todo'; return '<div class="ts ' + st + '"><div class="dot">' + (st === 'done' ? ic('check') : st === 'now' ? ic('clock') : ic('clock')) + '</div><div><b>' + s[1] + '</b>' + (st !== 'todo' ? '<small>' + (k === 0 ? ftime(o.placedAt) + ' · ' : '') + s[2] + '</small>' : '<small>' + (k === 4 ? 'Enjoy your meal!' : 'Waiting') + '</small>') + '</div></div>'; }).join('') + '</div>' + (o.rider ? '<div class="row" style="margin-top:4px">' + ic('truck') + ' <span>Rider: <b>' + E(o.rider.name) + '</b></span></div>' : '') + (o.etaMinutes && o.stage !== 'DELIVERED' ? '<div class="fine" style="margin-top:8px">⏱ Estimated ' + o.etaMinutes + ' min from order time</div>' : '') + '</div>';
+      h += '<div class="card"><b>Items</b>' + o.items.map(function (i) { return '<div class="row fine" style="padding:6px 0;color:var(--ink2)"><b style="color:var(--o)">' + i.quantity + '×</b><span class="grow">' + E(i.name) + '</span>' + (i.total != null ? '<span>' + money(i.total) + '</span>' : '') + '</div>'; }).join('') + '<div class="row fine" style="margin-top:6px">' + ic('pin') + '<span class="grow">' + E(o.address) + '</span></div><div class="row" style="margin-top:6px"><span class="grow fine">' + (o.pay.state === 'PAID' ? 'Paid with M-PESA' : o.pay.state === 'COD' ? 'Pay the rider on delivery' : '') + '</span>' + (o.pay.state === 'PAID' ? '<span class="tag gr">Paid</span>' : '') + '</div></div>';
+      if (o.pay.receiptRef) h += '<button class="btn ghost" id="vr">' + ic('receipt') + ' View e-receipt</button>';
+      $('#t').innerHTML = h;
+      var pn = $('#pn'); if (pn) pn.onclick = function () { payPrompt('Pay for your order', o.pay.amountDue, DT.mpesaPhone || DT.phone || (acct && acct.account.phone), async function (ph) { return call('/delivery/' + p.key + '/pay', 'POST', { payerPhone: ph }); }, { onOk: function () { VIEWS.track(p); }, onClose: function () { VIEWS.track(p); } }); };
+      var vr = $('#vr'); if (vr) vr.onclick = function () { nav('receipt', { ref: o.pay.receiptRef }); };
+      if (['DELIVERED', 'CANCELLED', 'FAILED'].indexOf(o.stage) >= 0) clearInterval(tmr);
+    } catch (e) { var t = $('#t'); if (t) t.innerHTML = empty('help', 'Order not found', E(e.message)); clearInterval(tmr); }
+  };
+  load(); tmr = setInterval(function () { if (!document.hidden && cur.v === 'track') load(); }, 8000);
+};
+
+/* ---------- my orders ---------- */
+VIEWS.orders = async function () {
+  var v = $('#view'); v.innerHTML = top('My Orders', { noBack: true }) + '<div class="pad"><div class="sk" style="height:80px;margin-top:14px"></div></div>';
+  var list = [];
+  if (acct) { await loadHist(); list = (hist && hist.orders) || []; drawNav(); }
+  else list = trackedKeys().map(function (x) { return { trackKey: x.key, orderNumber: x.n, placedAt: x.at, stage: 'RECEIVED', message: 'Tap to track', items: [], total: null }; });
+  if (cur.v !== 'orders') return;
+  var h = top('My Orders', { noBack: true }) + '<div class="pad">';
+  if (!acct) h += '<div class="note info" style="margin-top:14px">' + ic('user') + '<div><b>Sign in</b> to see all your orders and e-receipts on any device.</div></div>';
+  h += list.length ? list.map(function (o) { var fin = ['DELIVERED', 'CANCELLED', 'FAILED'].indexOf(o.stage) >= 0; return '<div class="card bk" style="margin-top:12px" data-k="' + o.trackKey + '"><div class="hd2"><div><b>' + E(o.orderNumber) + '</b><div class="fine">' + fdt(o.placedAt || o.at) + '</div></div><span class="tag ' + (o.stage === 'DELIVERED' ? 'gr' : fin ? 'rd' : 'or') + '">' + E(stageName(o.stage)) + '</span></div>' + (o.items.length ? '<div class="fine" style="margin-top:8px">' + o.items.map(function (i) { return i.quantity + '× ' + E(i.name); }).join(', ') + '</div>' : '') + '<div class="row" style="margin-top:10px"><b class="grow">' + (o.total != null ? money(o.total) : '') + '</b>' + (o.pay && o.pay.receiptRef ? '<button class="btn sm ghost" data-r="' + E(o.pay.receiptRef) + '">' + ic('receipt') + ' Receipt</button>' : '') + '<button class="btn sm">' + (fin ? 'Details' : 'Track') + '</button></div></div>'; }).join('') : empty('receipt', 'No orders yet', 'Your orders will show up here.', '<div style="margin-top:16px"><button class="btn sm" id="gm">Order now</button></div>');
+  v.innerHTML = h + '</div>'; var gm = $('#gm'); if (gm) gm.onclick = function () { tab('menu'); };
+  $$('[data-k]').forEach(function (c) { c.onclick = function (e) { if (e.target.closest('[data-r]')) return; nav('track', { key: c.dataset.k }); }; });
+  $$('[data-r]').forEach(function (b) { b.onclick = function () { nav('receipt', { ref: b.dataset.r }); }; });
+};
+
+/* ---------- restaurant floor (table booking) ---------- */
+var TB = { date: '', time: '', party: 2, filter: 'all' };
+VIEWS.tables = async function () {
+  if (!ctx.tables.enabled) { $('#view').innerHTML = top('Restaurant Floor') + '<div class="pad">' + empty('table', 'Table booking is not available', 'Please call us to reserve.') + '</div>'; return; }
+  if (!TB.date) TB.date = ymd(new Date());
+  var h = top('Restaurant Floor') + '<div class="pad"><div class="card" style="margin-top:14px">' + branchSel() + '<div class="row"><label class="lbl grow" style="margin-top:0">Date<input class="field" id="dt" type="date" min="' + ymd(new Date()) + '" value="' + TB.date + '"></label><label class="lbl" style="margin-top:0;width:112px">Guests<input class="field" id="pt" type="number" min="1" max="50" value="' + TB.party + '"></label></div><label class="lbl">Time<select class="field" id="tm"><option>Loading…</option></select></label></div>' +
+    (ctx.tables.requirePayment ? '<div class="note info">' + ic('shield') + '<div>Your table is confirmed once you pay with M-PESA - pre-order your food (or pay the table deposit).</div></div>' : '') + '<div id="tl"></div></div>';
+  $('#view').innerHTML = h; bindBranch(VIEWS.tables);
+  $('#dt').onchange = function () { TB.date = this.value; TB.time = ''; VIEWS.tables(); }; $('#pt').onchange = function () { TB.party = Math.max(1, +this.value || 1); loadTables(); }; $('#tm').onchange = function () { TB.time = this.value; loadTables(); };
+  try {
+    var r = await call('/tables?' + new URLSearchParams({ branchId: branchId || '', date: TB.date, partySize: TB.party })); if (cur.v !== 'tables') return;
+    if (!r.slots.length) { $('#tm').innerHTML = '<option value="">No times left this day</option>'; $('#tl').innerHTML = empty('clock', 'No times available', 'Try another day.'); return; }
+    if (!TB.time || r.slots.indexOf(TB.time) < 0) TB.time = r.slots[0]; $('#tm').innerHTML = r.slots.map(function (t) { return '<option' + (t === TB.time ? ' selected' : '') + '>' + t + '</option>'; }).join(''); loadTables();
+  } catch (e) { $('#tl').innerHTML = empty('help', 'Could not load tables', E(e.message)); }
+};
+async function loadTables() {
+  try {
+    var r = await call('/tables?' + new URLSearchParams({ branchId: branchId || '', date: TB.date, time: TB.time, partySize: TB.party })); if (cur.v !== 'tables') return; TB.data = r;
+    var cnt = { all: r.tables.length, free: 0, busy: 0, rsv: 0 }; r.tables.forEach(function (t) { if (t.free) cnt.free++; else if (t.reason === 'RESERVED') cnt.rsv++; else if (t.reason === 'OCCUPIED') cnt.busy++; });
+    var f = TB.filter, list = r.tables.filter(function (t) { return f === 'all' || (f === 'free' && t.free) || (f === 'busy' && t.reason === 'OCCUPIED') || (f === 'rsv' && t.reason === 'RESERVED'); });
+    $('#tl').innerHTML = '<div class="chips" style="position:static;padding:14px 0 10px">' + [['all', 'All'], ['free', 'Available'], ['busy', 'Occupied'], ['rsv', 'Reserved']].map(function (x) { return '<button class="chip ' + (f === x[0] ? 'on' : '') + '" data-f="' + x[0] + '">' + x[1] + ' (' + cnt[x[0]] + ')</button>'; }).join('') + '</div><div class="fgrid" style="padding:0">' +
+      (list.map(function (t) { var cl = t.free ? 'free' : t.reason === 'RESERVED' ? 'rsv' : t.reason === 'OCCUPIED' ? 'busy' : 'small'; var lb = t.free ? 'Available' : { RESERVED: 'Reserved', OCCUPIED: 'Occupied', TOO_SMALL: 'Too small' }[t.reason] || 'Taken'; return '<button class="tb ' + cl + '" ' + (t.free ? 'data-t="' + t.id + '" data-n="' + E(t.name) + '" data-s="' + t.seats + '"' : 'disabled') + '><span class="sq">' + ic('table') + '</span><b>Table ' + E(t.name) + '</b><small>' + lb + '</small><div class="fine">' + t.seats + ' seats</div></button>'; }).join('') || '<div class="empty" style="grid-column:1/-1">No tables match.</div>') + '</div>' +
+      '<div class="legend"><span><i style="background:var(--ok)"></i>Available</span><span><i style="background:var(--o)"></i>Occupied</span><span><i style="background:var(--blue)"></i>Reserved</span></div>';
+    $$('[data-f]').forEach(function (b) { b.onclick = function () { TB.filter = b.dataset.f; loadTables(); }; });
+    $$('[data-t]').forEach(function (b) { b.onclick = function () { needAuth(function () { reserveSheet(b.dataset.t, b.dataset.n); }, 'Sign in to book a table.'); }; });
+  } catch (e) { $('#tl').innerHTML = empty('help', 'Could not load tables', E(e.message)); }
+}
+async function reserveSheet(id, name) {
+  var pre = {}, req = ctx.tables.requirePayment, dep = (TB.data && TB.data.deposit) || 0;
+  var m = sheet(shd('Table ' + E(name)) + '<div class="bd"><div class="note info" style="margin-top:0">' + ic('cal') + '<div><b>' + fdate(TB.date) + ' at ' + E(TB.time) + '</b><br>' + TB.party + ' guest' + (TB.party > 1 ? 's' : '') + '</div></div><label class="lbl">Your name<input class="field" id="nm" value="' + E(DT.name) + '"></label><label class="lbl">Phone<input class="field" id="ph" type="tel" value="' + E(DT.phone) + '"></label><label class="lbl">Occasion / notes (optional)<input class="field" id="no" placeholder="Birthday, anniversary…"></label>' +
+    '<div class="sec" style="margin-bottom:4px">Pre-order your food' + (req ? ' <span class="tag or">required</span>' : '') + '</div><div class="fine">' + (req ? 'Pay for your food now with M-PESA to confirm the table. It is ready when you arrive.' : 'Optional - have it ready when you arrive.') + '</div><div id="pl" class="muted" style="margin-top:6px">Loading menu…</div><div id="due"></div><div class="err" id="er"></div></div><div class="fx"><button class="btn" id="ok">' + (req ? 'Pay & confirm table' : 'Book table') + '</button></div>', null);
+  try { if (!menu) menu = await call('/menu?branchId=' + encodeURIComponent(branchId || '')); } catch (e) { $('#pl', m).textContent = 'Could not load the menu.'; }
+  function total() { var t = 0; Object.keys(pre).forEach(function (k) { var it = findItem(k); if (it) t += it.price * pre[k]; }); return t; }
+  function due() { var t = total(), d = $('#due', m); var amt = t > 0 ? t : (dep || 0); d.innerHTML = amt > 0 ? '<div class="card" style="margin-top:12px;background:var(--ol);border-color:#fbd5bd"><div class="tot" style="padding:0"><span>' + (t > 0 ? 'Food to pay now' : 'Table deposit') + '</span><b style="font-size:18px">' + money(amt) + '</b></div></div>' : ''; }
+  if (menu) { var its = []; menu.categories.forEach(function (c) { c.items.forEach(function (i) { if (i.available !== false && i.price != null && !(i.variants || []).length && !(i.modifierGroups || []).length) its.push(i); }); });
+    $('#pl', m).innerHTML = its.slice(0, 60).map(function (i) { return '<div class="row" style="padding:7px 0;border-bottom:1px solid var(--line)"><div class="grow"><b style="font-size:14px">' + E(i.name) + '</b><div class="fine">' + money(i.price) + ' · ⏱ ' + (i.prepMinutes || 10) + ' min</div></div><div class="qty"><button data-i="' + E(i.id) + '" data-d="-1">' + ic('minus') + '</button><b data-q="' + E(i.id) + '">0</b><button data-i="' + E(i.id) + '" data-d="1">' + ic('plus') + '</button></div></div>'; }).join('') || 'No dishes available to pre-order.';
+    $$('[data-i]', m).forEach(function (b) { b.onclick = function () { var k = b.dataset.i; pre[k] = Math.max(0, (pre[k] || 0) + +b.dataset.d); $('[data-q="' + k + '"]', m).textContent = pre[k]; due(); }; }); }
+  due();
+  $('#ok', m).onclick = async function () {
+    var er = $('#er', m), nm = $('#nm', m).value.trim(), ph = $('#ph', m).value.trim(); er.textContent = '';
+    if (nm.length < 2) return er.textContent = 'Enter your name.'; if (ph.replace(/\D/g, '').length < 9) return er.textContent = 'Enter a valid phone number.';
+    if (req && !(total() > 0 || dep > 0)) return er.textContent = 'Choose at least one dish to pre-order - your table is confirmed once the food is paid.';
+    var btn = this; btn.disabled = true; btn.textContent = 'Booking…'; DT.name = nm; DT.phone = ph;
+    try {
+      var r = await call('/reservations', 'POST', { branchId: branchId || undefined, name: nm, phone: ph, date: TB.date, time: TB.time, partySize: TB.party, tableId: id, occasion: $('#no', m).value.trim() || undefined, preOrder: Object.keys(pre).filter(function (k) { return pre[k] > 0; }).map(function (k) { return { menuItemId: k, quantity: pre[k] }; }) });
+      closeSheet(); loadHist();
+      if (r.pay && r.pay.state === 'AWAITING') payPrompt('Pay to confirm table', r.deposit.amount, ph, function (p) { return call('/deposit', 'POST', { kind: 'RESERVATION', ref: r.reference, phone: ph, payerPhone: p }); }, { onOk: function () { nav('bookings', { open: 'RES:' + r.reference }, { replace: true }); }, onClose: function () { nav('bookings', {}, { replace: true }); } });
+      else { toast('Table booked'); nav('bookings', {}, { replace: true }); }
+    } catch (e) { btn.disabled = false; btn.textContent = req ? 'Pay & confirm table' : 'Book table'; er.textContent = e.message; if (e.code === 'GUEST_AUTH_REQUIRED') { closeSheet(); nav('auth', { why: 'Please sign in to book.' }); } }
   };
 }
 
-// ---------- tracking + my orders
-var STEPS = [['RECEIVED', 'Received'], ['CONFIRMED', 'Confirmed'], ['PREPARING', 'Cooking'], ['READY', 'Ready'], ['ON_THE_WAY', 'On the way'], ['DELIVERED', 'Delivered']];
-function trackHtml(o) {
-  var idx = STEPS.map(function (s) { return s[0]; }).indexOf(o.stage), bad = o.stage === 'CANCELLED' || o.stage === 'FAILED';
-  return '<div class="card"><div class="row"><b class="grow">Order ' + E(o.orderNumber) + '</b>' + (bad ? '<span class="tag r">' + E(o.stage.toLowerCase()) + '</span>' : '') + '</div><p>' + E(o.message) + '</p>' + (bad ? '' : '<div class="steps">' + STEPS.map(function (s, k) { return '<div class="' + (k <= idx ? 'd' : '') + '"><i>' + (k <= idx ? '✓' : '') + '</i>' + s[1] + '</div>'; }).join('') + '</div>') +
-    (o.stage !== 'DELIVERED' && !bad && o.etaMinutes ? '<div>⏱ Estimated ' + o.etaMinutes + ' min from order time</div>' : '') + (o.rider ? '<div>🛵 Rider: <b>' + E(o.rider.name) + '</b></div>' : '') + '<div class="muted" style="margin-top:6px">' + o.items.map(function (i) { return i.quantity + '× ' + E(i.name); }).join(', ') + '</div><div class="row" style="margin-top:6px"><span class="grow muted">To: ' + E(o.address) + '</span><b>' + money(o.total) + '</b></div><div class="muted">Pay ' + (o.payment === 'CASH' ? 'cash or M-PESA to the rider' : E(o.payment)) + '</div></div>';
+/* ---------- rooms ---------- */
+var RM = { ci: '', co: '', ad: 2, list: null };
+VIEWS.rooms = async function () {
+  if (!ctx.rooms.enabled) { $('#view').innerHTML = top('Rooms', { noBack: true }) + '<div class="pad">' + empty('bed', 'Rooms are not available', 'Please call us to book a stay.') + '</div>'; return; }
+  var t = new Date(), a = new Date(Date.now() + 864e5); if (!RM.ci) { RM.ci = ymd(t); RM.co = ymd(a); }
+  var h = top('Rooms', { noBack: true }) + '<div class="pad"><div class="card" style="margin-top:14px">' + branchSel() + '<div class="row"><label class="lbl grow" style="margin-top:0">Check-in<input class="field" id="ci" type="date" min="' + ymd(t) + '" value="' + RM.ci + '"></label><label class="lbl grow" style="margin-top:0">Check-out<input class="field" id="co" type="date" min="' + RM.ci + '" value="' + RM.co + '"></label></div><label class="lbl">Adults<input class="field" id="ad" type="number" min="1" max="20" value="' + RM.ad + '"></label><button class="btn" id="go" style="margin-top:12px">See available rooms</button></div>' + (ctx.rooms.depositRequired ? '<div class="note info">' + ic('shield') + '<div>A small deposit paid with M-PESA secures your room.</div></div>' : '') + '<div id="rl" style="margin:14px -16px 0"></div></div>';
+  $('#view').innerHTML = h; bindBranch(VIEWS.rooms);
+  $('#go').onclick = function () { RM.ci = $('#ci').value; RM.co = $('#co').value; RM.ad = +$('#ad').value || 1; if (RM.co <= RM.ci) return toast('Check-out must be after check-in', true); loadRooms(); }; loadRooms();
+};
+async function loadRooms() {
+  var box = $('#rl'); if (!box) return; box.innerHTML = '<div class="empty">Checking availability…</div>';
+  try {
+    var r = await call('/rooms?' + new URLSearchParams({ branchId: branchId || '', checkInDate: RM.ci, checkOutDate: RM.co, adults: RM.ad })); if (cur.v !== 'rooms') return; RM.list = r.roomTypes;
+    box.innerHTML = r.roomTypes.length ? r.roomTypes.map(function (t, k) { return '<button class="room" data-k="' + k + '"><div class="im">' + (t.images && t.images[0] ? '<img alt="" src="' + E(t.images[0]) + '" loading="lazy">' : ic('bed')) + '</div><div class="tx"><div class="row"><h3 class="grow">' + E(t.name) + '</h3><span class="tag gr">' + t.available + ' left</span></div><div class="price" style="margin-top:4px">' + money(t.perNight || t.total) + ' <span class="fine" style="font-weight:500">/ night</span></div><div class="meta"><span>' + ic('users') + ' ' + t.maxAdults + ' adults</span>' + (t.amenities || []).slice(0, 2).map(function (a) { return '<span>' + E(a) + '</span>'; }).join('') + '</div>' + (t.promo ? '<span class="tag or" style="margin-top:6px">' + E(t.promo.title || t.promo.percentOff + '% off') + '</span>' : '') + '</div></button>'; }).join('') : empty('bed', 'No rooms available', 'Try different dates.');
+    $$('[data-k]', box).forEach(function (b) { b.onclick = function () { nav('room', { k: +b.dataset.k }); }; });
+  } catch (e) { box.innerHTML = empty('help', 'Could not check rooms', E(e.message)); }
 }
-function openOrder(key) {
-  tab = 'mine'; tabs(); $('#main').innerHTML = '<div id="t"><div class="empty">Loading…</div></div><button class="s" id="back">← My orders</button>'; bar(); $('#back').onclick = go;
-  var load = function () { api('/delivery/' + key).then(function (o) { $('#t').innerHTML = trackHtml(o); if (['DELIVERED', 'CANCELLED', 'FAILED'].indexOf(o.stage) >= 0) clearInterval(timer); }).catch(function (e) { $('#t').innerHTML = '<div class="empty">' + E(e.message) + '</div>'; }); };
-  load(); clearInterval(timer); timer = setInterval(load, 10000);
-}
-function viewMine() {
-  var h = '<h3 style="margin:4px 2px">Delivery orders</h3>' + (S.orders.length ? S.orders.map(function (o) { return '<div class="card row"><div class="grow"><b>' + E(o.n) + '</b><div class="muted">' + new Date(o.at).toLocaleString() + '</div></div><button class="s" data-k="' + o.key + '">Track</button></div>'; }).join('') : '<div class="empty">No orders on this phone yet.</div>');
-  h += '<h3 style="margin:16px 2px 4px">Find a booking</h3><div class="card"><label>Booking code or table reservation number<input id="lc" placeholder="e.g. K7M2QX or RS-00012" /></label><label>Phone used to book<input id="lp" type="tel" /></label><div class="err" id="er"></div><button class="p" id="lf" style="margin-top:10px">Find</button><div id="lr"></div></div>';
-  $('#main').innerHTML = h; $$('[data-k]').forEach(function (b) { b.onclick = function () { openOrder(b.dataset.k); }; });
-  $('#lf').onclick = function () { var c = $('#lc').value.trim(), p = $('#lp').value.trim(); if (!c || !p) return $('#er').textContent = 'Enter both the code and the phone.'; $('#er').textContent = ''; var isRes = /^RS-/i.test(c); api((isRes ? '/reservations/lookup' + q({ reference: c, phone: p }) : '/bookings/lookup' + q({ code: c, phone: p }))).then(function (r) { $('#lr').innerHTML = isRes ? resHtml(r) : stayHtml(r); bindPay(r, isRes ? 'RESERVATION' : 'STAY', isRes ? r.reference : r.bookingCode, p); }).catch(function (e) { $('#er').textContent = e.message; }); };
+VIEWS.room = function (p) {
+  var t = RM.list && RM.list[p.k]; if (!t) return tab('rooms');
+  var imgs = t.images && t.images.length ? t.images : [];
+  $('#view').innerHTML = '<div style="position:relative"><div class="gal">' + (imgs.map(function (s) { return '<img alt="" src="' + E(s) + '">'; }).join('') || '<div class="ph">' + ic('bed') + '</div>') + '</div><button class="ib" data-back style="position:absolute;top:calc(12px + env(safe-area-inset-top));left:12px;background:#fff;box-shadow:var(--sh)">' + ic('back') + '</button></div>' +
+    '<div class="pad"><h2 style="margin-top:16px;font-size:22px">' + E(t.name) + '</h2><div class="price" style="font-size:20px;margin-top:6px">' + money(t.perNight || t.total) + ' <span class="fine" style="font-weight:500">/ night</span></div><div class="fine" style="margin-top:2px">' + t.nights + ' night' + (t.nights > 1 ? 's' : '') + ' · ' + fdate(RM.ci) + ' → ' + fdate(RM.co) + ' · <b style="color:var(--ink)">' + money(t.total) + ' total</b></div>' +
+    '<div class="am">' + (t.amenities || []).slice(0, 8).map(function (a) { return '<div>' + ic(amIcon(a)) + E(a) + '</div>'; }).join('') + '<div>' + ic('users') + 'Up to ' + t.maxAdults + '</div></div>' +
+    (t.description ? '<div class="sec">Description</div><p class="muted" style="font-size:14px">' + E(t.description) + '</p>' : '') + (t.bedConfig ? '<div class="fine" style="margin-top:10px">' + ic('bed') + ' ' + E(t.bedConfig) + '</div>' : '') +
+    (t.deposit > 0 ? '<div class="note info">' + ic('shield') + '<div><b>Deposit ' + money(t.deposit) + '</b> secures this room. Pay it with M-PESA after booking.</div></div>' : '') + '</div>' +
+    '<div class="cartbar nonav" style="display:block"><button class="btn" id="bk">Book Now</button></div>';
+  $('#bk').onclick = function () { needAuth(function () { bookSheet(t); }, 'Sign in to book a room.'); };
+};
+function bookSheet(t) {
+  sheet(shd(E(t.name)) + '<div class="bd"><div class="note info" style="margin-top:0">' + ic('cal') + '<div>' + fdate(RM.ci) + ' → ' + fdate(RM.co) + ' · ' + money(t.total) + (t.deposit > 0 ? '<br><b>Deposit now: ' + money(t.deposit) + '</b>' : '') + '</div></div><label class="lbl">Your name<input class="field" id="nm" value="' + E(DT.name) + '"></label><label class="lbl">Phone<input class="field" id="ph" type="tel" value="' + E(DT.phone) + '"></label><label class="lbl">Email (optional)<input class="field" id="em" type="email" value="' + E((acct && acct.account.email) || '') + '"></label><label class="lbl">Special requests (optional)<input class="field" id="sr"></label><div class="err" id="er"></div></div><div class="fx"><button class="btn" id="ok">' + (t.deposit > 0 && ctx.mpesa ? 'Confirm & pay deposit' : 'Confirm booking') + '</button></div>', function (m) {
+    $('#ok', m).onclick = async function () {
+      var er = $('#er', m), nm = $('#nm', m).value.trim(), ph = $('#ph', m).value.trim(); er.textContent = '';
+      if (nm.length < 2) return er.textContent = 'Enter your name.'; if (ph.replace(/\D/g, '').length < 9) return er.textContent = 'Enter a valid phone number.';
+      var btn = this; btn.disabled = true; btn.textContent = 'Booking…'; DT.name = nm; DT.phone = ph; if (!RM.ref) RM.ref = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      try {
+        var r = await call('/bookings', 'POST', { branchId: branchId || undefined, roomTypeId: t.roomTypeId, checkInDate: RM.ci, checkOutDate: RM.co, name: nm, phone: ph, email: $('#em', m).value.trim() || undefined, adults: RM.ad, specialRequests: $('#sr', m).value.trim() || undefined, clientRef: RM.ref });
+        RM.ref = null; closeSheet(); loadHist();
+        if (r.pay && r.pay.state === 'AWAITING') payPrompt('Pay deposit to secure your room', r.deposit.due, ph, function (p) { return call('/deposit', 'POST', { kind: 'STAY', ref: r.bookingCode, phone: ph, payerPhone: p }); }, { onOk: function () { nav('bookings', {}, { replace: true }); }, onClose: function () { nav('bookings', {}, { replace: true }); } });
+        else { toast('Room booked'); nav('bookings', {}, { replace: true }); }
+      } catch (e) { btn.disabled = false; btn.textContent = 'Confirm booking'; er.textContent = e.message; if (e.code === 'GUEST_AUTH_REQUIRED') { closeSheet(); nav('auth', { why: 'Please sign in to book.' }); } }
+    };
+  });
 }
 
-// ---------- tables
-var T = { date: '', time: '', party: 2, sel: null, pre: {} };
-function today() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-function viewTables() {
-  if (!ctx.tables.enabled) { $('#main').innerHTML = '<div class="empty">Table booking is not available.</div>'; return; }
-  if (!T.date) T.date = today();
-  $('#main').innerHTML = '<div class="card">' + branchPicker() + '<div class="row"><label class="grow">Date<input id="dt" type="date" min="' + today() + '" value="' + T.date + '" /></label><label class="grow">Guests<input id="pt" type="number" min="1" max="50" value="' + T.party + '" /></label></div><label>Time<select id="tm"><option>Loading…</option></select></label></div><div id="tl"></div>';
-  bindBranch(viewTables); $('#dt').onchange = function () { T.date = this.value; T.time = ''; viewTables(); }; $('#pt').onchange = function () { T.party = Math.max(1, +this.value || 1); loadTables(); }; $('#tm').onchange = function () { T.time = this.value; loadTables(); };
-  api('/tables' + q({ branchId: branchId, date: T.date, partySize: T.party })).then(function (r) { var opts = r.slots; if (!opts.length) { $('#tm').innerHTML = '<option value="">No times left this day</option>'; $('#tl').innerHTML = '<div class="empty">No times available on this date. Try another day.</div>'; return; } if (!T.time || opts.indexOf(T.time) < 0) T.time = opts[0]; $('#tm').innerHTML = opts.map(function (t) { return '<option' + (t === T.time ? ' selected' : '') + '>' + t + '</option>'; }).join(''); loadTables(); }).catch(function (e) { $('#tl').innerHTML = '<div class="empty">' + E(e.message) + '</div>'; });
+/* ---------- my bookings ---------- */
+var BK = { seg: 'cur' };
+VIEWS.bookings = async function (p) {
+  var v = $('#view'); v.innerHTML = top('My Bookings') + '<div class="pad"><div class="sk" style="height:90px;margin-top:14px"></div></div>';
+  if (!acct) { v.innerHTML = top('My Bookings') + '<div class="pad">' + empty('user', 'Sign in to see your bookings', 'Your room and table bookings live in your account.', '<div style="margin-top:16px"><button class="btn sm" id="si">Sign in</button></div>') + '</div>'; $('#si').onclick = function () { nav('auth', {}); }; return; }
+  await loadHist(); if (cur.v !== 'bookings') return; var H = hist || { stays: [], reservations: [] };
+  var items = H.stays.map(function (s) { return { k: 'STAY', s: s, at: s.checkInDate, end: s.checkOutDate, done: ['CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].indexOf(s.status) >= 0 || s.pay.state === 'EXPIRED' }; })
+    .concat(H.reservations.map(function (r) { return { k: 'RES', s: r, at: r.startsAt, done: ['COMPLETED', 'CANCELLED', 'NO_SHOW'].indexOf(r.status) >= 0 || r.pay.state === 'EXPIRED' || new Date(r.startsAt) < new Date(Date.now() - 4 * 3600000) }; }));
+  var cur_ = items.filter(function (x) { return !x.done; }), past = items.filter(function (x) { return x.done; }), list = BK.seg === 'cur' ? cur_ : past;
+  var h = top('My Bookings') + '<div class="pad"><div class="seg" style="margin-top:14px"><button data-s="cur" class="' + (BK.seg === 'cur' ? 'on' : '') + '">Current (' + cur_.length + ')</button><button data-s="past" class="' + (BK.seg === 'past' ? 'on' : '') + '">Past (' + past.length + ')</button></div>';
+  h += list.length ? list.map(function (x) {
+    var s = x.s, aw = s.pay && s.pay.state === 'AWAITING', st = aw ? '<span class="tag or">Payment due</span>' : '<span class="tag ' + (x.done ? 'rd' : 'gr') + '">' + E((s.status || '').replace(/_/g, ' ').toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); })) + '</span>';
+    return '<div class="card bk" style="margin-top:12px"><div class="hd2"><div><b>' + (x.k === 'STAY' ? E(s.roomType) + (s.roomNumber ? ' · Room ' + E(s.roomNumber) : '') : 'Table ' + E((s.tables || []).map(function (t) { return t.name; }).join(', '))) + '</b><div class="fine">' + (x.k === 'STAY' ? 'Check-in: ' + fdate(s.checkInDate) + '<br>Check-out: ' + fdate(s.checkOutDate) : fdt(s.startsAt) + ' · ' + s.partySize + ' guests') + '</div></div>' + st + '</div>' +
+      '<p class="fine" style="margin-top:8px">' + E(s.message || '') + '</p>' + (x.k === 'RES' && s.preOrder && s.preOrder.length ? '<div class="fine">Pre-order: ' + s.preOrder.map(function (i) { return i.quantity + '× ' + E(i.name); }).join(', ') + '</div>' : '') +
+      '<div class="row" style="margin-top:10px"><span class="grow fine">Ref <b style="color:var(--ink)">' + E(x.k === 'STAY' ? s.bookingCode : s.reference) + '</b></span>' + (s.pay && s.pay.receiptRef ? '<button class="btn sm ghost" data-r="' + E(s.pay.receiptRef) + '">' + ic('receipt') + ' Receipt</button>' : '') + (aw ? '<button class="btn sm" data-pay="' + x.k + ':' + E(x.k === 'STAY' ? s.bookingCode : s.reference) + ':' + (x.k === 'STAY' ? s.deposit.due : s.deposit.amount) + '">Pay now</button>' : '') + '</div></div>';
+  }).join('') : empty('cal', BK.seg === 'cur' ? 'No current bookings' : 'No past bookings', 'Book a table or a room to see it here.');
+  v.innerHTML = h + '</div>';
+  $$('[data-s]').forEach(function (b) { b.onclick = function () { BK.seg = b.dataset.s; VIEWS.bookings({}); }; });
+  $$('[data-r]').forEach(function (b) { b.onclick = function () { nav('receipt', { ref: b.dataset.r }); }; });
+  $$('[data-pay]').forEach(function (b) { b.onclick = function () { var q = b.dataset.pay.split(':'), kind = q[0] === 'STAY' ? 'STAY' : 'RESERVATION', ph = DT.phone || (acct.account.phone || ''); payPrompt(kind === 'STAY' ? 'Pay deposit' : 'Pay to confirm table', +q[2], ph, function (p) { return call('/deposit', 'POST', { kind: kind, ref: q[1], phone: ph, payerPhone: p }); }, { onOk: function () { VIEWS.bookings({}); }, onClose: function () { VIEWS.bookings({}); } }); }; });
+};
+
+/* ---------- e-receipts ---------- */
+VIEWS.receipts = async function () {
+  var v = $('#view'); v.innerHTML = top('E-Receipts') + '<div class="pad"><div class="sk" style="height:70px;margin-top:14px"></div></div>';
+  if (!acct) { v.innerHTML = top('E-Receipts') + '<div class="pad">' + empty('receipt', 'Sign in to see your receipts', 'Every payment you make is saved here.', '<div style="margin-top:16px"><button class="btn sm" id="si">Sign in</button></div>') + '</div>'; $('#si').onclick = function () { nav('auth', {}); }; return; }
+  await loadHist(); var rc = (hist && hist.receipts) || []; if (cur.v !== 'receipts') return;
+  v.innerHTML = top('E-Receipts') + '<div class="pad">' + (rc.length ? rc.map(function (r) { return '<button class="card row" style="margin-top:12px;width:100%;text-align:left" data-r="' + E(r.reference) + '"><span class="stat"><span class="ic" style="width:42px;height:42px;display:grid;place-items:center;background:var(--ol);color:var(--o);border-radius:12px">' + ic('receipt') + '</span></span><div class="grow"><b>' + E(r.place || 'Payment') + '</b><div class="fine">' + fdt(r.at) + ' · ' + E(r.number || '') + '</div></div><b>' + money(r.total) + '</b></button>'; }).join('') : empty('receipt', 'No receipts yet', 'Receipts appear here after you pay.')) + '</div>';
+  $$('[data-r]').forEach(function (b) { b.onclick = function () { nav('receipt', { ref: b.dataset.r }); }; });
+};
+VIEWS.receipt = async function (p) {
+  var v = $('#view'); v.innerHTML = top('E-Receipt', { right: '<button class="ib" id="pr" aria-label="Print">' + ic('print') + '</button>' }) + '<div class="pad"><div class="sk" style="height:300px;margin-top:14px"></div></div>';
+  try {
+    var q = '/receipts/' + encodeURIComponent(p.ref) + (acct ? '' : '?phone=' + encodeURIComponent(DT.phone || '')), r = await call(q); if (cur.v !== 'receipt') return;
+    var html = receiptHtml(r); v.innerHTML = top('E-Receipt', { right: '<button class="ib" id="pr" aria-label="Print">' + ic('print') + '</button>' }) + '<div class="pad" style="padding-top:18px">' + html + '</div>';
+    $('#pr').onclick = function () { $('#printarea').innerHTML = html; window.print(); };
+  } catch (e) { v.innerHTML = top('E-Receipt') + '<div class="pad">' + empty('receipt', 'Receipt not found', E(e.message)) + '</div>'; }
+};
+function receiptHtml(r) {
+  var row = function (a, b) { return b == null || b === '' ? '' : '<div class="r"><span>' + a + '</span><span>' + b + '</span></div>'; };
+  var b = r.business || {}; var n = function (x) { return x == null ? '' : money(x); };
+  return '<div class="rcpt"><div class="h"><b>' + E(b.name || '') + '</b>' + (b.address ? E(b.address) + '<br>' : '') + (b.phone ? E(b.phone) + '<br>' : '') + (b.taxPin ? 'PIN ' + E(b.taxPin) : '') + '<div class="paid">PAID</div></div>' +
+    row('Receipt', E(r.number)) + row('Date', E(new Date(r.date).toLocaleString('en-KE'))) + row('For', E(r.place)) + (r.mpesaReceipt ? row('M-PESA', E(r.mpesaReceipt)) : '') + '<hr>' +
+    (r.lines || []).map(function (l) { return '<div class="li"><b>' + E(l.quantity) + '×</b><span>' + E(l.name) + (l.note ? '<small>' + E(l.note) + '</small>' : '') + '</span><span>' + n(l.total) + '</span></div>'; }).join('') + '<hr>' +
+    (r.itemsTotal != null ? row('Items', n(r.itemsTotal)) : '') + (r.serviceCharge ? row('Service charge', n(r.serviceCharge)) : '') + (r.tax ? row('VAT included', n(r.tax)) : '') + '<div class="r s"><span>TOTAL</span><span>' + n(r.total) + '</span></div>' + row('Paid', n(r.paidAmount)) +
+    (r.payments || []).map(function (x) { return row(E(x.method || 'M-PESA'), n(x.amount)); }).join('') + '<div class="ft">' + E(r.footer || 'Thank you!') + '</div></div>';
 }
-function loadTables() {
-  api('/tables' + q({ branchId: branchId, date: T.date, time: T.time, partySize: T.party })).then(function (r) {
-    T.dep = r; var free = r.tables.filter(function (t) { return t.free; }).length;
-    $('#tl').innerHTML = '<div class="muted" style="margin:4px 2px">' + free + ' of ' + r.tables.length + ' tables free at ' + T.time + (r.depositRequired ? ' · deposit ' + money(r.deposit) : '') + '</div>' + r.tables.map(function (t) { return '<div class="card row"><div class="grow"><b>Table ' + E(t.name) + '</b><div class="muted">' + t.seats + ' seats' + (t.area ? ' · ' + E(t.area) : '') + '</div></div>' + (t.free ? '<span class="tag g">Free</span><button class="p" data-t="' + t.id + '" data-n="' + E(t.name) + '">Reserve</button>' : '<span class="tag r">' + ({ RESERVED: 'Reserved', OCCUPIED: 'Busy now', TOO_SMALL: 'Too small' }[t.reason] || 'Taken') + '</span>') + '</div>'; }).join('');
-    $$('[data-t]').forEach(function (b) { b.onclick = function () { reserveForm(b.dataset.t, b.dataset.n); }; });
-  }).catch(function (e) { $('#tl').innerHTML = '<div class="empty">' + E(e.message) + '</div>'; });
-}
-function reserveForm(id, name) {
-  var me = S.me || {}, pre = {}, m = document.createElement('div'); m.className = 'modal';
-  m.innerHTML = '<div class="sheet"><h3 style="margin:0">Table ' + E(name) + ' · ' + T.party + ' guests</h3><div class="muted">' + T.date + ' at ' + T.time + (T.dep && T.dep.depositRequired ? ' · deposit ' + money(T.dep.deposit) + ' to confirm' : '') + '</div><label>Your name<input id="nm" value="' + E(me.name) + '" /></label><label>Phone<input id="ph" type="tel" value="' + E(me.phone) + '" /></label><label>Occasion / notes (optional)<input id="no" /></label>' +
-    '<label>Pre-order food so it is ready when you arrive (optional)</label><div id="pl" class="muted">Loading menu…</div><div class="err" id="er"></div><div class="row" style="margin-top:12px"><button class="s" id="cx">Cancel</button><button class="p grow" id="ok">Book table</button></div></div>';
-  document.body.appendChild(m); $('#cx', m).onclick = function () { m.remove(); };
-  (menu ? Promise.resolve(menu) : api('/menu' + q({ branchId: branchId })).then(function (x) { menu = x; return x; })).then(function (mn) {
-    var its = []; mn.categories.forEach(function (c) { c.items.forEach(function (i) { if (i.available !== false && !(i.variants || []).length && !(i.modifierGroups || []).length) its.push(i); }); });
-    $('#pl', m).innerHTML = its.slice(0, 60).map(function (i) { return '<div class="row" style="padding:5px 0"><span class="grow">' + E(i.name) + ' <span class="muted">· ' + money(i.price) + ' · ⏱ ' + (i.prepMinutes || 10) + 'm</span></span><div class="qty"><button data-i="' + i.id + '" data-d="-1">−</button><b data-q="' + i.id + '">0</b><button data-i="' + i.id + '" data-d="1">+</button></div></div>'; }).join('') || 'No dishes available.';
-    $$('[data-i]', m).forEach(function (b) { b.onclick = function () { var k = b.dataset.i; pre[k] = Math.max(0, (pre[k] || 0) + +b.dataset.d); $('[data-q="' + k + '"]', m).textContent = pre[k]; }; });
-  }).catch(function () { $('#pl', m).textContent = ''; });
-  $('#ok', m).onclick = function () {
-    var er = $('#er', m), name = $('#nm', m).value.trim(), phone = $('#ph', m).value.trim(); if (name.length < 2) return er.textContent = 'Enter your name.'; if (phone.replace(/\D/g, '').length < 9) return er.textContent = 'Enter a valid phone number.';
-    var btn = $('#ok', m); btn.disabled = true; btn.textContent = 'Booking…';
-    api('/reservations', 'POST', { branchId: branchId || undefined, name: name, phone: phone, date: T.date, time: T.time, partySize: T.party, tableId: id, notes: $('#no', m).value.trim() || undefined, preOrder: Object.keys(pre).filter(function (k) { return pre[k] > 0; }).map(function (k) { return { menuItemId: k, quantity: pre[k] }; }) })
-      .then(function (r) { S.me = Object.assign(S.me || {}, { name: name, phone: phone }); S.bookings.unshift({ ref: r.reference, kind: 'RES', phone: phone, at: Date.now() }); save(); m.remove(); done('Table booked', resHtml(r), 'RESERVATION', r.reference, phone, r.deposit); })
-      .catch(function (e) { btn.disabled = false; btn.textContent = 'Book table'; er.textContent = e.message; });
+
+/* ---------- account: auth, profile, settings ---------- */
+VIEWS.auth = function (p) {
+  var reg = !!p.reg, h = top(reg ? 'Create account' : 'Sign in') + '<div class="pad"><div style="text-align:center;margin:22px 0 14px">' + logoHtml('lg2').replace('class="lg2"', 'style="width:64px;height:64px;border-radius:18px;background:var(--o);color:#fff;display:grid;place-items:center;font-size:28px;font-weight:800;margin:0 auto 10px;overflow:hidden"') + '<h2>' + E(ctx.business.name) + '</h2>' + (p.why ? '<p class="muted" style="margin-top:6px;font-size:14px">' + E(p.why) + '</p>' : '<p class="muted" style="margin-top:6px;font-size:14px">One account for ordering, bookings and receipts.</p>') + '</div>' +
+    '<div class="seg"><button data-m="in" class="' + (reg ? '' : 'on') + '">Sign in</button><button data-m="up" class="' + (reg ? 'on' : '') + '">Create account</button></div><div class="card">' +
+    (reg ? '<label class="lbl" style="margin-top:0">Full name<input class="field" id="a1" autocomplete="name"></label><label class="lbl">Phone<input class="field" id="a2" type="tel" placeholder="0712 345 678" autocomplete="tel"></label><label class="lbl">Email (optional)<input class="field" id="a3" type="email" autocomplete="email"></label><label class="lbl">Password<input class="field" id="a4" type="password" autocomplete="new-password" placeholder="At least 6 characters"></label>' :
+      '<label class="lbl" style="margin-top:0">Email or phone<input class="field" id="a1" autocomplete="username" placeholder="you@email.com or 0712 345 678"></label><label class="lbl">Password<input class="field" id="a4" type="password" autocomplete="current-password"></label>') +
+    '<div class="err" id="er"></div><button class="btn" id="sb" style="margin-top:8px">' + (reg ? 'Create account' : 'Sign in') + '</button><div id="gwrap" hidden><div class="or">or</div><div id="gbtn" style="display:flex;justify-content:center"></div></div></div></div>';
+  $('#view').innerHTML = h; $$('[data-m]').forEach(function (b) { b.onclick = function () { VIEWS.auth(Object.assign({}, p, { reg: b.dataset.m === 'up' })); }; });
+  var done = async function (res) { setAcct(res); await loadHist(); toast('Welcome, ' + String(res.account.name).split(' ')[0]); var f = p.after; cur = stack.pop() || { v: 'home', p: {} }; render(); if (f) f(); };
+  $('#sb').onclick = async function () {
+    var er = $('#er'), b = this; er.textContent = ''; b.disabled = true;
+    try {
+      if (reg) { var nm = $('#a1').value.trim(), ph = $('#a2').value.trim(), em = $('#a3').value.trim(), pw = $('#a4').value; if (nm.length < 2) throw new Error('Enter your name'); if (!ph && !em) throw new Error('Add a phone number or an email'); if (pw.length < 6) throw new Error('Password must be at least 6 characters'); await done(await call('/account/register', 'POST', { name: nm, phone: ph || undefined, email: em || undefined, password: pw })); }
+      else { var id = $('#a1').value.trim(), pw2 = $('#a4').value; if (!id || !pw2) throw new Error('Enter your email or phone, and password'); await done(await call('/account/login', 'POST', { identifier: id, password: pw2 })); }
+    } catch (e) { er.textContent = e.message; b.disabled = false; }
   };
-}
-function resHtml(r) { return '<div class="card"><b>Reservation ' + E(r.reference) + '</b> <span class="tag">' + E(r.status.toLowerCase()) + '</span><p>' + E(r.message || '') + '</p><div class="muted">' + E(r.guestName) + ' · ' + r.partySize + ' guests · ' + new Date(r.startsAt).toLocaleString() + '</div>' + (r.preOrder && r.preOrder.length ? '<div class="muted">Pre-order: ' + r.preOrder.map(function (i) { return i.quantity + '× ' + E(i.name); }).join(', ') + '</div>' : '') + (r.deposit.required ? '<div style="margin-top:6px">Deposit ' + money(r.deposit.amount) + ': ' + (r.deposit.paid ? '<span class="tag g">paid</span>' : '<span class="tag o">due</span>') + '</div>' : '') + '</div>'; }
-function stayHtml(s) { return '<div class="card"><b>Booking ' + E(s.bookingCode) + '</b> <span class="tag">' + E(s.status.replace(/_/g, ' ').toLowerCase()) + '</span><p>' + E(s.message || '') + '</p><div class="muted">' + E(s.roomType) + ' · ' + s.checkInDate + ' → ' + s.checkOutDate + ' (' + s.nights + ' night' + (s.nights > 1 ? 's' : '') + ')</div><div class="row" style="margin-top:6px"><span class="grow">Total ' + money(s.total) + '</span></div>' + (s.deposit.required ? '<div style="margin-top:4px">Deposit ' + money(s.deposit.amount) + ': ' + (s.deposit.due > 0 ? '<span class="tag o">' + money(s.deposit.due) + ' due</span>' : '<span class="tag g">paid</span>') + '</div>' : '') + '</div>'; }
-function done(title, html, kind, ref, phone, dep) {
-  var m = document.createElement('div'); m.className = 'modal'; m.innerHTML = '<div class="sheet"><h3 style="margin:0 0 8px">✓ ' + E(title) + '</h3>' + html + '<div id="pay"></div><p class="muted">Save your reference <b>' + E(ref) + '</b>. Use "My orders" to check it any time.</p><button class="p" id="x" style="width:100%">Done</button></div>'; document.body.appendChild(m); $('#x', m).onclick = function () { m.remove(); go(); };
-  var due = kind === 'STAY' ? dep && dep.due : dep && dep.required && !dep.paid ? dep.amount : 0; if (due > 0) payBox($('#pay', m), kind, ref, phone, due);
-}
-function bindPay(r, kind, ref, phone) { var due = kind === 'STAY' ? r.deposit && r.deposit.due : r.deposit && r.deposit.required && !r.deposit.paid ? r.deposit.amount : 0; if (due > 0 && ['CANCELLED', 'NO_SHOW', 'CHECKED_OUT'].indexOf(r.status) < 0) { var d = document.createElement('div'); d.id = 'pay2'; $('#lr').appendChild(d); payBox(d, kind, ref, phone, due); } }
-function payBox(box, kind, ref, phone, due) {
-  box.innerHTML = '<div class="card" style="background:#f0faf8"><b>Pay deposit ' + money(due) + ' with M-PESA</b><label>M-PESA number<input class="pp" type="tel" value="' + E(phone) + '" /></label><button class="p pb" style="margin-top:10px;width:100%">Send M-PESA prompt</button><div class="muted pm" style="margin-top:6px">You will get a prompt on your phone to enter your PIN.</div></div>';
-  $('.pb', box).onclick = function () { var b = this, msg = $('.pm', box); b.disabled = true; msg.textContent = 'Sending…'; api('/deposit', 'POST', { kind: kind, ref: ref, phone: phone, payerPhone: $('.pp', box).value }).then(function (r) { msg.textContent = 'Check your phone and enter your M-PESA PIN…'; var n = 0, t = setInterval(function () { n++; api('/deposit/' + r.reference).then(function (s) { if (s.status === 'SUCCESS') { clearInterval(t); box.innerHTML = '<div class="card ok"><b>✓ Deposit received.</b> ' + E(s.receipt || '') + ' Your booking is secured.</div>'; } else if (s.status === 'FAILED' || n > 40) { clearInterval(t); b.disabled = false; msg.textContent = s.status === 'FAILED' ? (s.message || 'Payment was not completed.') + ' You can try again.' : 'Still waiting. If you paid, it will be confirmed shortly.'; } }).catch(function () {}); }, 4000); }).catch(function (e) { b.disabled = false; msg.textContent = e.message; }); };
-}
-
-// ---------- rooms
-var RM = { ci: '', co: '', ad: 2 };
-function viewRooms() {
-  var t = new Date(), a = new Date(Date.now() + 864e5); var f = function (d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }; if (!RM.ci) { RM.ci = f(t); RM.co = f(a); }
-  $('#main').innerHTML = '<div class="card">' + branchPicker() + '<div class="row"><label class="grow">Check-in<input id="ci" type="date" min="' + f(t) + '" value="' + RM.ci + '" /></label><label class="grow">Check-out<input id="co" type="date" min="' + RM.ci + '" value="' + RM.co + '" /></label></div><label>Adults<input id="ad" type="number" min="1" max="20" value="' + RM.ad + '" /></label><button class="p" id="go" style="margin-top:10px;width:100%">See available rooms</button></div><div id="rl"></div>';
-  bindBranch(viewRooms); $('#go').onclick = function () { RM.ci = $('#ci').value; RM.co = $('#co').value; RM.ad = +$('#ad').value || 1; loadRooms(); }; loadRooms();
-}
-function loadRooms() {
-  $('#rl').innerHTML = '<div class="empty">Checking availability…</div>';
-  api('/rooms' + q({ branchId: branchId, checkInDate: RM.ci, checkOutDate: RM.co, adults: RM.ad })).then(function (r) {
-    $('#rl').innerHTML = r.roomTypes.length ? r.roomTypes.map(function (t, k) { return '<div class="card">' + (t.images && t.images[0] ? '<img src="' + E(t.images[0]) + '" alt="" style="width:100%;height:160px;object-fit:cover;border-radius:10px;margin-bottom:8px" loading="lazy" />' : '') + '<div class="row"><b class="grow">' + E(t.name) + '</b>' + (t.promo ? '<span class="tag o">' + E(t.promo.title || t.promo.percentOff + '% off') + '</span>' : '') + '</div><div class="muted">' + E(t.description || '') + '</div><div class="muted">Up to ' + t.maxAdults + ' adults' + (t.maxChildren ? ', ' + t.maxChildren + ' children' : '') + (t.bedConfig ? ' · ' + E(t.bedConfig) : '') + (t.amenities && t.amenities.length ? ' · ' + E(t.amenities.slice(0, 4).join(', ')) : '') + '</div><div class="row" style="margin-top:8px"><div class="grow"><span class="price">' + money(t.total) + '</span> <span class="muted">for ' + t.nights + ' night' + (t.nights > 1 ? 's' : '') + '</span>' + (t.deposit > 0 ? '<div class="muted">Deposit to secure: ' + money(t.deposit) + '</div>' : '') + '<div class="muted">' + t.available + ' room' + (t.available > 1 ? 's' : '') + ' left</div></div><button class="p" data-k="' + k + '">Book</button></div></div>'; }).join('') : '<div class="empty">No rooms available for those dates.</div>';
-    $$('[data-k]').forEach(function (b) { b.onclick = function () { bookForm(r.roomTypes[+b.dataset.k]); }; });
-  }).catch(function (e) { $('#rl').innerHTML = '<div class="empty">' + E(e.message) + '</div>'; });
-}
-function bookForm(t) {
-  var me = S.me || {}, m = document.createElement('div'); m.className = 'modal';
-  m.innerHTML = '<div class="sheet"><h3 style="margin:0">' + E(t.name) + '</h3><div class="muted">' + RM.ci + ' → ' + RM.co + ' · ' + money(t.total) + (t.deposit > 0 ? ' · deposit ' + money(t.deposit) : '') + '</div><label>Your name<input id="nm" value="' + E(me.name) + '" /></label><label>Phone<input id="ph" type="tel" value="' + E(me.phone) + '" /></label><label>Email (optional)<input id="em" type="email" /></label><label>Special requests (optional)<input id="sr" /></label><div class="err" id="er"></div><div class="row" style="margin-top:12px"><button class="s" id="cx">Cancel</button><button class="p grow" id="ok">Confirm booking</button></div></div>';
-  document.body.appendChild(m); $('#cx', m).onclick = function () { m.remove(); };
-  $('#ok', m).onclick = function () {
-    var er = $('#er', m), name = $('#nm', m).value.trim(), phone = $('#ph', m).value.trim(); if (name.length < 2) return er.textContent = 'Enter your name.'; if (phone.replace(/\D/g, '').length < 9) return er.textContent = 'Enter a valid phone number.';
-    var btn = $('#ok', m); btn.disabled = true; btn.textContent = 'Booking…'; if (!S.bref) S.bref = uid();
-    api('/bookings', 'POST', { branchId: branchId || undefined, roomTypeId: t.roomTypeId, checkInDate: RM.ci, checkOutDate: RM.co, name: name, phone: phone, email: $('#em', m).value.trim() || undefined, adults: RM.ad, specialRequests: $('#sr', m).value.trim() || undefined, clientRef: S.bref })
-      .then(function (r) { S.bref = null; S.me = Object.assign(S.me || {}, { name: name, phone: phone }); S.bookings.unshift({ ref: r.bookingCode, kind: 'STAY', phone: phone, at: Date.now() }); save(); m.remove(); done('Room booked', stayHtml(r), 'STAY', r.bookingCode, phone, r.deposit); })
-      .catch(function (e) { btn.disabled = false; btn.textContent = 'Confirm booking'; er.textContent = e.message; });
+  var gid = ctx.googleClientId || (window.APP_CONFIG && window.APP_CONFIG.GOOGLE_CLIENT_ID);
+  if (gid) { var go = function () { try { window.google.accounts.id.initialize({ client_id: gid, callback: async function (resp) { try { await done(await call('/account/google', 'POST', { credential: resp.credential })); } catch (e) { toast(e.message, true); } } }); window.google.accounts.id.renderButton($('#gbtn'), { theme: 'outline', size: 'large', shape: 'pill', text: reg ? 'signup_with' : 'continue_with', width: 300 }); $('#gwrap').hidden = false; } catch (e) { /* google unavailable */ } };
+    if (window.google && window.google.accounts) go(); else { var sc = document.createElement('script'); sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true; sc.onload = go; document.head.appendChild(sc); } }
+};
+VIEWS.more = async function () {
+  var a = acct && acct.account, n = activeOrders();
+  var row = function (i, t, g, x) { return '<button class="mrow" data-g="' + g + '"><span class="ic">' + ic(i) + '</span><span class="grow">' + t + '</span>' + (x || '') + '<span class="go">' + ic('chev') + '</span></button>'; };
+  var h = top('Profile', { noBack: true }) + '<div class="pad" style="padding-top:20px"><div class="center"><div class="avatar">' + (a ? (a.picture ? '<img alt="" src="' + E(a.picture) + '">' : E(initials(a.name))) : ic('user')) + '</div><h2>' + (a ? E(a.name) : 'Welcome') + '</h2><div class="fine">' + (a ? E(a.email || (a.phone ? '+254 ' + localPhone(a.phone) : '')) : 'Sign in to track orders and bookings') + '</div></div><div class="sp"></div>';
+  if (!a) h += '<button class="btn" id="si">Sign in / Create account</button><div class="sp"></div>';
+  h += '<div class="mlist">' + row('cal', 'My Bookings', 'bookings') + row('receipt', 'My Orders', 'orders', n ? '<span class="tag or">' + n + ' active</span>' : '') + row('receipt', 'E-Receipts', 'receipts') + row('table', 'Book a table', 'tables') + (ctx.business.phone ? '<a class="mrow" href="tel:' + E(ctx.business.phone) + '" style="color:inherit;text-decoration:none"><span class="ic">' + ic('help') + '</span><span class="grow">Help &amp; Support</span><span class="fine">' + E(ctx.business.phone) + '</span></a>' : '') + (a ? row('gear', 'Settings', 'settings') : '') + (a ? '<button class="mrow" id="lo" style="color:var(--bad)"><span class="ic" style="color:var(--bad)">' + ic('logout') + '</span><span class="grow">Log Out</span></button>' : '') + '</div>' +
+    '<div class="fine center" style="margin:22px 0">' + E(ctx.business.name) + '<br>Secure ordering and M-PESA payments</div></div>';
+  $('#view').innerHTML = h; var si = $('#si'); if (si) si.onclick = function () { nav('auth', {}); };
+  $$('[data-g]').forEach(function (b) { b.onclick = function () { var g = b.dataset.g; if (g === 'orders') tab('orders'); else nav(g); }; });
+  var lo = $('#lo'); if (lo) lo.onclick = function () { acct = null; hist = null; ss('q.acct', null); toast('Signed out'); tab('home'); };
+};
+VIEWS.settings = function () {
+  var a = acct && acct.account; if (!a) return nav('auth', {}, { replace: true });
+  $('#view').innerHTML = top('Settings') + '<div class="pad"><div class="card" style="margin-top:14px"><label class="lbl" style="margin-top:0">Full name<input class="field" id="s1" value="' + E(a.name) + '"></label><label class="lbl">Phone (also your default M-PESA number)<input class="field" id="s2" type="tel" value="' + E(a.phone || '') + '"></label><label class="lbl">Email' + (a.google ? ' (from Google)' : '') + '<input class="field" id="s3" type="email" value="' + E(a.email || '') + '"' + (a.google ? ' disabled' : '') + '></label>' +
+    (a.google ? '' : '<div class="sec" style="margin:18px 0 0">Change password (optional)</div><label class="lbl">Current password<input class="field" id="s4" type="password" autocomplete="current-password"></label><label class="lbl">New password<input class="field" id="s5" type="password" autocomplete="new-password"></label>') + '<div class="err" id="er"></div><button class="btn" id="sv" style="margin-top:8px">Save changes</button></div></div>';
+  $('#sv').onclick = async function () {
+    var er = $('#er'), b = this; er.textContent = ''; var body = { name: $('#s1').value.trim(), phone: $('#s2').value.trim() };
+    if (!a.google) { body.email = $('#s3').value.trim(); var np = $('#s5').value; if (np) { if (np.length < 6) return er.textContent = 'New password must be at least 6 characters'; body.newPassword = np; body.currentPassword = $('#s4').value; } }
+    b.disabled = true;
+    try { var r = await call('/account/profile', 'PUT', body); acct.account = r.account; ss('q.acct', acct); DT.name = r.account.name; DT.phone = r.account.phone || ''; toast('Saved'); back(); } catch (e) { er.textContent = e.message; b.disabled = false; }
   };
-}
+};
 
-// ---------- start
-if (!TOKEN) { $('#main').innerHTML = '<div class="empty">This link is not valid. Please scan the QR code again.</div>'; $('#bn').textContent = 'Order online'; return; }
-api('').then(function (c) {
-  ctx = c; document.title = c.business.name; $('#bn').textContent = c.business.name; $('#tag').textContent = c.store.tagline || ''; if (c.business.logo) { $('#logo').src = c.business.logo; $('#logo').hidden = false; }
-  document.documentElement.style.setProperty('--b', c.store.themeColor); $('#themeMeta').content = c.store.themeColor; branchId = c.branches[0] && c.branches[0].id; setupInstall();
-  var p = new URLSearchParams(location.search).get('track'); if (p) { openOrder(p); } else go();
-}).catch(function (e) { $('#bn').textContent = 'Order online'; $('#main').innerHTML = '<div class="empty">' + E(e.message) + '</div>'; });
+window.addEventListener('pageshow', function () { acct = sg('q.acct') || acct; });
+init();
 })();
 </script>
 </body>

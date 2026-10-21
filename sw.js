@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v3.6.1-hx-fast';
+const VERSION = 'v3.6.2-storefront-app';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -150,7 +150,7 @@ self.addEventListener('fetch', (event) => {
     return; // the backend API is never cached
   }
   if (url.pathname.startsWith('/api/')) return;
-  if (url.pathname.startsWith('/q/') || url.pathname === '/q' || url.pathname === '/q.html') return; // guest QR menu: always straight from the network
+  if (url.pathname.startsWith('/s/') || url.pathname === '/s' || url.pathname.startsWith('/q/') || url.pathname === '/q' || url.pathname === '/q.html') return; // guest QR menu: always straight from the network
   if (url.pathname.endsWith('/sw.js')) return;
 
   if (req.mode === 'navigate') { event.respondWith(networkFirst(event, true)); return; }
