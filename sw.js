@@ -4,11 +4,12 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v3.6.2-storefront-app';
+const VERSION = 'v3.6.3-storefront-app';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
 const CDN_HOSTS = /^(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|fonts\.googleapis\.com|fonts\.gstatic\.com|(.+\.)?fontawesome\.com)$/;
+
 
 // Missing files are skipped (allSettled), so listing a file that does not exist is harmless.
 const PRECACHE = [
