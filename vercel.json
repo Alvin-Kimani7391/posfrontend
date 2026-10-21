@@ -40,6 +40,10 @@
   ],
   "rewrites": [
     {
+      "source": "/kiosk/:token",
+      "destination": "/kiosk.html"
+    },
+    {
       "source": "/q/:token(b_.*)",
       "destination": "/store.html"
     },

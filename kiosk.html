@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#1570ef">
+<meta name="robots" content="noindex,nofollow">
+<title>Order here</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="css/kiosk.css">
+</head>
+<body>
+<div id="app">
+  <!-- full-screen messages (kiosk off / bad link) -->
+  <section id="fatal" class="screen center" hidden></section>
+
+  <!-- 1. welcome -->
+  <section id="welcome" class="screen center" hidden></section>
+
+  <!-- 2. shop: menu on the left, order panel on the right (matches the design mock-up) -->
+  <section id="shop" class="shop" hidden>
+    <main class="left">
+      <header class="top">
+        <div class="brand" id="brand"></div>
+        <div class="mode" id="modeTabs"></div>
+        <button class="ghost" data-act="home" aria-label="Start over">Start over</button>
+      </header>
+      <div class="searchrow">
+        <h2 class="title">Menu</h2>
+        <label class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search the menu" autocomplete="off"></label>
+      </div>
+      <div class="cats" id="cats"></div>
+      <div class="grid" id="grid"></div>
+    </main>
+
+    <aside class="right" id="panel">
+      <div class="phead"><h2>Your order</h2><span class="sub" id="pSub"></span><button class="x drawer-x" data-act="drawer" aria-label="Close">×</button></div>
+      <div class="seg" id="typeSeg"></div>
+      <button class="tablebtn" id="tableBtn" data-act="table" hidden></button>
+      <div class="plist" id="plist"></div>
+      <div class="psum" id="psum"></div>
+      <div class="pact" id="pact"></div>
+    </aside>
+
+    <button class="cartbar" id="cartbar" data-act="drawer" hidden></button>
+  </section>
+
+  <!-- 3. payment + order tracking -->
+  <section id="pay" class="screen center" hidden></section>
+</div>
+<div id="modal"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/core/config.js"></script>
+<script src="js/pages/kiosk.js"></script>
+</body>
+</html>

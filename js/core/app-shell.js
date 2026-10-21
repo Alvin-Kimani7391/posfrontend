@@ -48,6 +48,7 @@
     { key: 'hx-bills',        group: 'Restaurant',    label: 'Bills & payments',     icon: 'receipt',  href: 'hx-bills.html',        permission: 'restaurant.bills.view', feature: ['restaurantOrdering'] },
     { key: 'hx-reservations', group: 'Restaurant',    label: 'Reservations',         icon: 'calendar', href: 'hx-reservations.html', permission: 'restaurant.reservations.view', feature: ['reservations'] },
     { key: 'hx-delivery',     group: 'Restaurant',    label: 'Delivery & pickup',    icon: 'bike',     href: 'hx-delivery.html',     permAny: ['restaurant.delivery.view', 'restaurant.delivery.self'], feature: ['restaurantOrdering'] },
+    { key: 'hx-selfservice',  group: 'Restaurant',    label: 'Self-service kiosk',   icon: 'receipt',  href: 'hx-selfservice.html',  permAny: ['restaurant.bills.view', 'restaurant.settings.manage'], feature: ['restaurantOrdering'] },
     { key: 'hx-storefront',   group: 'Restaurant',    label: 'Online storefront',    icon: 'bike',     href: 'hx-storefront.html',   permission: 'restaurant.guest.qr', feature: ['restaurantOrdering'] },
     { key: 'hx-menu',         group: 'Restaurant',    label: 'Menu',                 icon: 'utensils', href: 'hx-menu.html',         permission: 'restaurant.menu.manage', feature: ['restaurantOrdering'] },
     { key: 'hx-stock',        group: 'Restaurant',    label: 'Ingredients & recipes',icon: 'box',      href: 'hx-stock.html',        permission: 'restaurant.ingredients.view', feature: ['recipeManagement'] },
