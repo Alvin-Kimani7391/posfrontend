@@ -219,4 +219,8 @@ svg.i{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:2;st
 .paper .pb-l,.paper .pb-t{border-top:1px dashed #9ca3af;margin-top:8px;padding-top:8px}
 .paper .pb-t .big{font-weight:800;font-size:15px}
 .paper .pb-f{text-align:center;margin-top:10px;font-size:12px}
+/* order code printed on the bill so the customer only hands the paper over */
+.paper .pb-code{text-align:center;border:2px solid #111;border-radius:6px;padding:6px 4px;margin:8px 0}
+.paper .pb-code small{display:block;font-size:11px;letter-spacing:.1em}
+.paper .pb-code b{font-size:24px;letter-spacing:.18em}
 @media print{body{overflow:visible;background:#fff}body *{visibility:hidden}#billpaper,#billpaper *{visibility:visible}#billpaper{position:absolute;left:0;top:0;border:0;max-width:80mm}}

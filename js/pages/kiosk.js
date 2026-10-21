@@ -353,7 +353,8 @@
     if (!b) return '';
     const biz = b.business || {};
     return `<div class="paper" id="billpaper"><div class="pb-h"><b>${E(biz.name || '')}</b>${biz.phone ? '<br>' + E(biz.phone) : ''}<br><b>${E(b.title || 'Bill')}</b></div>${b.banner ? `<div class="pb-ban">${E(b.banner)}</div>` : ''}
-      <div class="pb-m">${(b.meta || []).map((m) => `<div><span>${E(m[0])}</span><span>${E(m[1])}</span></div>`).join('')}</div>
+      ${S.code && b.status !== 'PAID' ? `<div class="pb-code"><small>ORDER CODE</small><b>${E(S.code)}</b></div>` : ''}
+      <div class="pb-m">${(b.meta || []).map((m) => `<div><span>${E(m[0])}</span><span>${E(m[1])}</span></div>`).join('')}${S.order && S.order.orderType ? `<div><span>Order type</span><span>${S.order.orderType === 'DINE_IN' ? 'Dine in' : 'Take away'}</span></div>` : ''}</div>
       <div class="pb-l">${(b.lines || []).map((l) => `<div><span>${l.qty} × ${E(l.name)}</span><span>${money(l.total)}</span></div>`).join('')}</div>
       <div class="pb-t">${(b.totals || []).map((t) => `<div class="${t[2] ? 'big' : ''}"><span>${E(t[0])}</span><span>${E(t[1])}</span></div>`).join('')}</div><div class="pb-f">${E(b.footer || '')}</div></div>`;
   }
@@ -383,9 +384,9 @@
       h = `<div class="pcard"><div class="ico bad">${IC.cross}</div><h1>Order cancelled</h1><p class="lead">${E(o.message)}</p><div class="acts"><button class="btn" data-p="new">Start a new order</button></div>${cdLine}</div>`;
     } else if (stage === 'AWAITING_CASHIER') {
       if (!S.cashArm) { S.cashArm = true; armReset(60000); }
-      h = `<div class="pcard"><div class="ico warn">${IC.cash}</div><h1>Pay at the cashier</h1><p class="lead">Take your bill to the cashier and pay <b>${money(o.totals.total)}</b>. Your order goes to the kitchen as soon as you have paid.</p>
-        <div class="codebox">${E(o.code)}</div><p class="msg">Show this code or order ${E(o.orderNumber || '')} to the cashier.</p>${S.bill ? billHtml(S.bill) : itemsBlock(o)}
-        <div class="acts"><button class="btn alt" data-p="print">${IC.print} Print my bill</button>${S.ctx.options.mpesa ? '<button class="btn alt" data-p="mpesa">Pay with M-PESA instead</button>' : ''}<button class="btn red" data-p="cancel">Cancel order</button></div><p class="msg" id="rs"></p><div class="acts"><button class="btn" data-p="new">Done · next customer</button></div>${cdLine}</div>`;
+      h = `<div class="pcard"><div class="ico warn">${IC.cash}</div><h1>Pay at the cashier</h1><p class="lead">Print your bill, take it to the cashier and pay <b>${money(o.totals.total)}</b>. Your order goes to the kitchen as soon as you have paid.</p>
+        ${S.bill ? billHtml(S.bill) : itemsBlock(o)}<p class="msg">Your bill has everything the cashier needs. Just hand it over.</p>
+        <div class="acts"><button class="btn" data-p="print">${IC.print} Print my bill</button>${S.ctx.options.mpesa ? '<button class="btn alt" data-p="mpesa">Pay with M-PESA instead</button>' : ''}<button class="btn red" data-p="cancel">Cancel order</button></div><p class="msg" id="rs"></p><div class="acts"><button class="btn" data-p="new">Done · next customer</button></div>${cdLine}</div>`;
     } else {
       const failed = ['FAILED', 'CANCELLED', 'TIMEOUT'].includes(p.status) || p.retry || !p.status;
       if (failed) {
