@@ -299,7 +299,7 @@ async function call(path, method, body) {
   var j = await r.json().catch(function () { return {}; });
   if (!r.ok || j.success === false) {
     var er = new Error((j.errors && j.errors[0] && j.errors[0].message) || j.message || 'Something went wrong. Please try again.'); er.code = j.code || ('HTTP_' + r.status); er.status = r.status;
-    if (r.status === 401 && acct) { acct = null; ss('q.acct', null); }
+    if (r.status === 401 && er.code === 'GUEST_AUTH_REQUIRED' && acct) { acct = null; ss('q.acct', null); }   // only a real "session expired" answer signs the guest out
     throw er;
   }
   return j.data !== undefined ? j.data : j;
@@ -355,7 +355,7 @@ function needAuth(fn, why) {
   if (acct || !ctx.requireAccount) return fn();
   nav('auth', { after: fn, why: why || 'Sign in to place your order and track it.' });
 }
-async function loadHist(force) { if (!acct) { hist = null; return null; } try { hist = await call('/account/history'); } catch (e) { if (e.status === 401) acct = null; } return hist; }
+async function loadHist(force) { if (!acct) { hist = null; return null; } try { hist = await call('/account/history'); } catch (e) { if (e.code === 'GUEST_AUTH_REQUIRED') { acct = null; ss('q.acct', null); } } return hist; }
 
 /* ---------- boot ---------- */
 async function init() {
@@ -365,7 +365,7 @@ async function init() {
     var tc = ctx.store && ctx.store.themeColor; THEME = tc && tc.toLowerCase() !== '#0f766e' ? tc : '#F26A21';
     document.documentElement.style.setProperty('--o', THEME); $('#themeMeta').content = THEME; document.title = ctx.business.name;
     branchId = ctx.branches[0] && ctx.branches[0].id;
-    if (acct) { try { var m = await call('/account/me'); acct.account = m.account; ss('q.acct', acct); } catch (e) { if (e.status === 401 || e.status === 404) { acct = null; ss('q.acct', null); } } }
+    if (acct) { try { var m = await call('/account/me'); acct.account = m.account; ss('q.acct', acct); } catch (e) { if (e.code === 'GUEST_AUTH_REQUIRED') { acct = null; ss('q.acct', null); } } }
     if (acct) { DT.name = acct.account.name; DT.phone = acct.account.phone || ''; loadHist().then(function () { drawNav(); }); }
     try { setupInstall(); } catch (e) { /* install prompt is optional */ }
     var q = new URLSearchParams(location.search), t = q.get('track');
@@ -837,7 +837,10 @@ VIEWS.settings = function () {
   };
 };
 
-window.addEventListener('pageshow', function () { acct = sg('q.acct') || acct; });
+function syncAcct() { var a = sg('q.acct'); if (a && a.token && (!acct || acct.token !== a.token)) { acct = a; try { drawNav(); if (MAIN.indexOf(cur.v) >= 0) render(); } catch (e) { /* ignore */ } } }
+window.addEventListener('pageshow', syncAcct);
+window.addEventListener('storage', function (e) { if (e.key === 'q.acct') syncAcct(); });
+document.addEventListener('visibilitychange', function () { if (!document.hidden) syncAcct(); });
 init();
 })();
 </script>

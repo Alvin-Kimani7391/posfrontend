@@ -322,7 +322,7 @@ async function call(path, method, body) {
   try { r = await fetch(API + token + path + q, { method: method || 'GET', headers: Object.assign({ 'Content-Type': 'application/json' }, acct && acct.token ? { Authorization: 'Bearer ' + acct.token } : {}), body: body ? JSON.stringify(body) : undefined }); }
   catch (e) { var er = new Error('No connection. Please check your internet and try again.'); er.code = 'NETWORK'; throw er; }
   var j = await r.json().catch(function () { return {}; });
-  if (!r.ok || j.success === false) { var er2 = new Error(j.message || 'Something went wrong. Please try again.'); er2.code = j.code || ('HTTP_' + r.status); er2.status = r.status; throw er2; }
+  if (!r.ok || j.success === false) { var er2 = new Error((j.errors && j.errors[0] && j.errors[0].message && j.code === 'VALIDATION_ERROR' ? j.message + ': ' + j.errors[0].message : j.message) || 'Something went wrong. Please try again.'); er2.code = j.code || ('HTTP_' + r.status); er2.status = r.status; throw er2; }
   return j.data;
 }
 var tt;
@@ -638,7 +638,7 @@ async function chargeRoom(orderId, billId) {
 }
 async function openReceipt(ref) {
   sheet(shd('Receipt') + '<div class="bd"><div class="sk" style="height:260px"></div></div>');
-  try { var rc; if (acct) { try { rc = await call('/account/receipts/' + ref); } catch (x) { rc = null; } } if (!rc) rc = await call('/receipt/' + ref + (pin ? '?pin=' + encodeURIComponent(pin) : ''));
+  try { var rc; if (acct) { try { rc = await call('/account/receipts/' + ref); } catch (x) { rc = null; } } if (!rc && /^MPX-[A-F0-9]{12}$/.test(ref)) rc = await call('/receipt/' + ref + (pin ? '?pin=' + encodeURIComponent(pin) : '')); if (!rc) throw new Error('We could not open this receipt. Please sign in to your account and try again.');
     sheet(shd('Your receipt') + '<div class="bd" style="padding-top:14px">' + receiptHtml(rc) + '</div><div class="fx"><button class="btn alt sm" id="dl" style="flex:1">' + ic('download') + 'Download</button><button class="btn alt sm" id="pr" style="flex:1">' + ic('printer') + 'Print</button></div>', function (o) { $('#dl', o).onclick = function () { downloadReceipt(rc); }; $('#pr', o).onclick = function () { printReceipt(rc); }; });
   } catch (e) { closeSheet(); toast(e.message, true); }
 }
