@@ -19,12 +19,34 @@
   }
 
   async function requests(gb) {
-    const d = await get('/restaurant/guest/requests', { branchId: window.HX.branchId() }); const rows = list(d, 'requests');
-    gb.innerHTML = rows.length ? `<div class="hx-cols">${rows.map((r) => `<div class="hx-card"><div class="hx-row" style="padding-top:0"><div class="grow"><b>${E(r.kind === 'ROOM' ? 'Room ' + r.roomNumber : 'Table ' + r.tableName)}</b><small class="hx-sub">${mins(r.createdAt)} min ago${r.guest && r.guest.name ? ' · ' + E(r.guest.name) : ''}</small></div><span class="hx-money">${M(r.estimatedTotal)}</span></div>
+    const bid = window.HX.branchId();
+    const [d, od] = await Promise.all([get('/restaurant/guest/requests', { branchId: bid }), get('/restaurant/orders', { branchId: bid, status: 'OPEN', limit: 60 })]); const rows = list(d, 'requests');
+    const pending = rows.length ? `<div class="hx-cols">${rows.map((r) => `<div class="hx-card"><div class="hx-row" style="padding-top:0"><div class="grow"><b>${E(r.kind === 'ROOM' ? 'Room ' + r.roomNumber : 'Table ' + r.tableName)}</b><small class="hx-sub">${mins(r.createdAt)} min ago${r.guest && r.guest.name ? ' · ' + E(r.guest.name) : ''}</small></div><span class="hx-money">${M(r.estimatedTotal)}</span></div>
       ${(r.items || []).map((i) => `<div class="hx-row"><span class="grow"><b>${i.quantity}× ${E(i.name)}</b>${i.notes ? `<small class="hx-sub">${E(i.notes)}</small>` : ''}${i.allergyNotes ? `<small class="hx-sub" style="color:var(--color-danger)">Allergy: ${E(i.allergyNotes)}</small>` : ''}</span></div>`).join('')}
       ${r.notes ? `<p class="hx-sub">${E(r.notes)}</p>` : ''}${can('restaurant.guest.respond') ? `<div class="hx-actions" style="margin-top:var(--space-3)"><button class="btn btn-primary" data-ok="${r._id}">Accept and send</button><button class="btn btn-secondary" data-no="${r._id}">Decline</button></div>` : ''}</div>`).join('')}</div>` : window.HX.empty('No orders waiting', 'Guest orders that need your confirmation appear here.');
+    gb.innerHTML = `<div class="hx-section"><h2>To confirm${rows.length ? ' · ' + rows.length : ''}</h2>${pending}</div>` + tracking(list(od, 'orders'));
     gb.querySelectorAll('[data-ok]').forEach((b) => b.addEventListener('click', async () => { if (await send('post', `/restaurant/guest/requests/${b.dataset.ok}/accept`, { sendNow: true })) { window.UI.toast.success('Sent to the kitchen'); paint(); } }));
     gb.querySelectorAll('[data-no]').forEach((b) => b.addEventListener('click', async () => { const r = await window.HX.ask('Decline order', 'Reason shown to the guest', { required: false }); if (r === null) return; if (await send('post', `/restaurant/guest/requests/${b.dataset.no}/reject`, r ? { reason: r } : {})) paint(); }));
+  }
+
+  /* ---- Confirmed orders: follow each one through Confirmed > Cooking > Ready > Served ---- */
+  const STAGES = ['Confirmed', 'Cooking', 'Ready', 'Served'];
+  const STAGE_OF = { DRAFT: 0, HELD: 0, PENDING: 0, ACCEPTED: 0, PREPARING: 1, READY: 2, SERVED: 3 };
+  const guestSource = (o) => /guest|qr|self|room|scan/i.test(String(o.source || o.channel || o.origin || o.createdVia || ''));
+  function tracking(all) {
+    const flagged = all.some((o) => o.source || o.channel || o.origin || o.createdVia);
+    const orders = all.filter((o) => (flagged ? guestSource(o) : o.orderType === 'DINE_IN' || o.roomNumber) && (o.items || []).some((i) => i.status !== 'CANCELLED'))
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    const body = orders.length ? `<div class="hx-trk">${orders.map((o) => {
+      const items = (o.items || []).filter((i) => i.status !== 'CANCELLED'), idx = items.map((i) => (STAGE_OF[i.status] == null ? 0 : STAGE_OF[i.status]));
+      const stage = Math.min(...idx), counts = STAGES.map((_, k) => idx.filter((x) => x === k).length);
+      const where = o.roomNumber ? 'Room ' + o.roomNumber : o.tableName ? 'Table ' + o.tableName : (o.orderType || '').replace('_', ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
+      const done = stage === 3, late = mins(o.createdAt) > 45 && !done;
+      return `<div class="hx-card hx-trk-card ${done ? 'is-done' : ''}"><div class="hx-row" style="padding-top:0"><div class="grow"><b>${E(where)} · ${E(o.orderNumber || '')}</b><small class="hx-sub">${mins(o.createdAt)} min ago${o.customerName ? ' · ' + E(o.customerName) : ''}</small></div>${pill(STAGES[stage], done ? 'ok' : stage === 2 ? 'ok' : stage === 1 ? 'busy' : 'plan')}${late ? pill('Slow', 'bad') : ''}</div>
+        <ol class="hx-steps" aria-label="Order progress">${STAGES.map((l, k) => `<li class="${k < stage ? 'done' : k === stage ? 'now' : ''}"><i></i><span>${l}</span>${counts[k] ? `<em>${counts[k]}</em>` : ''}</li>`).join('')}</ol>
+        <div class="hx-trk-items">${items.map((i) => `<span class="hx-trk-it s${STAGE_OF[i.status] == null ? 0 : STAGE_OF[i.status]}">${i.quantity}× ${E(i.name)} <em>${STAGES[STAGE_OF[i.status] == null ? 0 : STAGE_OF[i.status]]}</em></span>`).join('')}</div></div>`;
+    }).join('')}</div>` : window.HX.empty('No confirmed orders yet', 'Orders you accept show up here so you can follow them until they are served.');
+    return `<div class="hx-section"><h2>Confirmed orders · tracking${orders.length ? ' · ' + orders.length : ''}</h2>${body}</div>`;
   }
 
   async function calls(gb) {

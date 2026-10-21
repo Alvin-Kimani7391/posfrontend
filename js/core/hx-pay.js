@@ -103,9 +103,12 @@
   HX.receipt = receipt;
 
   /* ---- the payment dialog ---- */
+  const PAYLOAD = () => `<div class="hx-pay-loading" aria-busy="true">${HX.skel('rows', 3)}</div>`;
   async function openPay(o) {
-    const ep = (o.kind === 'stay' ? EP.stay : EP.bill)(o.id);
-    const ctx = await payCtx(ep.mod, true);
+    const mkEp = (id) => (o.kind === 'stay' ? EP.stay : EP.bill)(id);
+    let ep = mkEp(o.id);
+    const hit = ctxCache[ep.mod + HX.branchId()];
+    let ctx = hit && Date.now() - hit.t < 60000 ? hit.d : null;   // recent details: no waiting at all
     const S = { method: 'CASH', due: round2(num(o.due)), payKind: 'PAYMENT', busy: false, alive: true, key: window.Api.newIdempotencyKey(), paidSoFar: 0, amount: 0 };
     const methods = () => { const f = ctx.flags || {}, a = ['CASH']; if (f.mpesaStk) a.push('MPESA_STK'); if (f.mpesaTill) a.push('MPESA_TILL'); a.push('MOBILE_MONEY', 'CARD', 'BANK'); return a; };
     const needsShift = () => ctx.requireShift && !ctx.shift;
@@ -125,7 +128,21 @@
       <div class="hx-methods">${methods().map((x) => `<button type="button" class="hx-method${x === S.method ? ' on' : ''}" data-m="${x}"><b>${METHOD_META[x].label}</b><small>${METHOD_META[x].hint}</small></button>`).join('')}</div>
       ${!(ctx.flags && (ctx.flags.mpesaStk || ctx.flags.mpesaTill)) && window.Permissions.can(HX.user(), 'settings.update') ? '<p class="hx-sub hx-hintline">Tip: switch on M-PESA STK push or a Till under <a href="settings.html">Settings → Integrations</a> and it appears here.</p>' : ''}
       <div id="shift"></div><div class="hx-form"><div class="field"><label>Amount to pay now</label><input class="input hx-big" id="amt" type="number" step="0.01" min="0" inputmode="decimal" value="${S.due}"></div><div id="panel"></div></div>`;
-    return modal({ title: o.title || 'Take payment', maxWidth: '500px', cls: 'hx-modal-pay', body: body(), footer: '<button class="btn btn-secondary" data-c>Cancel</button><button class="btn btn-primary" id="go">Confirm payment</button>', onMount: mount });
+    const ready = !!ctx && !o.pending;
+    return modal({ title: o.title || 'Take payment', maxWidth: '500px', cls: 'hx-modal-pay', body: ready ? body() : PAYLOAD(), footer: '<button class="btn btn-secondary" data-c>Cancel</button><button class="btn btn-primary" id="go"' + (ready ? '' : ' disabled') + '>Confirm payment</button>',
+      onMount(el, close) {
+        if (ready) return mount(el, close);
+        el.querySelector('[data-c]').addEventListener('click', close);
+        Promise.all([ctx || payCtx(ep.mod, true), o.pending || null]).then(([c, info]) => {
+          if (!el.isConnected) { if (o.onClose) o.onClose(); return; }
+          if (o.pending && (!info || typeof info !== 'object')) { close(); return; }
+          ctx = c; if (info) { Object.assign(o, info); S.due = round2(num(o.due)); if (info.id) ep = mkEp(info.id); }
+          const h = el.querySelector('.modal-header h3'); if (h) h.textContent = o.title || 'Take payment';
+          el.querySelector('.modal-body').innerHTML = body();
+          const cancel = el.querySelector('[data-c]'); cancel.replaceWith(cancel.cloneNode(true));   // mount() binds its own handler
+          mount(el, close);
+        }).catch(() => close());
+      } });
 
     function mount(el, close) {
       const $ = (s) => el.querySelector(s); S.amount = S.due;
@@ -254,12 +271,44 @@
   /* ---- bill preview ---- */
   const BILL_TONE = { OPEN: 'warn', PARTIAL: 'busy', PAID: 'ok', VOID: 'mute', WRITTEN_OFF: 'mute' };
   const dueOf = (b) => (b.balance != null ? b.balance : Math.max(0, (b.total || 0) - (b.paid || 0)));
-  async function openBill(id, opts = {}) {
-    const [d, ctx] = await Promise.all([get('/restaurant/bills/' + id), payCtx('restaurant')]); if (!d) { toast().error('Could not open that bill'); return null; }
-    let bill = unwrap(d, 'bill'), sale = d.sale || (d.data && d.data.sale) || null;
+  /** "Pay" / "Bill & pay": ONLY the payment dialog opens (never the bill preview behind it). */
+  function payOnly(idP, opts) {
+    let bill = null, sale = null, id = null;
+    const pending = (async () => {
+      id = await idP;
+      if (id && id.choose) { setTimeout(() => chooser(id.choose, opts), 0); return false; }
+      if (!id) return false;
+      const d = await get('/restaurant/bills/' + id);
+      if (!d) { toast().error('Could not open that bill'); return false; }
+      bill = unwrap(d, 'bill'); sale = d.sale || (d.data && d.data.sale) || null;
+      if (!((bill.status === 'OPEN' || bill.status === 'PARTIAL') && can('restaurant.bills.pay') && dueOf(bill) > 0)) {
+        setTimeout(() => openBill(id, { ...opts, autoPay: false }), 0); return false;   // nothing to pay: show the bill instead
+      }
+      return { id, title: `Pay ${bill.billNumber}`, reference: `${bill.tableName ? 'Table ' + bill.tableName : (bill.orderType || '').replace('_', ' ').toLowerCase()} · ${bill.billNumber}`, due: dueOf(bill), phone: opts.phone };
+    })();
+    return openPay({ kind: 'bill', id: typeof idP === 'string' ? idP : '', title: 'Take payment', pending,
+      onPaid: async (r, p, info) => {
+        const [rr, ctx] = await Promise.all([get('/restaurant/bills/' + id), payCtx('restaurant')]);
+        if (rr) { bill = unwrap(rr, 'bill'); sale = rr.sale || (rr.data && rr.data.sale) || null; }
+        if (opts.onChange) opts.onChange(bill);
+        if (!info.partial && bill && bill.status === 'PAID') receipt.show(billDoc(bill, ctx, sale), { title: 'Payment receipt' });
+      } });
+  }
+  async function openBill(idP, opts = {}) {
+    if (opts.autoPay) return payOnly(idP, opts);
+    let el = null, bill = null, sale = null, ctx = null, id = null;
+    // The dialog is on screen the moment the button is tapped; the bill fills in when it arrives.
+    const mm = modal({ title: 'Bill', maxWidth: '560px', cls: 'hx-modal-bill', body: `<div class="hx-billbody">${HX.skel('rows', 4)}</div>`, footer: '<div class="hx-foot"></div>', onMount: (m) => { el = m; } });
+    id = await idP;
+    if (!el || !el.isConnected) return null;
+    if (id && id.choose) { mm.close(); return chooser(id.choose, opts); }
+    if (!id) { mm.close(); return null; }
+    const [d, c] = await Promise.all([get('/restaurant/bills/' + id), payCtx('restaurant')]);
+    if (!el.isConnected) return null;
+    if (!d) { mm.close(); toast().error('Could not open that bill'); return null; }
+    ctx = c; bill = unwrap(d, 'bill'); sale = d.sale || (d.data && d.data.sale) || null;
+    el.querySelector('.modal-header h3').textContent = `Bill ${bill.billNumber}`;
     const reload = async () => { const r = await get('/restaurant/bills/' + id); if (r) { bill = unwrap(r, 'bill'); sale = r.sale || (r.data && r.data.sale) || null; } if (opts.onChange) opts.onChange(bill); paint(); };
-    let el = null;
-    const mm = modal({ title: `Bill ${bill.billNumber}`, maxWidth: '560px', cls: 'hx-modal-bill', body: '<div class="hx-billbody"></div>', footer: '<div class="hx-foot"></div>', onMount: (m) => { el = m; setTimeout(() => { paint(); if (opts.autoPay && payable()) setTimeout(takePayment, 150); }, 0); } });
     function payable() { return (bill.status === 'OPEN' || bill.status === 'PARTIAL') && can('restaurant.bills.pay') && dueOf(bill) > 0; }
     function paint() {
       if (!el || !el.isConnected) return;
@@ -282,15 +331,22 @@
     const tip = () => F({ title: 'Add a tip', maxWidth: '400px', fields: [{ name: 'amount', label: 'Tip amount', type: 'number', min: 0, step: '0.01', required: true }, { name: 'method', label: 'Paid by', type: 'select', options: ['CASH', 'MPESA', 'CARD', 'MOBILE_MONEY', 'BANK'].map((x) => [x, HX.payLabel(x)]) }, { name: 'reference', label: 'Reference (optional)' }], onSubmit: async (v) => { if (await HX.send('post', `/restaurant/bills/${bill._id}/tips`, v)) { toast().success('Tip recorded'); reload(); return true; } return false; } });
     const refund = () => F({ title: 'Refund', maxWidth: '400px', fields: [{ name: 'amount', label: 'Amount', type: 'number', value: bill.paid, step: '0.01', required: true }, { name: 'method', label: 'Refund by', type: 'select', options: ['CASH', 'MPESA', 'CARD', 'BANK'].map((x) => [x, HX.payLabel(x)]) }, { name: 'reason', label: 'Reason', required: true }], onSubmit: async (v) => { if (await HX.send('post', `/restaurant/bills/${bill._id}/refund`, v)) { reload(); return true; } return false; } });
     const voidIt = async () => { const r = await HX.ask('Void this bill', 'Reason'); if (r && await HX.send('post', `/restaurant/bills/${bill._id}/void`, { reason: r })) reload(); };
+    paint();
     return { close: () => mm.close(), reload };
   }
-  async function forOrder(orderId, opts = {}) {
-    try { await window.Api.post(`/restaurant/orders/${orderId}/bills`, {}); } catch (e) { /* use existing bills */ }
-    const l = await get('/restaurant/bills', { orderId, limit: 20 }); const bills = list(l, 'bills').filter((b) => b.status === 'OPEN' || b.status === 'PARTIAL');
-    if (!bills.length) { toast().error('Nothing to bill yet. Send some items to the kitchen first.'); return null; }
-    if (bills.length === 1) return openBill(bills[0]._id, { ...opts, orderId, autoPay: !!opts.pay });
+  function chooser(bills, opts) {
     return modal({ title: 'Choose a bill', maxWidth: '440px', body: `<div class="hx-card flush">${bills.map((b) => `<button type="button" class="hx-row hx-pickrow" data-b="${b._id}"><div class="grow"><b>${E(b.billNumber)}${b.label ? ' · ' + E(b.label) : ''}</b></div><span class="hx-money">${M(dueOf(b))}</span></button>`).join('')}</div>`,
-      onMount(el, close) { el.querySelectorAll('[data-b]').forEach((x) => x.addEventListener('click', () => { close(); openBill(x.dataset.b, { ...opts, orderId, autoPay: !!opts.pay }); })); } });
+      onMount(el, close) { el.querySelectorAll('[data-b]').forEach((x) => x.addEventListener('click', () => { close(); openBill(x.dataset.b, { ...opts }); })); } });
+  }
+  /** Bill (or Bill & pay) for an order. The dialog opens straight away; creating/finding the bill happens behind the placeholder. */
+  function forOrder(orderId, opts = {}) {
+    const idP = (async () => {
+      try { await window.Api.post(`/restaurant/orders/${orderId}/bills`, {}); } catch (e) { /* use existing bills */ }
+      const l = await get('/restaurant/bills', { orderId, limit: 20 }); const bills = list(l, 'bills').filter((b) => b.status === 'OPEN' || b.status === 'PARTIAL');
+      if (!bills.length) { toast().error('Nothing to bill yet. Send some items to the kitchen first.'); return null; }
+      return bills.length === 1 ? bills[0]._id : { choose: bills };
+    })();
+    return openBill(idP, { ...opts, orderId, autoPay: !!opts.pay });
   }
   HX.bill = { open: openBill, forOrder };
 

@@ -18,9 +18,9 @@
   }
 
   function shell() {
-    el.innerHTML = head('Kitchen & bar', 'Oldest tickets first. Tap the button on a ticket to move it along.',
+    el.innerHTML = head('Kitchen & bar', 'Each stage has its own column, oldest tickets first. Tap the button on a ticket to move it along.',
       `<button class="btn btn-secondary" id="snd">Sound on</button><button class="btn btn-secondary" id="full">Full screen</button><span class="hx-live">Live</span>`) +
-      `<div id="kst" class="hx-kstats"></div><div id="stn"></div><div class="hx-kds" id="kds"></div>`;
+      `<div id="kst" class="hx-kstats"></div><div id="stn"></div><div class="hx-kds hx-kcols" id="kds"></div>`;
     el.querySelector('#snd').addEventListener('click', (e) => { sound = !sound; e.target.textContent = sound ? 'Sound on' : 'Sound off'; });
     el.querySelector('#full').addEventListener('click', () => { const k = el.querySelector('#kds'); k.classList.toggle('full'); document.body.style.overflow = k.classList.contains('full') ? 'hidden' : ''; });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { el.querySelector('#kds')?.classList.remove('full'); document.body.style.overflow = ''; } });
@@ -46,8 +46,14 @@
     const chips = [['NEW', 'New order', '#64748b', 'bellRing'], ['COOK', 'In kitchen', '#f5a524', 'flame'], ['LATE', 'Delayed', '#ef3b3b', 'clock'], ['READY', 'Ready', '#22a447', 'check']];
     el.querySelector('#kst').innerHTML = chips.map(([k, l, c, ic]) => `<button type="button" class="hx-kstat" style="--c:${c};cursor:pointer;${flt === k ? `outline:3px solid ${c}55` : ''}" data-f="${k}"><i>${icon(ic)}</i>${l}<b>${String(cnt(k)).padStart(2, '0')}</b></button>`).join('');
     el.querySelectorAll('[data-f]').forEach((b) => b.addEventListener('click', () => { flt = flt === b.dataset.f ? '' : b.dataset.f; paint(); }));
-    const shown = tickets.filter((t) => !flt || stOf(t) === flt).sort((a, b) => (a.status === 'READY') - (b.status === 'READY') || new Date(a.receivedAt || 0) - new Date(b.receivedAt || 0));
-    el.querySelector('#kds').innerHTML = shown.map(card).join('') || `<div class="hx-empty-kds">${window.HX.empty('No tickets', flt ? 'Nothing in this state right now.' : 'New orders from the floor appear here.')}</div>`;
+    // One column per stage, so a new order lands in "New order", then moves to "In kitchen", "Delayed" or "Ready" by itself.
+    const oldest = (x, y) => new Date(x.receivedAt || 0) - new Date(y.receivedAt || 0);
+    const cols = chips.filter(([k]) => !flt || k === flt);
+    const klass = { NEW: 's-new', COOK: 's-cook', LATE: 's-late', READY: 's-ready' };
+    el.querySelector('#kds').innerHTML = tickets.length || flt ? cols.map(([k, l, c, ic]) => {
+      const rows = tickets.filter((t) => stOf(t) === k).sort(oldest);
+      return `<section class="hx-kcol ${klass[k]}" style="--c:${c}" aria-label="${l}"><header><i>${icon(ic)}</i><b>${l}</b><span class="n">${rows.length}</span></header><div class="hx-kcol-body">${rows.map(card).join('') || `<div class="hx-kcol-empty">${k === 'NEW' ? 'New orders appear here' : k === 'LATE' ? 'Nothing is late' : 'Nothing here'}</div>`}</div></section>`;
+    }).join('') : `<div class="hx-empty-kds" style="grid-column:1/-1">${window.HX.empty('No tickets', 'New orders from the floor appear here.')}</div>`;
     el.querySelectorAll('[data-bump]').forEach((b) => b.addEventListener('click', () => bump(b.dataset.bump, b.dataset.to)));
     el.querySelectorAll('[data-expo]').forEach((b) => b.addEventListener('click', async () => { if (await send('post', `/restaurant/kitchen/tickets/${b.dataset.expo}/expo`, {})) load(); }));
     el.querySelectorAll('[data-urgent]').forEach((b) => b.addEventListener('click', async () => { if (await send('post', `/restaurant/kitchen/tickets/${b.dataset.urgent}/priority`, { priority: b.dataset.p })) load(); }));

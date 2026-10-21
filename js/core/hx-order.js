@@ -12,30 +12,39 @@
     const k = branchId + orderType, c = menuCache[k]; if (c && Date.now() - c.t < 120000) return c.d;
     const d = (await get('/restaurant/menu', { branchId, orderType })) || { categories: [] }; menuCache[k] = { t: Date.now(), d }; return d;
   }
+  const LOADING = () => `<div class="hx-ow-loading" aria-busy="true">${HX.skel('rows', 5)}</div>`;
   async function open(id, opts = {}) {
-    const [od, warm] = await Promise.all([get('/restaurant/orders/' + id), loadMenu(HX.branchId(), 'DINE_IN').catch(() => null)]); if (!od) { window.UI.toast.error('Could not open that order'); return null; }
+    // The dialog appears on the tap (with a placeholder); the order and menu fill it in as soon as they arrive.
+    const early = HX.modal({ title: 'Loading order…', maxWidth: '1120px', cls: 'hx-modal-order', body: LOADING() });
+    const gone = () => !early.el || !early.el.isConnected;
+    const [od, warm] = await Promise.all([get('/restaurant/orders/' + id), loadMenu(HX.branchId(), 'DINE_IN').catch(() => null)]);
+    if (gone()) return null;
+    if (!od) { early.close(); window.UI.toast.error('Could not open that order'); return null; }
     let order = unwrap(od, 'order'); const type = order.orderType || 'DINE_IN';
     const menu = (type === 'DINE_IN' && (!order.branchId || String(order.branchId) === String(HX.branchId())) && warm) ? warm : await loadMenu(order.branchId || HX.branchId(), type);
+    if (gone()) return null;
     let draft = [], cat = 0, q = '', root = null, timer = null, busy = false;
     const title = `${order.tableName ? 'Table ' + order.tableName : (order.orderType || '').replace('_', ' ')} · ${order.orderNumber}`;
     const modalAbove = () => { const all = document.querySelectorAll('.modal-backdrop'); return all.length && all[all.length - 1] !== root.closest('.modal-backdrop'); };
     const $ = (s) => root.querySelector(s);
     const live = () => (order.items || []).filter((i) => i.status !== 'CANCELLED');
     const lineTotal = (i) => (i.unitPrice || 0) * (i.quantity || 1);
-    const m = HX.modal({ title, maxWidth: '1120px', cls: 'hx-modal-order',
-      body: '<div class="hx-ow"><div class="hx-order-menu"><div class="hx-owbar"></div><div class="hx-recent" id="ow-recent"></div><div class="hx-cats" id="ow-cats"></div><div class="hx-dishes" id="ow-dishes"></div></div><aside class="hx-cart" id="ow-cart"></aside></div>',
-      onMount(el) {
-        root = el; paintBar(); paintMenu(); paintCart(); paintRecent();
-        timer = setInterval(() => { if (!root.isConnected) { clearInterval(timer); return; } if (!document.hidden && !busy && !modalAbove()) refresh(); }, 15000);
-        const obs = new MutationObserver(() => { if (!root.isConnected) { obs.disconnect(); clearInterval(timer); if (opts.onClose) opts.onClose(); } });
-        obs.observe(document.body, { childList: true });
-      } });
+    const m = early; root = early.el;
+    root.querySelector('.modal-header h3').textContent = title;
+    root.querySelector('.modal-body').innerHTML = '<div class="hx-ow"><div class="hx-order-menu"><div class="hx-owbar"></div><div class="hx-recent" id="ow-recent"></div><div class="hx-cats" id="ow-cats"></div><div class="hx-dishes" id="ow-dishes"></div></div><aside class="hx-cart" id="ow-cart"></aside></div>';
+    paintBar(); paintMenu(); paintCart(); paintRecent();
+    timer = setInterval(() => { if (!root.isConnected) { clearInterval(timer); return; } if (!document.hidden && !busy && !modalAbove()) refresh(); }, 15000);
+    const obs = new MutationObserver(() => { if (!root.isConnected) { obs.disconnect(); clearInterval(timer); if (opts.onClose) opts.onClose(); } });
+    obs.observe(document.body, { childList: true });
     async function refresh() { const r = await get('/restaurant/orders/' + order._id); if (r && root.isConnected) { order = unwrap(r, 'order'); paintBar(); paintCart(); if (opts.onChange) opts.onChange(order); } }
     const act = (path, body) => send('post', '/restaurant/orders/' + order._id + path, body);
     function paintBar() {
-      const d = order.delivery || {};
-      $('.hx-owbar').innerHTML = `<div class="hx-owmeta"><span>${order.guestCount || 0} guests${order.waiterName ? ' · ' + E(order.waiterName) : ''}</span>${order.customerName ? `<span>${E(order.customerName)}${order.customerPhone ? ' · ' + E(order.customerPhone) : ''}</span>` : ''}${d.address ? `<span>📍 ${E(d.address)}</span>` : ''}</div><input class="input" id="ow-q" placeholder="Search dishes" value="${E(q)}">`;
-      $('#ow-q').addEventListener('input', window.UI.debounce((e) => { q = e.target.value; paintMenu(); }, 200));
+      const d = order.delivery || {}, bar = $('.hx-owbar');
+      if (!$('#ow-q')) {
+        bar.innerHTML = `<div class="hx-owmeta"></div><input class="input" id="ow-q" placeholder="Search dishes" value="${E(q)}" autocomplete="off">`;
+        $('#ow-q').addEventListener('input', window.UI.debounce((e) => { q = e.target.value; paintMenu(); }, 150));
+      }
+      $('.hx-owmeta').innerHTML = `<span>${order.guestCount || 0} guests${order.waiterName ? ' · ' + E(order.waiterName) : ''}</span>${order.customerName ? `<span>${E(order.customerName)}${order.customerPhone ? ' · ' + E(order.customerPhone) : ''}</span>` : ''}${d.address ? `<span>📍 ${E(d.address)}</span>` : ''}`;
     }
     function allItems() { return (menu.categories || []).flatMap((c) => c.items.map((i) => Object.assign(i, { _cat: c.name }))); }
     function inDraft(id) { return draft.filter((d) => d.menuItemId === id).reduce((n, d) => n + d.quantity, 0); }

@@ -2,7 +2,7 @@
    HX PRO - restaurant + accommodation POS look. Loads LAST (after hx-redesign.css).
    Black icon rail, white cards, bright status colours, big touch targets.
    ========================================================================== */
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+/* Plus Jakarta Sans is loaded with a non-blocking <link> in each page (was a render-blocking @import). */
 
 body[data-page^="hx-"] {
   --px-font: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -58,7 +58,7 @@ body[data-page^="hx-"] :focus-visible { outline: 3px solid rgba(21,112,239,.45);
   body[data-page^="hx-"] .bottom-nav { background: #0a0a0b; border-top: 0; }
   body[data-page^="hx-"] .bottom-nav-item { color: #9aa0ab; font-weight: 600; } body[data-page^="hx-"] .bottom-nav-item.active { color: #ffb020; }
 }
-body[data-page^="hx-"] .topbar { height: 64px; background: rgba(255,255,255,.92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--px-line); }
+body[data-page^="hx-"] .topbar { height: 64px; background: rgba(255,255,255,.92); border-bottom: 1px solid var(--px-line); }
 body[data-page^="hx-"] .topbar-title { font-size: 1.05rem; font-weight: 800; letter-spacing: -.01em; }
 body[data-page^="hx-"] .branch-switcher { border-radius: 12px; font-weight: 600; }
 

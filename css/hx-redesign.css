@@ -93,7 +93,7 @@ body[data-page^="hx-"] .main, body[data-page^="hx-"] main { background: #f6f7f9;
 .modal-body { padding: 20px; }
 .modal-footer { padding: 14px 20px; gap: 10px; z-index: 2; }
 .modal-footer .btn { min-height: 44px; }
-.modal-backdrop { backdrop-filter: blur(2px); }
+.modal-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
 /* setup / service cards */
 .hx-station, .hx-svc-row, .hx-tile { border-radius: var(--hx-radius); box-shadow: var(--hx-shadow); border: 1px solid var(--hx-line); }

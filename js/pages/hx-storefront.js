@@ -18,9 +18,11 @@
     const [s, q, b] = await Promise.all([get('/restaurant/settings'), get('/restaurant/storefront/qr'), get('/branches', { limit: 100 })]);
     st = (s && (s.settings || s).storefront) || {}; qrInfo = q; branches = list(b, 'branches').filter((x) => x.status !== 'inactive');
   }
-  const chk = (id, label, on) => `<label class="hx-check"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> <span>${E(label)}</span></label>`;
-  const num = (id, label, val, extra = '') => `<label>${E(label)}<input type="number" id="${id}" value="${E(val)}" min="0" step="any" ${extra}></label>`;
-  const txt = (id, label, val, ph = '') => `<label>${E(label)}<input type="text" id="${id}" value="${E(val)}" placeholder="${E(ph)}"></label>`;
+  const chk = (id, label, on, hint = '') => `<label class="sf-toggle"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span class="sf-sw" aria-hidden="true"></span><span class="sf-tt">${E(label)}${hint ? `<small>${E(hint)}</small>` : ''}</span></label>`;
+  const fld = (id, label, control, hint = '') => `<div class="field"><label for="${id}">${E(label)}</label>${control}${hint ? `<small class="hx-sub">${E(hint)}</small>` : ''}</div>`;
+  const num = (id, label, val, hint = '') => fld(id, label, `<input class="input" type="number" id="${id}" value="${E(val)}" min="0" step="any" inputmode="decimal">`, hint);
+  const txt = (id, label, val, ph = '') => fld(id, label, `<input class="input" type="text" id="${id}" value="${E(val)}" placeholder="${E(ph)}">`);
+  const sec = (ic, title, sub, body, tone = 'blue') => `<section class="sf-card sf-${tone}"><header><span class="sf-ic">${window.HX.icon(ic)}</span><div><h3>${E(title)}</h3>${sub ? `<p>${sub}</p>` : ''}</div></header><div class="sf-body">${body}</div></section>`;
   function paint() {
     const d = st.delivery || {}, t = st.tables || {};
     const loc = (id) => (st.branchLocations || []).find((x) => String(x.branchId) === String(id)) || {};
@@ -28,23 +30,26 @@
     const tk = qrInfo && (qrInfo.token || String(qrInfo.url || '').split(/\/(?:q|s)\//)[1] || '');
     const url = tk ? location.origin + '/store.html?t=' + encodeURIComponent(tk) : '';
     el.innerHTML = head('Online storefront', 'One QR code for delivery, table reservations and room booking.', '<button class="btn btn-primary" id="save">Save settings</button>') + `
-    <div class="hx-card"><h3>Your storefront QR</h3>
-      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center"><div id="qr" style="background:#fff;padding:10px;border-radius:10px"></div>
-      <div style="flex:1;min-width:240px"><p style="word-break:break-all"><a href="${E(url)}" target="_blank" rel="noopener">${E(url || 'Save and enable the storefront to get your link')}</a></p>
-      <p class="hx-sub">Print this on menus, receipts, posters and your door. Customers scan it, install the app, then order, reserve and book.</p>
-      <div class="hx-actions"><button class="btn btn-secondary" id="cp">Copy link</button><button class="btn btn-secondary" id="pr">Print</button><button class="btn btn-secondary" id="rot">Replace QR (old prints stop working)</button></div></div></div></div>
-    <div class="hx-card"><h3>General</h3>${chk('en', 'Storefront is switched on', st.enabled)}${txt('tg', 'Tagline', v(st, 'tagline'), 'Fresh food, delivered')}${txt('wm', 'Welcome message', v(st, 'welcomeMessage'))}<label>Brand colour<input type="color" id="co" value="${E(v(st, 'themeColor', '#0f766e'))}"></label></div>
-    <div class="hx-card"><h3>Delivery</h3>${chk('de', 'Offer delivery', d.enabled !== false)}${chk('dp', 'Pause delivery now (we are too busy)', d.paused)}
-      <label>New delivery orders<select id="dm"><option value="AUTO" ${d.mode !== 'CONFIRM' ? 'selected' : ''}>Go straight to the kitchen</option><option value="CONFIRM" ${d.mode === 'CONFIRM' ? 'selected' : ''}>Wait for staff to confirm and send</option></select></label>
-      <div class="hx-cols">${num('bf', 'Base delivery fee (KSh)', kes(d.baseFeeCents))}${num('pk', 'Extra fee per km (KSh)', kes(d.perKmCents))}${num('mo', 'Minimum order (KSh)', kes(d.minOrderCents))}${num('mr', 'Max distance (km, 0 = no limit)', v(d, 'maxRadiusKm', 0))}</div>
-      <div class="hx-cols">${num('mk', 'Minutes per km', v(d, 'minutesPerKm', 3))}${num('bm', 'Extra buffer minutes', v(d, 'bufferMinutes', 10))}${txt('hs', 'Delivery from (HH:MM)', v(d, 'hoursStart'), '08:00')}${txt('he', 'Delivery until (HH:MM)', v(d, 'hoursEnd'), '22:00')}</div></div>
-    <div class="hx-card"><h3>Branch locations</h3><p class="hx-sub">Where each branch cooks from. Delivery distance, fee and range are measured from here. Stand at the branch and press the button.</p>
-      ${branches.map((b) => { const l = loc(b._id); return `<div class="hx-row" data-b="${b._id}"><div class="grow"><b>${E(b.name)}</b></div><input type="number" step="any" class="la" placeholder="Latitude" value="${E(l.lat ?? '')}" style="width:120px"><input type="number" step="any" class="ln" placeholder="Longitude" value="${E(l.lng ?? '')}" style="width:120px"><button class="btn btn-secondary btn-sm here">Use my location</button><a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${E(l.lat ?? '')},${E(l.lng ?? '')}">View on Google Maps</a></div>`; }).join('') || '<p class="hx-sub">No branches found.</p>'}</div>
-    <div class="hx-card"><h3>Table reservations</h3>${chk('te', 'Let customers see free tables and reserve', t.enabled !== false)}
-      <div class="hx-cols">${txt('ot', 'Bookings from (HH:MM)', v(t, 'openTime', '10:00'))}${txt('ct', 'Last booking until (HH:MM)', v(t, 'closeTime', '22:00'))}${num('sm', 'Time slot every (minutes)', v(t, 'slotMinutes', 30))}${num('ml', 'Book at least (minutes ahead)', v(t, 'minLeadMinutes', 30))}${num('ma', 'Up to (days ahead)', v(t, 'maxAdvanceDays', 30))}</div>
-      <p class="hx-sub">The table deposit is set in <a href="hx-settings.html">Settings → Restaurant → Reservations</a>.</p></div>
-    <div class="hx-card"><h3>Rooms</h3>${chk('re', 'Let customers see free rooms and book', v(st, 'rooms.enabled', true) !== false)}<p class="hx-sub">The room deposit is set in <a href="hx-settings.html">Settings → Rooms → Deposit</a>. Online bookings appear in Front desk and Stays.</p></div>
-    <div class="hx-card"><h3>Where it shows up</h3><p class="hx-sub"><b>Delivery orders</b> → Delivery &amp; pickup (name, phone, address, Google Maps link, ETA). <b>Table bookings</b> and pre-orders → Reservations. <b>Room bookings</b> and deposits → Front desk. Managers, cashiers and waiters get a notification for each one.</p></div>`;
+    <div class="sf-page">
+    <section class="sf-hero">
+      <div class="sf-qr"><div id="qr" class="sf-qrbox"></div></div>
+      <div class="sf-herotxt">
+        <h2>Your storefront QR</h2>
+        <p class="sf-link">${url ? `<a href="${E(url)}" target="_blank" rel="noopener">${E(url)}</a>` : 'Switch the storefront on and save to get your link.'}</p>
+        <p class="hx-sub">Print this on menus, receipts, posters and your door. Customers scan it, install the app, then order, reserve and book.</p>
+        <div class="hx-actions"><button class="btn btn-secondary" id="cp">Copy link</button><button class="btn btn-secondary" id="pr">Print</button><button class="btn btn-secondary" id="rot">Replace QR</button></div>
+        <small class="hx-sub">Replacing the QR makes every printed copy stop working.</small>
+      </div>
+    </section>
+    <div class="sf-grid">
+      ${sec('store', 'General', 'What customers see first.', chk('en', 'Storefront is switched on', st.enabled) + `<div class="sf-two">${txt('tg', 'Tagline', v(st, 'tagline'), 'Fresh food, delivered')}${txt('wm', 'Welcome message', v(st, 'welcomeMessage'))}</div>` + fld('co', 'Brand colour', `<input class="sf-color" type="color" id="co" value="${E(v(st, 'themeColor', '#0f766e'))}">`))}
+      ${sec('bike', 'Delivery', 'Fees, range and how new orders are handled.', chk('de', 'Offer delivery', d.enabled !== false) + chk('dp', 'Pause delivery now', d.paused, 'Use this when the kitchen is too busy.') + fld('dm', 'New delivery orders', `<select class="select" id="dm"><option value="AUTO" ${d.mode !== 'CONFIRM' ? 'selected' : ''}>Go straight to the kitchen</option><option value="CONFIRM" ${d.mode === 'CONFIRM' ? 'selected' : ''}>Wait for staff to confirm and send</option></select>`) + `<div class="sf-grid2">${num('bf', 'Base fee (KSh)', kes(d.baseFeeCents))}${num('pk', 'Extra per km (KSh)', kes(d.perKmCents))}${num('mo', 'Minimum order (KSh)', kes(d.minOrderCents))}${num('mr', 'Max distance (km)', v(d, 'maxRadiusKm', 0), '0 means no limit')}${num('mk', 'Minutes per km', v(d, 'minutesPerKm', 3))}${num('bm', 'Buffer (minutes)', v(d, 'bufferMinutes', 10))}${txt('hs', 'Delivers from', v(d, 'hoursStart'), '08:00')}${txt('he', 'Delivers until', v(d, 'hoursEnd'), '22:00')}</div>`, 'orange')}
+      ${sec('utensils', 'Table reservations', 'Customers see free tables and reserve.', chk('te', 'Let customers reserve tables', t.enabled !== false) + `<div class="sf-grid2">${txt('ot', 'Bookings from', v(t, 'openTime', '10:00'), '10:00')}${txt('ct', 'Last booking until', v(t, 'closeTime', '22:00'), '22:00')}${num('sm', 'Time slot (minutes)', v(t, 'slotMinutes', 30))}${num('ml', 'Book at least (minutes ahead)', v(t, 'minLeadMinutes', 30))}${num('ma', 'Up to (days ahead)', v(t, 'maxAdvanceDays', 30))}</div><p class="hx-sub">The deposit is set in <a href="hx-settings.html">Settings → Restaurant → Reservations</a>.</p>`, 'purple')}
+      ${sec('bed', 'Rooms', 'Customers see free rooms and book.', chk('re', 'Let customers book rooms', v(st, 'rooms.enabled', true) !== false) + '<p class="hx-sub">The deposit is set in <a href="hx-settings.html">Settings → Rooms → Deposit</a>. Online bookings appear in Front desk and Stays.</p>', 'green')}
+    </div>
+    ${sec('building', 'Branch locations', 'Delivery distance, fee and range are measured from here. Stand at the branch and press “Use my location”.', `<div class="sf-branches">${branches.map((b) => { const l = loc(b._id); return `<div class="sf-branch" data-b="${b._id}"><b>${E(b.name)}</b><div class="sf-two"><input type="number" step="any" class="input la" placeholder="Latitude" aria-label="Latitude" value="${E(l.lat ?? '')}"><input type="number" step="any" class="input ln" placeholder="Longitude" aria-label="Longitude" value="${E(l.lng ?? '')}"></div><div class="hx-actions"><button class="btn btn-secondary btn-sm here">Use my location</button><a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${E(l.lat ?? '')},${E(l.lng ?? '')}">View on Google Maps</a></div></div>`; }).join('') || '<p class="hx-sub">No branches found.</p>'}</div>`, 'slate')}
+    ${sec('receipt', 'Where it shows up', '', '<ul class="sf-where"><li><b>Delivery orders</b> go to Delivery &amp; pickup, with name, phone, address, map link and ETA.</li><li><b>Table bookings</b> and pre-orders go to Reservations.</li><li><b>Room bookings</b> and deposits go to Front desk.</li></ul><p class="hx-sub">Managers, cashiers and waiters get a notification for each one.</p>', 'slate')}
+    </div>`;
     draw(url);
     const $ = (s) => el.querySelector(s); const val = (s) => $(s).value;
     $('#cp').onclick = () => { navigator.clipboard?.writeText(url); window.UI.toast.success('Link copied'); };
@@ -60,5 +65,11 @@
       const r = await send('put', '/restaurant/settings', body); if (r) { window.UI.toast.success('Storefront saved'); await load(); paint(); }
     };
   }
-  function draw(url) { const box = el.querySelector('#qr'); if (!url || !window.QREncoder) { box.textContent = 'QR appears once the link is ready'; return; } box.innerHTML = '<div style="width:340px;max-width:100%">' + window.QREncoder.toSvg(url, { ecl: 'M', border: 1 }) + '</div>'; }
+  function draw(url) {
+    const box = el.querySelector('#qr');
+    if (!url) { box.innerHTML = '<span class="sf-qrempty">QR appears once the link is ready</span>'; return; }
+    if (!window.QREncoder) { box.innerHTML = '<span class="sf-qrempty">The QR script did not load. Refresh the page.</span>'; return; }
+    try { box.innerHTML = window.QREncoder.toSvg(url, { ecl: 'M', border: 1, title: 'Storefront QR' }); }
+    catch (e) { box.innerHTML = '<span class="sf-qrempty">Could not draw the QR. Copy the link instead.</span>'; }
+  }
 })();

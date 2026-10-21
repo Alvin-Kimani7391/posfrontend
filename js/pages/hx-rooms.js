@@ -4,9 +4,10 @@
  */
 (function () {
   const { E, can, get, send, list, head, pill, formModal, hm } = window.HX;
-  let el, rooms = [], summary = {}, filter = '';
+  let el, rooms = [], summary = {}, filter = '', roomTypes = [];
   document.addEventListener('DOMContentLoaded', init);
-  async function init() { el = window.HX.mount('Room board'); if (!el) return; await window.AppShell.whenProfileReady?.(); window.HX.live(load, 30000); load(); }
+  async function init() { el = window.HX.mount('Room board'); if (!el) return; await window.AppShell.whenProfileReady?.(); window.HX.live(load, 30000); load(); loadTypes(); }
+  async function loadTypes() { const d = await get('/accommodation/room-types'); roomTypes = (d && (d.roomTypes || (d.data && d.data.roomTypes))) || list(d, 'roomTypes'); }
 
   async function load() {
     const d = await get('/accommodation/board', { branchId: window.HX.branchId() });
@@ -18,7 +19,7 @@
   function paint() {
     const f = rooms.filter((r) => !filter || (filter === 'occupied' ? r.inHouse : filter === 'ready' ? !r.inHouse && r.sellable : filter === 'dirty' ? !r.inHouse && r.status === 'AVAILABLE' && !r.sellable : r.status === 'OUT_OF_ORDER'));
     const chips = [['', `All · ${summary.total || rooms.length}`], ['occupied', `Occupied · ${summary.occupied || 0}`], ['ready', `Ready · ${summary.vacantReady || 0}`], ['dirty', `Needs cleaning · ${summary.vacantDirty || 0}`], ['ooo', `Out of order · ${summary.outOfOrder || 0}`]];
-    el.innerHTML = head('Room board', 'Tap a room for its details and actions.', (can('accommodation.rooms.manage') ? '<button class="btn btn-secondary" id="deals">Room deals</button>' : '') + '<span class="hx-live">Live</span>') + `<div class="hx-cats hx-tabs">${chips.map(([k, l]) => `<button class="hx-chip ${k === filter ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}</div>` +
+    el.innerHTML = head('Room board', 'Tap a room for its details and actions.', (can('accommodation.rooms.manage') ? '<button class="btn btn-primary" id="new-room">+ New room</button><button class="btn btn-secondary" id="deals">Room deals</button>' : '') + '<span class="hx-live">Live</span>') + `<div class="hx-cats hx-tabs">${chips.map(([k, l]) => `<button class="hx-chip ${k === filter ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}</div>` +
       (f.length ? `<div class="hx-rooms">${f.map((r) => { const [s, t] = state(r); return `<button class="hx-room hx-st-${t}" data-r="${r._id}"><span class="bedwrap">${window.HX.art.bed(r.roomType)}</span><span class="no"><span>${E(r.number)}</span>${pill(s, t)}</span><span class="ty">${E(r.roomType || '')}${r.floor ? ' · floor ' + E(r.floor) : ''}</span><span class="who">${r.inHouse ? E(r.inHouse.guest && r.inHouse.guest.name) : r.arrivingToday ? 'Arriving today' : ''}${r.dueOutToday ? (r.inHouse ? ' · due out' : 'Due out') : ''}</span></button>`; }).join('')}</div>` : window.HX.empty('No rooms', 'Add rooms in the Setup guide.'));
     el.querySelectorAll('[data-f]').forEach((b) => b.addEventListener('click', () => { filter = b.dataset.f; paint(); }));
     el.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => open(rooms.find((x) => x._id === b.dataset.r))));
@@ -52,5 +53,20 @@
       ], onSubmit: async (v) => { if (await send('put', `/accommodation/room-types/${t._id}`, { promo: { active: !!v.active, title: v.title || '', percentOff: v.percentOff || 0, description: v.description || '', validFrom: v.validFrom || '', validTo: v.validTo || '' } })) { window.UI.toast.success('Deal saved'); return true; } return false; } });
     }));
   }
-  document.addEventListener('click', (e) => { if (e.target && e.target.id === 'deals') dealsDialog(); });
+  /** Add one room (or a run such as 101-110). Uses the same endpoint as the Setup guide. */
+  async function newRoom() {
+    if (!roomTypes.length) await loadTypes();
+    if (!roomTypes.length) return window.UI.toast.info('Create a room type first (Setup guide → Add a room type)');
+    const expand = (text) => { const out = []; String(text).split(',').map((x) => x.trim()).filter(Boolean).forEach((p) => { const m = p.match(/^(\d+)\s*-\s*(\d+)$/); if (m && +m[2] >= +m[1] && +m[2] - +m[1] < 200) for (let n = +m[1]; n <= +m[2]; n++) out.push(String(n)); else out.push(p); }); return Array.from(new Set(out)).slice(0, 200); };
+    formModal({ title: 'Add a room', maxWidth: '440px', submitText: 'Add room', intro: 'One room number, or several separated by commas or as a range, like 101-110.', fields: [
+      { name: 'roomTypeId', label: 'Room type', type: 'select', options: roomTypes.map((t) => [t._id, t.name]) },
+      { row: [{ name: 'numbers', label: 'Room number(s)', required: true, placeholder: '105' }, { name: 'floor', label: 'Floor (optional)' }] },
+    ], onSubmit: async (v) => {
+      const numbers = expand(v.numbers); if (!numbers.length) { window.UI.toast.warning('Enter at least one room number'); return false; }
+      const dup = numbers.filter((n) => rooms.some((r) => String(r.number) === n)); if (dup.length) { window.UI.toast.warning(`Room ${dup.join(', ')} already exists`); return false; }
+      const r = await send('post', '/accommodation/rooms/bulk', { branchId: window.HX.branchId(), roomTypeId: v.roomTypeId, numbers, ...(v.floor ? { floor: v.floor } : {}) });
+      if (!r) return false; window.UI.toast.success(numbers.length > 1 ? `${numbers.length} rooms added` : `Room ${numbers[0]} added`); load(); return true;
+    } });
+  }
+  document.addEventListener('click', (e) => { const b = e.target && e.target.closest && e.target.closest('#deals, #new-room'); if (!b) return; if (b.id === 'deals') dealsDialog(); else newRoom(); });
 })();

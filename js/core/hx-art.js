@@ -13,7 +13,17 @@
 
   /* ---------- helpers ---------- */
   const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return Math.abs(h); };
-  const uri = (svg) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  // One short blob: URL per illustration (was a 3-6 KB data: URI copied into every <img>, twice). The browser decodes each URL once and reuses it.
+  const uri = (svg) => { try { return URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })); } catch (e) { return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); } };
+  // Big photos stored inline (data: URIs) are turned into one short blob: URL as well, so re-painting the menu never re-parses megabytes of text.
+  const photoCache = new Map();
+  const photo = (src) => {
+    if (!src || src.slice(0, 5) !== 'data:' || src.length < 2000) return src;
+    if (photoCache.has(src.length + src.slice(-40))) return photoCache.get(src.length + src.slice(-40));
+    let out = src;
+    try { const i = src.indexOf(','), head = src.slice(5, i), bin = head.includes('base64') ? atob(src.slice(i + 1)) : decodeURIComponent(src.slice(i + 1)); const u = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k); out = URL.createObjectURL(new Blob([u], { type: head.split(';')[0] || 'image/jpeg' })); } catch (e) { out = src; }
+    photoCache.set(src.length + src.slice(-40), out); return out;
+  };
   const frame = (a, b, inner) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient><radialGradient id="p" cx=".4" cy=".35" r=".8"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#e6eaf0"/></radialGradient></defs><rect width="320" height="220" fill="url(#g)"/>${inner}</svg>`;
   const shadow = '<ellipse cx="160" cy="198" rx="108" ry="9" fill="#000" opacity=".13"/>';
   const plate = '<circle cx="160" cy="108" r="88" fill="url(#p)"/><circle cx="160" cy="108" r="70" fill="none" stroke="#d9dee6" stroke-width="2"/>';
@@ -101,8 +111,8 @@
   }
   /** <img> for a dish: its own photo when there is one, otherwise the illustration (also the fallback if the photo fails to load). */
   function dishImg(item, category, cls = '') {
-    const fb = dish(item && item.name, category), src = item && item.image ? item.image : fb;
-    return `<img class="${cls}" src="${E(src)}" alt="" loading="lazy" data-fb="${fb}" onerror="if(this.dataset.fb&&this.src!==this.dataset.fb){this.src=this.dataset.fb}">`;
+    const fb = dish(item && item.name, category), src = item && item.image ? photo(item.image) : fb;
+    return `<img class="${cls}" src="${E(src)}" alt="" loading="lazy" decoding="async"${src !== fb ? ` data-fb="${fb}" onerror="if(this.dataset.fb&&this.src!==this.dataset.fb){this.src=this.dataset.fb}"` : ''}>`;
   }
 
   /* ---------- table with chairs ---------- */
