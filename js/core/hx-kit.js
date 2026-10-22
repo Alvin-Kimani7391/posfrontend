@@ -5,6 +5,17 @@
 (function (window) {
   const E = (s) => window.UI.escapeHtml(String(s == null ? '' : s));
   const M = (n) => window.UI.formatMoney(n);
+  /** Percent for display. The API can send a percent as 25, as 25.0000001, or in hundredths (2500 = 25%), which showed up as "2500%".
+   *  A value above 100 is read as hundredths of a percent; the result is rounded to 1 decimal with no trailing zeros. */
+  function pctNum(v) {
+    let n = Number(v); if (!isFinite(n)) return 0;
+    if (n > 100) n = n / 100;
+    return Math.round(n * 10) / 10;
+  }
+  const pct = (v) => pctNum(v) + '%';
+  /** Whole number for counts (orders, guests, rooms): never currency, thousands separators. */
+  const count = (v) => { const n = Number(v); return isFinite(n) ? Math.round(n).toLocaleString('en-KE') : String(v == null ? '' : v); };
+
   const shell = () => window.AppShell;
   const user = () => shell().getUser();
   const can = (p) => window.Permissions.can(user(), p);
@@ -140,7 +151,7 @@
     return () => { clearInterval(t); window.removeEventListener('branchchange', fn); document.removeEventListener('visibilitychange', tick); };
   }
 
-  window.HX = { errors: errs, E, M, user, can, canAny, branchId, feature, list, get, send, pill, head, icon, fieldHtml, formModal, readForm, mount, live, skel };
+  window.HX = { pct, pctNum, count, errors: errs, E, M, user, can, canAny, branchId, feature, list, get, send, pill, head, icon, fieldHtml, formModal, readForm, mount, live, skel };
 })(window);
 /* ---- extra helpers shared by the order, bill and stay screens ---- */
 (function (window) {

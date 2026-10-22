@@ -50,7 +50,7 @@
           ${window.HX.kpi('Total sales', M(d.today && d.today.revenue), 'today', 'blue', 'cash')}
           ${window.HX.kpi('Average value', M(d.today && d.today.averageOrderValue), 'per order', 'ember', 'tag')}
           ${window.HX.kpi('In the kitchen', d.kitchenQueue ?? 0, `${d.openOrders ?? 0} open orders`, 'green', 'flame')}
-          ${d.today && d.today.foodCostPercent != null ? window.HX.kpi('Food cost', d.today.foodCostPercent + '%', 'of sales', 'slate', 'pulse') : ''}
+          ${d.today && d.today.foodCostPercent != null ? window.HX.kpi('Food cost', window.HX.pct(d.today.foodCostPercent), 'of sales', 'slate', 'pulse') : ''}
         </div>
         ${total ? `<div class="hx-dgrid"><div class="hx-card"><h3>Tables <small>${total} in service · ${busyN} busy</small></h3>
           <div class="hx-donutwrap">${window.HX.art.donut(parts, total, 'tables')}<div class="hx-legendrow">${parts.map((p) => `<div><i style="background:${p.color}"></i>${E(p.label)}<b>${p.value}</b></div>`).join('')}</div></div></div>
@@ -62,7 +62,7 @@
     if (ad) {
       h += `<div class="hx-section"><h2>Rooms today</h2>
         <div class="hx-kpis">
-          ${window.HX.kpi('Occupancy', (ad.occupancyPercent ?? 0) + '%', `${ad.occupied ?? 0} of ${ad.rooms ?? 0} rooms`, 'blue', 'bed')}
+          ${window.HX.kpi('Occupancy', window.HX.pct(ad.occupancyPercent ?? 0), `${ad.occupied ?? 0} of ${ad.rooms ?? 0} rooms`, 'blue', 'bed')}
           ${window.HX.kpi('Arriving', (ad.arrivals || []).length, 'checking in today', 'green', 'key')}
           ${window.HX.kpi('Leaving', (ad.departures || []).length, 'checking out today', 'amber', 'calendar')}
           ${window.HX.kpi('Out of order', ad.outOfOrder ?? 0, 'not for sale', 'red', 'wrench')}

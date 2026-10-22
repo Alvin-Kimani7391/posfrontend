@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<script>window.__dp=null;window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__dp=e;window.dispatchEvent(new Event('sx-bip'));});window.addEventListener('appinstalled',function(){window.__dp=null;try{localStorage.setItem('store:installed','1');}catch(e){}window.dispatchEvent(new Event('sx-inst'));});</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Order online</title>
 <meta name="theme-color" content="#F26A21" id="themeMeta" />
-<meta name="apple-mobile-web-app-capable" content="yes" /><meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" /><meta name="apple-mobile-web-app-title" content="Order online" /><meta name="apple-mobile-web-app-status-bar-style" content="default" /><meta name="mobile-web-app-capable" content="yes" />
 <meta name="robots" content="noindex,nofollow" />
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <link rel="icon" href="/icons/favicon-32.png" />
@@ -228,6 +229,14 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 .rcpt hr{border:0;border-top:1px dashed #999;margin:10px 0}.rcpt .ft{text-align:center;margin-top:12px;opacity:.75}
 #map{height:210px;border-radius:14px;margin-top:8px;border:1px solid var(--line);z-index:1}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav) + 90px);background:#14171A;color:#fff;padding:12px 18px;border-radius:14px;z-index:90;font-size:14px;box-shadow:0 10px 28px rgba(0,0,0,.3);max-width:90vw;display:flex;gap:9px;align-items:center}.toast.bad{background:var(--bad)}
+/* install-app prompt */
+.pwa{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav) + 12px + env(safe-area-inset-bottom));width:min(456px,calc(100% - 24px));z-index:45;background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 10px 34px rgba(20,23,26,.22);padding:14px;animation:pwaup .35s ease}
+@keyframes pwaup{from{opacity:0;transform:translate(-50%,16px)}to{opacity:1;transform:translate(-50%,0)}}
+.pwa .pr{display:flex;gap:12px;align-items:center}
+.pwa .pi{width:46px;height:46px;border-radius:12px;background:var(--o);color:#fff;display:grid;place-items:center;font-weight:800;font-size:20px;overflow:hidden;flex:none}
+.pwa .pi img{width:100%;height:100%;object-fit:cover}
+.pwa b{font-size:15px}.pwa .pt{font-size:13px;color:var(--ink2);margin-top:2px;line-height:1.4}
+.pwa .pb{display:flex;gap:8px;margin-top:12px}.pwa .pb .btn{flex:1}
 .banner{display:none;background:#fff;border:1px solid var(--line);border-radius:14px;margin:12px 16px 0;padding:12px;align-items:center;gap:10px}
 @media print{body>*:not(#printarea){display:none!important}#printarea{display:block!important}}
 #printarea{display:none}
@@ -237,7 +246,7 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 <body>
 <div id="app">
   <main id="view"><div class="pad" style="padding-top:60px"><div class="sk" style="height:26px;width:55%;margin-bottom:14px"></div><div class="sk" style="height:110px"></div></div></main>
-  <div class="banner" id="install"><div class="grow"><b>Install this app</b><div class="muted" id="installTxt" style="font-size:13px">Order faster next time.</div></div><button class="btn sm" id="installBtn">Install</button><button class="btn sm ghost" id="installX">Not now</button></div>
+  <div class="pwa" id="install" role="dialog" aria-label="Install app"><div class="pr"><div class="pi" id="installIc">O</div><div class="grow"><b id="installTtl">Install our app</b><div class="pt" id="installTxt">Add it to your home screen to order faster and track your food.</div></div></div><div class="pb"><button class="btn sm ghost" id="installX">Not now</button><button class="btn sm" id="installBtn">Install</button></div></div>
   <div class="cartbar" id="cartbar"></div>
   <nav class="nav" id="nav" hidden></nav>
 </div>
@@ -377,14 +386,39 @@ async function init() {
 }
 function fail(e) { var net = e.code === 'NETWORK'; $('#view').className = ''; $('#view').innerHTML = '<div class="pad" style="padding-top:60px"><div class="card">' + empty(net ? 'refresh' : 'help', net ? 'You are offline' : 'We could not open this page', E(e.message || '') + (net ? '' : '<br>Please ask a member of staff for help.'), '<div style="margin-top:16px"><button class="btn sm" id="rt">Try again</button></div>') + '</div></div>'; $('#rt').onclick = function () { location.reload(); }; }
 function setupInstall() {
-  var base = location.origin, m = { name: ctx.business.name, short_name: ctx.business.name.slice(0, 12), start_url: base + '/s/' + TOKEN, scope: base + '/s/', display: 'standalone', background_color: '#ffffff', theme_color: THEME, icons: [{ src: base + '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: base + '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }, { src: base + '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }] };
+  var base = location.origin, nm = String(ctx.business.name || 'Order online'), sid = base + '/s/' + TOKEN;
+  var m = { id: sid, name: nm, short_name: nm.slice(0, 12), description: 'Order food, book a table or a room from ' + nm, lang: 'en-KE', start_url: sid, scope: base + '/', display: 'standalone', display_override: ['standalone', 'minimal-ui'], orientation: 'portrait', background_color: '#ffffff', theme_color: THEME,
+    icons: [{ src: base + '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' }, { src: base + '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' }, { src: base + '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }] };
   var l = document.createElement('link'); l.rel = 'manifest'; l.href = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: 'application/manifest+json' })); document.head.appendChild(l);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
-  if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone || localStorage.getItem('store:noinstall')) return;
-  var dp; window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); dp = e; $('#install').style.display = 'flex'; });
-  $('#installBtn').onclick = function () { if (dp) { dp.prompt(); dp.userChoice.then(function () { $('#install').style.display = 'none'; }); } };
-  $('#installX').onclick = function () { $('#install').style.display = 'none'; try { localStorage.setItem('store:noinstall', '1'); } catch (e) { /* ignore */ } };
-  if (/iphone|ipad|ipod/i.test(navigator.userAgent)) { $('#installTxt').textContent = 'Tap Share, then "Add to Home Screen".'; $('#installBtn').style.display = 'none'; $('#install').style.display = 'flex'; }
+
+  var ua = navigator.userAgent || '';
+  var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  if (standalone) return;                                                          // already installed and opened as the app
+  var ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var android = /android/i.test(ua), phone = ios || android || /mobile/i.test(ua);
+  var inApp = /FBAN|FBAV|Instagram|WhatsApp|Line\/|MicroMessenger|Twitter|TikTok|Snapchat|musical_ly/i.test(ua) || (android && /; wv\)/.test(ua));
+  var safari = ios && /safari/i.test(ua) && !/crios|fxios|edgios|opios/i.test(ua);
+  var box = $('#install'), btn = $('#installBtn'), x = $('#installX'), shown = false;
+  var snooze = sg('store:instSnooze'); if (snooze && Date.now() < snooze) return;
+
+  var ic = $('#installIc'); if (ctx.business.logo) { ic.innerHTML = '<img alt="" src="' + E(ctx.business.logo) + '" onerror="this.parentNode.textContent=\'' + E(nm.charAt(0).toUpperCase()) + '\'">'; } else ic.textContent = nm.charAt(0).toUpperCase();
+  $('#installTtl').textContent = 'Install ' + nm;
+  function show(mode) {
+    if (shown && mode !== 'prompt') return; shown = true;
+    var t = $('#installTxt'); btn.style.display = '';
+    if (mode === 'prompt') { t.textContent = 'Add it to your home screen to order faster, track your food and keep your receipts.'; btn.textContent = 'Install'; btn.onclick = function () { var dp = window.__dp; if (!dp) return; dp.prompt(); dp.userChoice.then(function (c) { window.__dp = null; if (c && c.outcome === 'accepted') box.style.display = 'none'; }); }; }
+    else if (mode === 'inapp') { t.textContent = ios ? 'To install, open this page in Safari: tap the ••• or Share button, then "Open in Safari".' : 'To install, open this page in Chrome: tap the ⋮ menu, then "Open in browser".'; btn.style.display = 'none'; }
+    else if (mode === 'ios') { t.innerHTML = 'Tap the <b>Share</b> button <span aria-hidden="true">⎋</span> at the bottom of the screen, then choose <b>"Add to Home Screen"</b>.'; btn.textContent = 'Got it'; btn.onclick = function () { box.style.display = 'none'; ss('store:instSnooze', Date.now() + 3 * 86400000); }; }
+    else { t.innerHTML = 'Tap the <b>⋮</b> menu at the top of your browser, then choose <b>"Install app"</b> or <b>"Add to Home screen"</b>.'; btn.textContent = 'Got it'; btn.onclick = function () { box.style.display = 'none'; ss('store:instSnooze', Date.now() + 3 * 86400000); }; }
+    box.style.display = 'block';
+  }
+  x.onclick = function () { box.style.display = 'none'; var n = (sg('store:instN') || 0) + 1; ss('store:instN', n); ss('store:instSnooze', Date.now() + (n >= 3 ? 14 : 2) * 86400000); };   // asks again later, not never
+  window.addEventListener('sx-inst', function () { box.style.display = 'none'; });
+  window.addEventListener('sx-bip', function () { setTimeout(function () { if (window.__dp) show('prompt'); }, 1500); });   // Chrome / Edge / Samsung Internet on Android
+  if (window.__dp) setTimeout(function () { show('prompt'); }, 1500);
+  // Browsers that never send an install prompt (iPhone, Firefox, in-app browsers): explain how, once the page has settled
+  if (phone) setTimeout(function () { if (shown || window.__dp || sg('store:installed')) return; show(inApp ? 'inapp' : ios ? (safari ? 'ios' : 'ios') : 'android'); }, 6000);
 }
 function logoHtml(c) { var b = ctx.business; return '<div class="' + (c || 'lg') + '">' + (b.logo ? '<img alt="" src="' + E(b.logo) + '" onerror="this.parentNode.textContent=\'' + E(String(b.name || '?').charAt(0).toUpperCase()) + '\'">' : E(String(b.name || '?').charAt(0).toUpperCase())) + '</div>'; }
 function branchSel() { if (!ctx.branches || ctx.branches.length < 2) return ''; return '<label class="lbl">Branch<select class="field" id="brSel">' + ctx.branches.map(function (b) { return '<option value="' + b.id + '"' + (b.id === branchId ? ' selected' : '') + '>' + E(b.name) + '</option>'; }).join('') + '</select></label>'; }
@@ -624,7 +658,7 @@ VIEWS.track = function (p) {
       if (wait) h += '<div class="card" style="margin-top:12px;border-color:#fbd5bd;background:var(--ol)"><b>Payment needed</b><p class="muted" style="margin:4px 0 12px;font-size:13.5px">' + E(o.message) + '</p><button class="btn" id="pn">Pay ' + money(o.pay.amountDue) + ' with M-PESA</button></div>';
       if (bad) h += '<div class="note" style="background:var(--badl);color:#7a1b13">' + ic('alert') + '<div>' + E(o.message) + '</div></div>';
       else h += '<div class="card" style="margin-top:12px"><div class="tl">' + STEPS.map(function (s, k) { var st = k < idx || (o.stage === 'DELIVERED' && k <= idx) ? 'done' : k === idx ? 'now' : 'todo'; return '<div class="ts ' + st + '"><div class="dot">' + (st === 'done' ? ic('check') : st === 'now' ? ic('clock') : ic('clock')) + '</div><div><b>' + s[1] + '</b>' + (st !== 'todo' ? '<small>' + (k === 0 ? ftime(o.placedAt) + ' · ' : '') + s[2] + '</small>' : '<small>' + (k === 4 ? 'Enjoy your meal!' : 'Waiting') + '</small>') + '</div></div>'; }).join('') + '</div>' + (o.rider ? '<div class="row" style="margin-top:4px">' + ic('truck') + ' <span>Rider: <b>' + E(o.rider.name) + '</b></span></div>' : '') + (o.etaMinutes && o.stage !== 'DELIVERED' ? '<div class="fine" style="margin-top:8px">⏱ Estimated ' + o.etaMinutes + ' min from order time</div>' : '') + '</div>';
-      h += '<div class="card"><b>Items</b>' + o.items.map(function (i) { return '<div class="row fine" style="padding:6px 0;color:var(--ink2)"><b style="color:var(--o)">' + i.quantity + '×</b><span class="grow">' + E(i.name) + '</span>' + (i.total != null ? '<span>' + money(i.total) + '</span>' : '') + '</div>'; }).join('') + '<div class="row fine" style="margin-top:6px">' + ic('pin') + '<span class="grow">' + E(o.address) + '</span></div><div class="row" style="margin-top:6px"><span class="grow fine">' + (o.pay.state === 'PAID' ? 'Paid with M-PESA' : o.pay.state === 'COD' ? 'Pay the rider on delivery' : '') + '</span>' + (o.pay.state === 'PAID' ? '<span class="tag gr">Paid</span>' : '') + '</div></div>';
+      h += '<div class="card"><b>Items</b>' + o.items.map(function (i) { return '<div class="row fine" style="padding:6px 0;color:var(--ink2)"><b style="color:var(--o)">' + i.quantity + '×</b><span class="grow">' + E(i.name) + '</span>' + (i.total != null ? '<span>' + money(i.total) + '</span>' : '') + '</div>'; }).join('') + '<div class="row fine" style="margin-top:6px">' + ic('pin') + '<span class="grow">' + E(o.address) + '</span></div><div class="row" style="margin-top:6px"><span class="grow fine">' + (o.pay.state === 'PAID' ? (o.pay.method === 'CASH' ? 'Paid on delivery' : 'Paid with M-PESA') : o.pay.state === 'COD' ? 'Pay the rider on delivery' : '') + '</span>' + (o.pay.state === 'PAID' ? '<span class="tag gr">Paid</span>' : '') + '</div></div>';
       if (o.pay.receiptRef) h += '<button class="btn ghost" id="vr">' + ic('receipt') + ' View e-receipt</button>';
       $('#t').innerHTML = h;
       var pn = $('#pn'); if (pn) pn.onclick = function () { payPrompt('Pay for your order', o.pay.amountDue, DT.mpesaPhone || DT.phone || (acct && acct.account.phone), async function (ph) { return call('/delivery/' + p.key + '/pay', 'POST', { payerPhone: ph }); }, { onOk: function () { VIEWS.track(p); }, onClose: function () { VIEWS.track(p); } }); };
