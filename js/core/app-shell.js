@@ -59,10 +59,10 @@
     { key: 'hx-rooms',        group: 'Accommodation', label: 'Room board',           icon: 'bed',      href: 'hx-rooms.html',        permission: 'accommodation.rooms.view', feature: ['accommodation'] },
     { key: 'hx-stays',        group: 'Accommodation', label: 'Bookings',             icon: 'calendar', href: 'hx-stays.html',        permission: 'accommodation.stays.view', feature: ['accommodation'] },
     { key: 'hx-housekeeping', group: 'Accommodation', label: 'Housekeeping',         icon: 'broom',    href: 'hx-housekeeping.html', permission: 'accommodation.housekeeping.view', feature: ['accommodation'] },
-    { key: 'hx-reports',      group: 'Restaurant & rooms', label: 'Reports',         icon: 'reports',  href: 'hx-reports.html',      permAny: ['restaurant.reports.view', 'accommodation.reports.view'], feature: ['restaurantOrdering', 'accommodation'] },
-    { key: 'hx-setup',        group: 'Restaurant & rooms', label: 'Setup guide',     icon: 'rocket',   href: 'hx-setup.html',        permAny: ['restaurant.settings.manage', 'restaurant.tables.manage', 'restaurant.menu.manage', 'accommodation.rooms.manage'], feature: ['restaurantOrdering', 'accommodation'] },
-    { key: 'hx-settings',     group: 'Restaurant & rooms', label: 'Service settings',icon: 'sliders',  href: 'hx-settings.html',     permAny: ['restaurant.settings.view', 'accommodation.settings.view'], feature: ['restaurantOrdering', 'accommodation'] },
-    { key: 'hx-services',     group: 'Restaurant & rooms', label: 'Services & system check', icon: 'sliders', href: 'hx-services.html', permission: 'settings.update' },
+    { key: 'hx-reports',      group: 'Reports & setup', label: 'Reports',         icon: 'reports',  href: 'hx-reports.html',      permAny: ['restaurant.reports.view', 'accommodation.reports.view'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-setup',        group: 'Reports & setup', label: 'Setup guide',     icon: 'rocket',   href: 'hx-setup.html',        permAny: ['restaurant.settings.manage', 'restaurant.tables.manage', 'restaurant.menu.manage', 'accommodation.rooms.manage'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-settings',     group: 'Reports & setup', label: 'Service settings',icon: 'sliders',  href: 'hx-settings.html',     permAny: ['restaurant.settings.view', 'accommodation.settings.view'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-services',     group: 'Reports & setup', label: 'Services & system check', icon: 'sliders', href: 'hx-services.html', permission: 'settings.update' },
     { key: 'products',      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
     { key: 'inventory',     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view', wsLabel: 'Wholesale inventory' },
     // Wholesale is no longer a separate section. For businesses with warehouses (feature multiWarehouse) the normal pages
@@ -432,7 +432,7 @@
       let label = '';
       if (hx) {
         const g = item.key === 'dashboard' ? '' : (item.group || 'Business');
-        if (g !== lastGroup) { if (g) label = `<div class="sidebar-section-label">${g}</div>`; lastGroup = g; }
+        if (g !== lastGroup) { if (g) label = `<div class="sidebar-section-label" data-group="${g.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}">${g}</div>`; lastGroup = g; }
       }
       return `${label}
         <a class="sidebar-link ${activeClass}" ${gated} data-nav-key="${item.key}"

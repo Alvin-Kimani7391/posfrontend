@@ -99,3 +99,36 @@ body:has(.modal-backdrop) .hx-sk { animation-play-state: paused; }
 .hx-trk-it em { font-style: normal; font-weight: 800; margin-left: 4px; color: #6b7280; }
 .hx-trk-it.s1 em { color: #b45309; } .hx-trk-it.s2 em { color: #178a3a; } .hx-trk-it.s3 em { color: #98a2b3; }
 @media (max-width: 520px) { .hx-trk { grid-template-columns: 1fr; } }
+
+/* ---------- 5. kitchen & bar: full screen + snappy buttons ---------- */
+.hx-kexit { display: none; }
+.hx-kwrap.full { position: fixed; inset: 0; z-index: 400; background: var(--px-bg, #f4f5f8); padding: 14px 16px 16px; overflow: auto; display: flex; flex-direction: column; animation: kFull .22s ease; overscroll-behavior: contain; }
+.hx-kwrap.full .hx-kexit { display: inline-flex; align-items: center; gap: 8px; position: fixed; top: 12px; right: 14px; z-index: 5; height: 44px; padding: 0 18px 0 14px; border-radius: 999px; background: #14171a; color: #fff; font-weight: 800; font-size: .88rem; border: 0; cursor: pointer; box-shadow: 0 8px 22px rgba(0,0,0,.28); transition: transform .12s, background .15s; }
+.hx-kwrap.full .hx-kexit:hover { background: #000; } .hx-kwrap.full .hx-kexit:active { transform: scale(.95); }
+.hx-kexit svg { width: 18px; height: 18px; }
+.hx-kwrap.full .hx-kstats { padding-right: 190px; }
+.hx-kwrap.full .hx-kds { flex: 1; min-height: 0; align-items: stretch; }
+.hx-kwrap.full .hx-kcol { min-height: 0; overflow-y: auto; }
+body.hx-kds-full .sidebar, body.hx-kds-full .topbar, body.hx-kds-full .bottom-nav, body.hx-kds-full .mobile-nav, body.hx-kds-full #hx-banner, body.hx-kds-full .dr-topnav, body.hx-kds-full .sidebar-overlay { display: none !important; }
+body.hx-kds-full { overflow: hidden; }
+@keyframes kFull { from { opacity: 0; transform: scale(.985); } }
+
+/* ticket buttons: react the instant they are pressed */
+.hx-tk .ac .btn { position: relative; transition: transform .1s ease, box-shadow .15s ease, filter .15s ease, background .15s ease; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; }
+.hx-tk .ac .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(16,24,40,.18); }
+.hx-tk .ac .btn:active:not(:disabled) { transform: scale(.94); box-shadow: none; filter: brightness(.94); }
+.hx-tk .ac .btn.is-busy, .hx-tk .ac .btn.is-busy:disabled { opacity: 1; cursor: progress; color: transparent !important; transform: scale(.97); }
+.hx-tk .ac .btn.is-busy::after { content: ''; position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; border: 2.5px solid rgba(255,255,255,.45); border-top-color: #fff; animation: kSpin .6s linear infinite; }
+.hx-tk .ac .btn.btn-secondary.is-busy::after { border-color: rgba(0,0,0,.2); border-top-color: #14171a; }
+@keyframes kSpin { to { transform: rotate(360deg); } }
+.hx-tk-item[data-item] { transition: background .12s, transform .1s; border-radius: 8px; } .hx-tk-item[data-item]:hover { background: #f3f7f4; } .hx-tk-item[data-item]:active { transform: scale(.98); }
+.hx-tk-item .vd { transition: background .2s, transform .2s; }
+.hx-tk-item.done .vd { transform: scale(1.12); }
+
+/* ticket moves between columns: slide out, then land with a soft glow */
+.hx-tk { transition: opacity .17s ease, transform .17s ease, box-shadow .3s; will-change: transform, opacity; }
+.hx-tk.tk-out { opacity: 0; transform: translateX(26px) scale(.96); pointer-events: none; }
+.hx-tk.tk-in { animation: kIn .38s cubic-bezier(.2,.9,.3,1.15); }
+@keyframes kIn { 0% { opacity: 0; transform: translateX(-28px) scale(.95); box-shadow: 0 0 0 0 rgba(34,164,71,0); } 55% { box-shadow: 0 0 0 6px rgba(34,164,71,.28); } 100% { opacity: 1; transform: none; box-shadow: var(--px-sh); } }
+.hx-kstat { transition: transform .12s, box-shadow .15s, outline-color .15s; } .hx-kstat:active { transform: scale(.95); }
+@media (prefers-reduced-motion: reduce) { .hx-tk, .hx-tk.tk-in, .hx-kwrap.full, .hx-tk .ac .btn { animation: none !important; transition: none !important; } }

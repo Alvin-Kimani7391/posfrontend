@@ -77,6 +77,7 @@
   function available() {
     const t = [];
     if (feature('restaurantOrdering') && can('restaurant.settings.view')) t.push(['restaurant', 'Restaurant']);
+    if (feature('restaurantOrdering') && can('restaurant.settings.view')) t.push(['tracking', 'Ingredient tracking']);
     if (feature('guestQrOrdering') && can('restaurant.settings.view')) t.push(['guest', 'Guest QR ordering']);
     if (feature('accommodation') && can('accommodation.settings.view')) t.push(['rooms', 'Rooms and front desk']);
     return t;
@@ -87,9 +88,41 @@
     el.innerHTML = head('Service settings', 'Changes apply to everyone straight away.') +
       `<div class="hx-cats hx-tabs">${tabs.map(([k, l]) => `<button class="hx-chip ${k === tab ? 'on' : ''}" data-tab="${k}">${E(l)}</button>`).join('')}</div><div id="hx-set"><div class="hx-card"><p class="hx-sub">Loading…</p></div></div>`;
     el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; history.replaceState(null, '', '#' + tab); show(); }));
+    if (tab === 'tracking') return tracking();
     const src = SOURCE[tab];
     if (!cache[src]) { const d = await get(PATH[tab]); cache[src] = (d && (d.settings || d)) || {}; }
     paint(cache[src]);
+  }
+
+  /** Ingredient tracking by recipe: the on/off switch, setup progress and how it behaves. GET/PUT /restaurant/tracking */
+  async function tracking() {
+    const box = el.querySelector('#hx-set'); const d = await get('/restaurant/tracking'); const t = d && d.tracking;
+    if (!t) { box.innerHTML = window.HX.empty('Could not load tracking', 'Try again in a moment.'); return; }
+    const editable = can('restaurant.settings.manage'), s = t.tracking || {};
+    const step = (c) => `<div class="hx-row"><span>${c.done ? '✅' : '⬜'}</span><div class="grow">${E(c.label)}</div></div>`;
+    box.innerHTML = `<div class="hx-card" style="max-width:720px;margin-bottom:var(--space-4)"><h4>Track ingredients with recipes</h4>
+      <p class="hx-sub" style="margin:var(--space-2) 0 var(--space-3)">${t.enabled ? 'ON: every dish with a recipe takes its ingredients out of stock when sold (oldest batch first), expiry shows in your daily alert, and Profit &amp; loss uses the real cost of what was sold.' : 'OFF: orders do not touch ingredient stock. Profit &amp; loss counts food cost from what you buy (record it as a “Food Purchases” expense). Nothing is deleted when you switch this.'}</p>
+      ${editable ? `<button class="btn ${t.enabled ? 'btn-secondary' : 'btn-primary'}" id="tg">${t.enabled ? 'Turn tracking off' : 'Turn tracking on'}</button>` : '<p class="hx-sub">Only the owner can change this.</p>'}</div>
+      ${t.enabled ? `<div class="hx-card flush" style="max-width:720px;margin-bottom:var(--space-4)"><div class="hx-row"><div class="grow"><b>Setup progress</b><small class="hx-sub">${t.dishes.withRecipe} of ${t.dishes.total} dishes have a recipe · ${t.ingredients.total} ingredients${t.ingredients.withoutCost ? ` · ${t.ingredients.withoutCost} without a cost` : ''}</small></div><a class="btn btn-sm btn-secondary" href="hx-stock.html">Ingredients</a><a class="btn btn-sm btn-secondary" href="hx-menu.html">Menu</a></div>${(t.checklist || []).map(step).join('')}</div>
+      <form class="hx-card hx-form" id="tf" style="max-width:720px" novalidate><fieldset ${editable ? '' : 'disabled'} style="border:0;padding:0;display:grid;gap:var(--space-3)">
+        <h4>How it behaves</h4>
+        <div class="two">${fieldHtml({ name: 'expiryCriticalDays', label: 'Red alert: expires within (days)', type: 'number', min: 0, max: 365, value: s.expiryCriticalDays })}${fieldHtml({ name: 'expiryWarningDays', label: 'Orange alert: expires within (days)', type: 'number', min: 1, max: 365, value: s.expiryWarningDays })}</div>
+        ${fieldHtml({ name: 'autoWriteOffExpired', label: 'Write expired ingredients off automatically', type: 'checkbox', value: s.autoWriteOffExpired, hint: 'Off: they stay on the Batches list until a manager writes them off.' })}
+        <div class="two">${fieldHtml({ name: 'targetFoodCostPercent', label: 'Target food cost (% of sales)', type: 'number', min: 1, max: 100, value: s.targetFoodCostPercent })}${fieldHtml({ name: 'costBasis', label: 'Profit & loss counts food cost from', type: 'select', value: s.costBasis, options: [['AUTO', 'Automatic (recipes when tracking is on)'], ['RECIPE', 'Recipes: what was actually used'], ['PURCHASES', 'Purchases: what was bought']] })}</div>
+        ${editable ? '<div><button class="btn btn-primary" type="submit">Save changes</button></div>' : ''}</fieldset></form>` : ''}`;
+    box.querySelector('#tg')?.addEventListener('click', async (e) => {
+      if (t.enabled && !window.confirm('Turn ingredient tracking off? Recipes and stock are kept, but sales will stop deducting ingredients.')) return;
+      window.UI.setButtonLoading(e.currentTarget, true, 'Saving…');
+      const r = await send('put', '/restaurant/tracking', { enabled: !t.enabled });
+      if (r) { window.UI.toast.success(t.enabled ? 'Tracking is off' : 'Tracking is on'); setTimeout(() => location.reload(), 600); } else window.UI.setButtonLoading(e.currentTarget, false);
+    });
+    box.querySelector('#tf')?.addEventListener('submit', async (e) => {
+      e.preventDefault(); const f = e.currentTarget, n = (k) => (f.querySelector(`[name="${k}"]`).value === '' ? undefined : Number(f.querySelector(`[name="${k}"]`).value));
+      const body = { tracking: { expiryCriticalDays: n('expiryCriticalDays'), expiryWarningDays: n('expiryWarningDays'), targetFoodCostPercent: n('targetFoodCostPercent'), autoWriteOffExpired: f.querySelector('[name="autoWriteOffExpired"]').checked, costBasis: f.querySelector('[name="costBasis"]').value } };
+      Object.keys(body.tracking).forEach((k) => body.tracking[k] === undefined && delete body.tracking[k]);
+      const btn = f.querySelector('[type=submit]'); window.UI.setButtonLoading(btn, true, 'Saving…'); const r = await send('put', '/restaurant/tracking', body); window.UI.setButtonLoading(btn, false);
+      if (r) window.UI.toast.success('Saved');
+    });
   }
 
   function paint(values) {

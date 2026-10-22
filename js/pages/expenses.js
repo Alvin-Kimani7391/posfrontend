@@ -4,7 +4,8 @@
  * land as PENDING until a manager/owner approves or rejects them.
  */
 (function () {
-  const CATEGORIES = ['Rent', 'Electricity', 'Water', 'Transport', 'Salary', 'Packaging', 'Internet', 'Maintenance', 'Other'];
+  const CATEGORIES = ['Salary', 'Wages', 'Food Purchases', 'Rent', 'Electricity', 'Water', 'Gas & Fuel', 'Transport', 'Packaging', 'Internet', 'Maintenance', 'Cleaning', 'Marketing', 'Licences', 'Insurance', 'Taxes', 'Other'];
+  const PAYROLL = ['Salary', 'Wages'];
   const state = { page: 1, limit: 10, status: '' };
   let contentEl;
 
@@ -126,17 +127,36 @@
             </div>
             <div class="field"><label>Date</label><input class="input" name="expenseDate" type="date" value="${new Date().toISOString().slice(0, 10)}" /></div>
           </div>
+          <div id="payroll-box" hidden>
+            <div class="form-row">
+              <div class="field"><label>Who was paid</label><select class="select" name="employeeId"><option value="">Choose staff member</option></select></div>
+              <div class="field"><label>For month</label><input class="input" name="payPeriod" type="month" value="${new Date().toISOString().slice(0, 7)}" /></div>
+            </div>
+          </div>
           <div class="field"><label>Reference <span class="text-muted">(optional)</span></label><input class="input" name="reference" /></div>
+          <p class="text-xs text-muted" id="cat-hint"></p>
         </form>
       `,
       footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="save" id="expense-save-btn">Save</button>`,
     });
 
+    const catSel = modal.querySelector('[name="category"]'), box = modal.querySelector('#payroll-box'), hint = modal.querySelector('#cat-hint');
+    let staffLoaded = false;
+    const onCat = async () => {
+      const pay = PAYROLL.includes(catSel.value); box.hidden = !pay;
+      hint.textContent = catSel.value === 'Food Purchases' ? 'Use this for food and drink you bought if you are not tracking ingredients by recipe. It counts as food cost in Profit & loss.' : pay ? 'Salaries and wages are counted in Profit & loss once approved.' : '';
+      if (pay && !staffLoaded) {
+        staffLoaded = true;
+        try { const { data } = await window.Api.get('/employees', { page: 1, limit: 100 }); const sel = modal.querySelector('[name="employeeId"]'); (data.items || data.employees || []).forEach((u) => { const o = document.createElement('option'); o.value = u._id; o.textContent = u.name + (u.role ? ` (${String(u.role).toLowerCase()})` : ''); sel.appendChild(o); }); } catch (e) { /* staff list is optional */ }
+      }
+    };
+    catSel.addEventListener('change', onCat); onCat();
     modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
     modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
       const form = modal.querySelector('#expense-form');
       if (!form.reportValidity()) return;
       const raw = window.UI.serializeForm(form);
+      if (!PAYROLL.includes(raw.category)) { delete raw.employeeId; delete raw.payPeriod; } else if (!raw.employeeId) delete raw.employeeId;
       const btn = document.getElementById('expense-save-btn');
       window.UI.setButtonLoading(btn, true, 'Saving…');
       try {

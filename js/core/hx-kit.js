@@ -28,7 +28,8 @@
     if (!rows.length) { if (b) b.remove(); return; }
     if (!b) { b = document.createElement('div'); b.id = 'hx-banner'; b.className = 'hx-banner'; b.setAttribute('role', 'alert'); document.body.appendChild(b); }
     const f = rows[0];
-    const hint = f.code === 'FEATURE_DISABLED' ? 'This service is switched off. Turn it on in <a href="hx-services.html">Services &amp; system check</a>.'
+    const hint = f.code === 'FEATURE_DISABLED' && /^\/restaurant\/(ingredients|recipes)/.test(f.path || '') ? 'Ingredient tracking is switched off. Turn it on in <a href="hx-settings.html#tracking">Service settings → Ingredient tracking</a>.'
+      : f.code === 'FEATURE_DISABLED' ? 'This service is switched off. Turn it on in <a href="hx-services.html">Services &amp; system check</a>.'
       : f.code === 'NETWORK_ERROR' ? 'Cannot reach the backend. Check the address in <a href="hx-services.html">Services &amp; system check</a>.'
       : f.code === 'ROUTE_NOT_FOUND' ? 'The backend you are connected to does not have this route (old deployment). Redeploy the updated backend, then run the <a href="hx-services.html">system check</a>.'
       : 'Open the <a href="hx-services.html">system check</a> for details.';
