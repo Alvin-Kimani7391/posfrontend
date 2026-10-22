@@ -91,6 +91,7 @@
     const food = feature('restaurantOrdering'), rooms = feature('accommodation');
     add(food && can('restaurant.orders.view'), 'hx-floor.html', 'table', 'Tables & orders', 'Take an order or open a table');
     add(food && can('restaurant.kitchen.view'), 'hx-kitchen.html', 'flame', 'Kitchen & bar', 'Tickets to cook and serve');
+    add(can('cashier.view') && ['OWNER','MANAGER','CASHIER'].includes(window.HX.user().role), 'hx-cashier.html', 'cash', 'Cashier desk', 'Confirm payments, cash drawer')
     add(food && can('restaurant.bills.view'), 'hx-bills.html', 'receipt', 'Bills & payments', 'Collect payment, split, tip');
     add(feature('reservations') && can('restaurant.reservations.view'), 'hx-reservations.html', 'calendar', 'Reservations', 'Bookings for today and later');
     add(rooms && can('accommodation.stays.view'), 'hx-desk.html', 'key', 'Front desk', 'Arrivals, departures, in-house');

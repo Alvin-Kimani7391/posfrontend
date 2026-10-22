@@ -56,7 +56,7 @@
       case 'RECEPTIONIST': return rooms ? 'hx-desk.html' : HX_HOME;
       case 'HOUSEKEEPER': return 'hx-housekeeping.html';
       case 'DELIVERY_RIDER': return 'hx-delivery.html';
-      case 'CASHIER': return food ? 'hx-floor.html' : (rooms ? 'hx-desk.html' : HX_HOME);
+      case 'CASHIER': return 'hx-cashier.html';
       default: return HX_HOME;
     }
   }

@@ -124,6 +124,8 @@
   /* ---- Restaurant & accommodation roles (mirrors backend constants/restaurantPermissions.js). UI hiding only. ---- */
   const HX_ROLE_GRANTS = {
   "MANAGER": [
+    "cashier.view",
+    "cashier.drawer",
     "restaurant.settings.view",
     "restaurant.menu.view",
     "restaurant.menu.manage",
@@ -204,6 +206,8 @@
     "accommodation.folio.verify"
   ],
   "CASHIER": [
+    "cashier.view",
+    "cashier.drawer",
     "restaurant.menu.view",
     "restaurant.tables.view",
     "restaurant.tables.view_all",

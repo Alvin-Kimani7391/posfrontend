@@ -43,6 +43,7 @@
     // Anti-fraud: scan a receipt's QR to confirm it is a real sale. Open to every signed-in staff member (no permission).
     { key: 'verify', hxHide: true,        label: 'Verify receipt',     icon: 'shield',    href: 'verify.html' },
     // ---- Restaurant & accommodation (shown only when those modules are switched on; see isHospitality()).
+    { key: 'hx-cashier',       group: 'Restaurant',    label: 'Cashier desk',         icon: 'cash',     href: 'hx-cashier.html',      permission: 'cashier.view', roles: ['OWNER', 'MANAGER', 'CASHIER'], feature: ['restaurantOrdering', 'accommodation'] },
     { key: 'hx-floor',        group: 'Restaurant',    label: 'Tables & orders',      icon: 'table',    href: 'hx-floor.html',        permission: 'restaurant.orders.view', feature: ['restaurantOrdering'] },
     { key: 'hx-kitchen',      group: 'Restaurant',    label: 'Kitchen & bar',        icon: 'flame',    href: 'hx-kitchen.html',      permission: 'restaurant.kitchen.view', feature: ['restaurantOrdering'] },
     { key: 'hx-bills',        group: 'Restaurant',    label: 'Bills & payments',     icon: 'receipt',  href: 'hx-bills.html',        permission: 'restaurant.bills.view', feature: ['restaurantOrdering'] },
@@ -408,6 +409,7 @@
   function itemAllowed(item, user) {
     if (!itemVisibleForBusiness(item)) return false;
     if (item.ownerOnly && user?.role !== 'OWNER') return false;
+    if (item.roles && !item.roles.includes(user?.role)) return false;
     if (item.hxHide && isHospitality()) return false;
     if (item.permAny && !item.permAny.some((p) => window.Permissions.can(user, p))) return false;
     return true;
@@ -447,7 +449,7 @@
   function bottomNavKeys() {
     if (!isHospitality()) return BOTTOM_NAV_KEYS;
     const user = getUser();
-    const want = ['dashboard', 'hx-floor', 'hx-kitchen', 'hx-desk', 'hx-rooms', 'hx-bills', 'hx-stays', 'hx-housekeeping', 'hx-delivery', 'hx-guest', 'employees'];
+    const want = ['dashboard', 'hx-cashier', 'hx-floor', 'hx-kitchen', 'hx-desk', 'hx-rooms', 'hx-bills', 'hx-stays', 'hx-housekeeping', 'hx-delivery', 'hx-guest', 'employees'];
     return want.filter((k) => { const it = NAV_ITEMS.find((n) => n.key === k); return it && itemAllowed(it, user) && (!it.permission || window.Permissions.can(user, it.permission)); }).slice(0, 5);
   }
 
