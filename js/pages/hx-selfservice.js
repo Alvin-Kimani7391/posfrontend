@@ -7,24 +7,25 @@
 (function () {
   const { E, M, can, get, list, head, pill, dt, hm } = window.HX;
   let el, tab = 'CASH', search = '', info = null, ss = {}, branches = [], busy = false;
-  const canDesk = () => can('restaurant.bills.view'), canSetup = () => can('restaurant.settings.manage');
+  const canDesk = () => can('restaurant.bills.view'), canSetup = () => can('restaurant.settings.manage'), canTables = () => can('restaurant.tables.assign');
+  let pick = new Set();
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
     el = window.HX.mount('Self-service kiosk'); if (!el) return;
     await window.AppShell.whenProfileReady?.();
-    if (!canDesk() && !canSetup()) { el.innerHTML = head('Self-service kiosk', '') + window.HX.empty('No access', 'Ask the owner or a manager for access.'); return; }
-    if (!canDesk()) tab = 'SETUP';
+    if (!canDesk() && !canSetup() && !canTables()) { el.innerHTML = head('Self-service kiosk', '') + window.HX.empty('No access', 'Ask the owner or a manager for access.'); return; }
+    if (!canDesk()) tab = canTables() ? 'TABLES' : 'SETUP';
     show();
-    window.HX.live(() => { if (!document.querySelector('.modal-backdrop') && tab !== 'SETUP') show(true); }, 8000);
+    window.HX.live(() => { if (!document.querySelector('.modal-backdrop') && tab !== 'SETUP' && tab !== 'TABLES') show(true); }, 8000);
   }
 
   async function show(quiet) {
-    const tabs = []; if (canDesk()) tabs.push(['CASH', 'Waiting for payment'], ['PAID', 'Paid today']); if (canSetup()) tabs.push(['SETUP', 'Kiosk setup']);
+    const tabs = []; if (canDesk()) tabs.push(['CASH', 'Waiting for payment'], ['PAID', 'Paid today']); if (canTables()) tabs.push(['TABLES', 'Free tables']); if (canSetup()) tabs.push(['SETUP', 'Kiosk setup']);
     el.innerHTML = head('Self-service kiosk', 'Customers order and pay at the kiosk. Confirm cash here.') + window.HX.tabs(tabs, tab) + '<div id="ss"></div>';
     el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; show(); }));
     const box = el.querySelector('#ss'); if (!quiet) box.innerHTML = window.HX.skel('rows');
-    return tab === 'SETUP' ? setup(box) : desk(box);
+    return tab === 'SETUP' ? setup(box) : tab === 'TABLES' ? tables(box) : desk(box);
   }
 
   // ---------------------------------------------------------------- cashier desk
@@ -34,6 +35,7 @@
     const bar = `<div class="hx-row" style="margin-bottom:var(--space-3)"><input class="input grow" id="sq" type="search" placeholder="Search by order no., collect no., table or customer code" value="${E(search)}"></div>`;
     box.innerHTML = bar + (rows.length ? `<div class="hx-card flush">${rows.map((o) => row(o)).join('')}</div>` : window.HX.empty(tab === 'PAID' ? 'Nothing paid yet' : 'No kiosk orders waiting', tab === 'PAID' ? 'Paid kiosk orders from the last 24 hours show here.' : 'When a customer chooses “Cash”, the order appears here until you confirm the money.'));
     const sq = box.querySelector('#sq'); let t; sq.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { search = sq.value.trim(); desk(box).then(() => { const n = box.querySelector('#sq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }); }, 400); });
+    box.querySelectorAll('[data-bill]').forEach((b) => b.addEventListener('click', () => viewBill(rows.find((x) => String(x.id) === b.dataset.bill))));
     box.querySelectorAll('[data-cash]').forEach((b) => b.addEventListener('click', () => confirmCash(rows.find((x) => String(x.id) === b.dataset.cash))));
   }
   function row(o) {
@@ -44,7 +46,20 @@
     return `<div class="hx-row"><div class="grow"><b>${E(o.orderNumber)}${o.pickupNumber ? ' · #' + E(o.pickupNumber) : ''} · ${E(where)}</b>
       <small class="hx-sub">${E((o.items || []).slice(0, 4).join(', '))}${(o.items || []).length > 4 ? '…' : ''} · ${hm(o.createdAt)}${o.expiresAt && !paid ? ' · expires ' + hm(o.expiresAt) : ''}</small></div>
       ${pill(label, tone)}<span class="hx-money">${M(o.total)}</span>
-      ${cash && can('restaurant.bills.pay') ? `<button class="btn btn-sm btn-primary" data-cash="${o.id}">Confirm cash</button>` : ''}</div>`;
+      <button class="btn btn-sm btn-secondary" data-bill="${o.id}">Bill</button>${cash && can('restaurant.bills.pay') ? `<button class="btn btn-sm btn-primary" data-cash="${o.id}">Confirm cash</button>` : ''}</div>`;
+  }
+  function paper(o) {
+    const items = (o.items || []).map((i) => `<div style="display:flex;justify-content:space-between"><span>${E(i)}</span></div>`).join('');
+    return `<div id="bp" style="font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;max-width:300px;margin:0 auto;text-align:center"><b>${o.paymentState === 'PAID' ? 'RECEIPT' : 'BILL'} ${E(o.orderNumber)}</b><br>${o.table ? 'Table ' + E(o.table) : 'Take away'}${o.pickupNumber ? ' · Collect #' + E(o.pickupNumber) : ''}<br>${dt(o.createdAt)}<hr style="border:0;border-top:1px dashed #999">
+      <div style="text-align:left">${items}</div><hr style="border:0;border-top:1px dashed #999"><b style="font-size:16px">${o.paymentState === 'PAID' ? 'TOTAL PAID' : 'AMOUNT DUE'}: ${M(o.total)}</b>${o.paymentState === 'PAID' ? '' : '<br><b>UNPAID - CASH</b>'}</div>`;
+  }
+  function viewBill(o) {
+    if (!o) return;
+    window.HX.modal({ title: 'Bill · ' + o.orderNumber, maxWidth: '420px', body: paper(o), footer: '<button class="btn btn-secondary" data-x>Close</button><button class="btn btn-primary" id="pr">Print</button>',
+      onMount(root, close) {
+        root.querySelector('[data-x]').onclick = close;
+        root.querySelector('#pr').onclick = () => { const w = window.open('', '_blank', 'width=380,height=600'); if (!w) return window.UI.toast.warning('Allow pop-ups to print'); w.document.write('<body style="margin:12px">' + paper(o) + '</body>'); w.document.close(); w.focus(); w.print(); };
+      } });
   }
   function confirmCash(o) {
     if (!o) return; let key = window.Api.newIdempotencyKey();
@@ -67,6 +82,43 @@
         };
       },
     });
+  }
+
+  // ---------------------------------------------------------------- free tables (a customer left, or walked away from an unpaid kiosk order)
+  async function tables(box) {
+    const bid = window.HX.branchId();
+    const [d, k] = await Promise.all([get('/restaurant/tables', { branchId: bid }), get('/restaurant/self-service/orders', { branchId: bid })]);
+    const floor = list(d, 'tables'); const kiosk = {}; list(k, 'orders').forEach((o) => { if (o.table) kiosk[o.table] = o; });
+    const busyT = floor.filter((t) => (t.status || 'AVAILABLE') !== 'AVAILABLE');
+    pick = new Set([...pick].filter((id) => busyT.some((t) => String(t._id) === id)));
+    const label = (t) => { const st = t.status || 'AVAILABLE', ko = kiosk[t.name]; return ko ? 'Kiosk order ' + ko.orderNumber + (ko.paymentState === 'AWAITING_CASH' ? ' · cash not paid' : ' · M-PESA not paid') : st.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase()); };
+    box.innerHTML = `<p class="hx-sub" style="margin:0 0 10px">Tick the tables whose customers have left and press <b>Free tables</b>. Unpaid kiosk orders on those tables are cancelled (nobody is charged) and the table becomes available again.</p>
+      <div class="hx-row" style="margin-bottom:var(--space-3);gap:8px;flex-wrap:wrap"><button class="btn btn-secondary btn-sm" id="t_all">Select all not available</button><button class="btn btn-secondary btn-sm" id="t_none">Clear</button><span class="grow"></span><button class="btn btn-primary" id="t_go" ${pick.size ? '' : 'disabled'}>Free tables (${pick.size})</button></div>
+      ${floor.length ? `<div class="hx-card flush">${floor.map((t) => { const av = (t.status || 'AVAILABLE') === 'AVAILABLE'; return `<label class="hx-row" style="${av ? 'opacity:.55' : 'cursor:pointer'}"><input type="checkbox" data-t="${E(t._id)}" ${av ? 'disabled' : ''} ${pick.has(String(t._id)) ? 'checked' : ''} style="width:22px;height:22px"><span class="grow"><b>Table ${E(t.name)}</b><small class="hx-sub">${t.seats ? t.seats + ' seats · ' : ''}${E(label(t))}</small></span>${pill(av ? 'AVAILABLE' : (t.status || '').replace(/_/g, ' '), av ? 'ok' : 'busy')}</label>`; }).join('')}</div>` : window.HX.empty('No tables', 'There are no tables for this branch.')}`;
+    const $ = (i) => box.querySelector(i);
+    const upd = () => { const b = $('#t_go'); b.disabled = !pick.size; b.textContent = `Free tables (${pick.size})`; };
+    box.querySelectorAll('input[data-t]').forEach((c) => c.addEventListener('change', () => { c.checked ? pick.add(c.dataset.t) : pick.delete(c.dataset.t); upd(); }));
+    $('#t_all').onclick = () => { busyT.forEach((t) => pick.add(String(t._id))); tables(box); };
+    $('#t_none').onclick = () => { pick.clear(); tables(box); };
+    $('#t_go').onclick = async () => {
+      const chosen = floor.filter((t) => pick.has(String(t._id))); if (!chosen.length) return;
+      const withKiosk = chosen.filter((t) => kiosk[t.name]).length;
+      const ok = await window.UI.confirmDialog({ title: `Free ${chosen.length} table${chosen.length > 1 ? 's' : ''}?`, message: 'Only do this when the customers have left. ' + (withKiosk ? withKiosk + ' unpaid kiosk order(s) will be cancelled. ' : '') + 'Orders that are already paid or being served are not cancelled.', confirmText: 'Free tables' });
+      if (!ok) return; const b = $('#t_go'); b.disabled = true; b.textContent = 'Working…';
+      const reason = 'Table freed by ' + ((window.HX.user() || {}).name || 'staff'); let done = 0; const fails = [];
+      for (const t of chosen) {
+        try {
+          const ko = kiosk[t.name];
+          if (ko) await window.Api.post('/restaurant/orders/' + ko.id + '/cancel', { reason });
+          await window.Api.post('/restaurant/tables/' + t._id + '/status', { status: 'AVAILABLE', reason });
+          done++;
+        } catch (e) { fails.push(`Table ${t.name}: ${(e && e.message) || 'failed'}`); }
+      }
+      pick.clear();
+      if (done) window.UI.toast.success(`${done} table${done > 1 ? 's' : ''} freed`);
+      if (fails.length) window.UI.toast.error(fails.slice(0, 3).join(' · '));
+      tables(box);
+    };
   }
 
   // ---------------------------------------------------------------- setup
