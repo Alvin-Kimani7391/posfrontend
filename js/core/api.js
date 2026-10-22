@@ -130,9 +130,19 @@
     }
 
     // Locked for non-payment: send the user to the one page that still works (Billing).
+    // NOTE: with cleanUrls the page path is "/billing" (no ".html"), so match both forms - otherwise the
+    // Billing page redirects to itself forever (the screen "blinks") and the owner can never pay.
     if (res.status === 402 && payload.code === 'SUBSCRIPTION_LOCKED' && !background) {
-      const p = window.location.pathname;
-      if (!/billing\.html$/.test(p) && !p.includes('admin-') && !/login\.html$/.test(p)) window.location.href = 'billing.html?locked=1';
+      const p = window.location.pathname.replace(/\/+$/, '');
+      const onBilling = /(^|\/)billing(\.html)?$/.test(p);
+      const onExempt = onBilling || p.includes('admin-') || /(^|\/)(login|register|verify)(\.html)?$/.test(p);
+      let recent = false;
+      try { // loop guard: never auto-redirect more than once every 10s
+        const last = Number(sessionStorage.getItem('pos.lockRedirectAt') || 0);
+        recent = Date.now() - last < 10000;
+        if (!onExempt && !recent) sessionStorage.setItem('pos.lockRedirectAt', String(Date.now()));
+      } catch { /* storage blocked */ }
+      if (!onExempt && !recent) window.location.replace('billing?locked=1');
     }
 
     if (!res.ok || payload.success === false) {
