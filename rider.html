@@ -30,8 +30,8 @@ window.addEventListener('appinstalled', function () { window.__dp = null; try { 
 #rxIn .r{display:flex;gap:12px;align-items:center}
 #rxIn .i{width:46px;height:46px;border-radius:12px;background:#F26A21;color:#fff;display:grid;place-items:center;font-weight:800;font-size:20px;flex:none;overflow:hidden}
 #rxIn .i img{width:100%;height:100%;object-fit:cover}
-#rxIn b{font-size:15px;display:block}#rxIn p{margin:2px 0 0;color:#3B424A;font-size:13px}
-#rxIn ol{margin:10px 0 0;padding-left:20px;color:#3B424A;font-size:13px}#rxIn ol li{margin:3px 0}
+#rxIn .r b{font-size:15px;display:block}#rxIn ol b,#rxIn ol li b{display:inline;font-size:inherit;font-weight:700}#rxIn p{margin:2px 0 0;color:#3B424A;font-size:13px}
+#rxIn ol{margin:10px 0 0;padding-left:20px;color:#3B424A;font-size:13px}#rxIn{max-height:calc(100dvh - 24px);overflow:auto}body:has(.rl) #rxIn{bottom:calc(12px + env(safe-area-inset-bottom))}body:has(.rl) #rxUp{bottom:calc(84px + env(safe-area-inset-bottom))}@media (max-width:400px){#rxIn{padding:11px;border-radius:16px}#rxIn .i{width:38px;height:38px;font-size:17px}#rxIn b{font-size:14px}#rxIn p,#rxIn ol{font-size:12.5px}#rxIn button{min-height:42px}}#rxIn ol li{margin:3px 0}
 #rxIn .b{display:flex;gap:8px;margin-top:12px}
 #rxIn button{flex:1;min-height:44px;border-radius:12px;font:inherit;font-weight:700;border:0;cursor:pointer}
 #rxIn .p{background:#F26A21;color:#fff}#rxIn .g{background:#fff;color:#14171A;border:1px solid #cfd4d9}

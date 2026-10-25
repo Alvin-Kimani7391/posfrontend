@@ -117,3 +117,33 @@
 .rl.leave .rl-ride{transition:transform .8s cubic-bezier(.6,0,.9,.4);transform:translateX(150%);animation:none}
 @media (max-height:640px){.rl-hero{height:260px}.rl-copy h1{font-size:25px}.rl-chip{display:none}}
 @media (prefers-reduced-motion:reduce){.rl *,.rl *::before,.rl *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* ---------- small phones: everything scales down so the sign-in fits without breaking ---------- */
+.rl-sheet{min-width:0}.rl-st{min-width:0}
+@media (max-width:400px){
+  .rl-bar{padding:calc(14px + env(safe-area-inset-top)) 16px 0;gap:10px}
+  .rl-logo{width:40px;height:40px;border-radius:12px}.rl-bn{font-size:15.5px}.rl-bn span{font-size:10.5px}
+  .rl-copy{left:18px;right:18px;top:calc(74px + env(safe-area-inset-top))}
+  .rl-copy h1{font-size:26px}.rl-copy p{font-size:13px;max-width:200px}
+  .rl-chip{right:10px;top:calc(78px + env(safe-area-inset-top));min-width:0;padding:7px 11px 7px 7px;gap:8px;transform-origin:right top}
+  .rl-chip .ci{width:30px;height:30px}.rl-chip b{font-size:11.5px}.rl-chip small{font-size:10.5px}
+  .rl-sheet{padding:22px 18px calc(20px + env(safe-area-inset-bottom));border-radius:26px 26px 0 0}
+  .rl-h2{font-size:20px}.rl-sub{font-size:13px}
+  .rl-seg{margin:14px 0 12px}.rl-seg button{padding:10px 4px;font-size:13px;gap:5px}
+  .rl-f{margin-bottom:12px}.rl-f input{height:54px;font-size:16px;padding-right:46px}.rl-f label{font-size:14.5px}
+  .rl-btn{height:54px;font-size:16px;border-radius:15px}
+  .rl-help{margin-top:12px}.rl-steps{gap:10px}.rl-steps div{padding:11px 12px;gap:12px}
+}
+@media (max-height:700px){
+  .rl-hero{height:clamp(214px,34dvh,250px)}
+  .rl-copy{top:calc(70px + env(safe-area-inset-top))}
+  .rl-copy h1{font-size:24px}.rl-copy p{display:none}
+  .rl-ride{width:138px;bottom:14px;left:24%}
+  .rl-route{bottom:48px;height:110px}.rl-pin{bottom:78px;right:34px;transform-origin:50% 100%}
+  .rl-pin,.rl-pin svg{width:32px;height:32px}
+  .rl-sheet{margin-top:-24px;padding-top:18px}
+  .rl-seg{margin:12px 0 10px}.rl-f{margin-bottom:10px}.rl-f input{height:52px}.rl-btn{height:52px}
+  .rl-help{margin-top:10px}.rl-fine{margin-top:8px}
+}
+@media (max-height:600px){.rl-sub,.rl-fine{display:none}.rl-hero{height:200px}.rl-ride{width:120px}.rl-copy h1{font-size:22px}}
+@media (max-width:340px){.rl-chip{display:none}.rl-copy h1{font-size:23px}.rl-seg button svg{display:none}}
