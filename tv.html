@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <title>Live TV menu</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800;900&display=swap" />
+  <link rel="stylesheet" href="css/tv.css" />
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+    body.show-cursor { cursor: default; }
+    #tv { position: fixed; inset: 0; }
+    .tvp { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 22px; text-align: center; color: #fff; font-family: 'Plus Jakarta Sans', Arial, sans-serif; background: radial-gradient(900px 600px at 50% 0%, #7a0a1c, #121212 70%); padding: 24px; z-index: 30; }
+    .tvp.on { display: flex; }
+    .tvp h1 { font-size: clamp(28px, 5vw, 64px); font-weight: 900; margin: 0; } .tvp p { font-size: clamp(16px, 2vw, 26px); opacity: .85; margin: 0; max-width: 900px; }
+    .tvp input { font-size: clamp(30px, 6vw, 80px); font-weight: 900; letter-spacing: .25em; text-align: center; text-transform: uppercase; width: min(90vw, 760px); padding: 14px; border-radius: 18px; border: 4px solid #FFC72C; background: rgba(0,0,0,.4); color: #fff; outline: none; }
+    .tvp button { font-size: clamp(18px, 2.4vw, 32px); font-weight: 800; padding: 14px 44px; border-radius: 16px; border: 0; background: #FFC72C; color: #111; cursor: pointer; }
+    .tvp .err { color: #ffb4b4; font-weight: 700; min-height: 1.4em; }
+    .tvstat { position: fixed; right: 10px; bottom: 8px; z-index: 40; font: 600 13px Arial, sans-serif; color: #fff; background: rgba(0,0,0,.55); padding: 4px 10px; border-radius: 20px; opacity: 0; transition: opacity .3s; pointer-events: none; } .tvstat.on { opacity: 1; }
+    #fs { position: fixed; left: 12px; bottom: 10px; z-index: 40; font: 700 14px Arial, sans-serif; padding: 8px 14px; border-radius: 10px; border: 0; background: rgba(255,255,255,.9); cursor: pointer; display: none; }
+  </style>
+</head>
+<body>
+  <div id="tv"></div>
+  <section class="tvp" id="pair">
+    <h1>Connect this screen</h1>
+    <p>In the POS open <b>Live TV menu → Screens</b>, add a screen and type the 8-character code shown there.</p>
+    <input id="code" maxlength="9" autocomplete="off" autocapitalize="characters" inputmode="text" placeholder="XXXX-XXXX" />
+    <div class="err" id="perr"></div>
+    <button id="pbtn">Connect</button>
+  </section>
+  <section class="tvp" id="blocked"><h1 id="btitle">Screen switched off</h1><p id="bmsg"></p><button id="brepair" style="display:none">Enter a new code</button></section>
+  <div class="tvstat" id="stat"></div>
+  <button id="fs">Full screen</button>
+  <script src="js/core/config.js"></script>
+  <script src="js/core/tv-render.js"></script>
+  <script src="js/core/tv-player.js"></script>
+</body>
+</html>

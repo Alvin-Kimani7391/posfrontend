@@ -77,6 +77,7 @@
     patient: stroke('<circle cx="12" cy="7" r="3.5"/><path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/><path d="M12 16v4"/><path d="M10 18h4"/>'),
 
     // ---- Restaurant & accommodation (hospitality) icons
+    tv: stroke('<rect x="2" y="5" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 18v3"/>'),
     utensils: stroke('<path d="M6 3v8a2 2 0 0 0 2 2v8"/><path d="M4 3v6a2 2 0 0 0 2 2"/><path d="M8 3v6"/><path d="M17 3c-2 1.5-3 4-3 6.5 0 1.5 1 2.5 3 2.5v9"/>'),
     flame: stroke('<path d="M12 3c1 3 4 4.5 4 9a4 4 0 0 1-8 0c0-1.5.6-2.6 1.5-3.5C10 10 11.5 8 12 3z"/><path d="M12 21a2 2 0 0 0 2-2c0-1.3-1-2-2-3-1 1-2 1.7-2 3a2 2 0 0 0 2 2z"/>'),
     bed: stroke('<path d="M3 18V7"/><path d="M3 14h18v4"/><path d="M21 14v-2a3 3 0 0 0-3-3h-7v5"/><circle cx="7" cy="11" r="1.6"/>'),

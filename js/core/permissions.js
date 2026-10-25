@@ -450,6 +450,13 @@
     DEFAULT_ROLE_PERMISSIONS[role] = Array.from(new Set([...(DEFAULT_ROLE_PERMISSIONS[role] || []), ...HX_ROLE_GRANTS[role]]));
   });
 
+  // Live TV (digital menu board): managers run it; supervisors, head waiters and reception can only look.
+  const TV_ALL = ['tv.view', 'tv.manage', 'tv.publish', 'tv.screens'];
+  const TV_GRANTS = { MANAGER: TV_ALL, SUPERVISOR: ['tv.view'], HEAD_WAITER: ['tv.view'], RECEPTIONIST: ['tv.view'] };
+  Object.keys(TV_GRANTS).forEach((role) => {
+    DEFAULT_ROLE_PERMISSIONS[role] = Array.from(new Set([...(DEFAULT_ROLE_PERMISSIONS[role] || []), ...TV_GRANTS[role]]));
+  });
+
   function can(user, permission) {
     if (!user) return false;
     if (user.role === ROLES.OWNER) return true;
