@@ -1,1 +1,58 @@
-{"name":"Six Star POS Rider","short_name":"Rider","description":"Delivery rider app","start_url":"/rider.html","scope":"/","display":"standalone","background_color":"#0E1114","theme_color":"#F26A21","icons":[{"src":"/icons/icon-192.png","sizes":"192x192","type":"image/png"},{"src":"/icons/icon-512.png","sizes":"512x512","type":"image/png"},{"src":"/icons/icon-maskable-512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}]}
+{
+  "id": "/rider",
+  "name": "Six Star Rider",
+  "short_name": "Rider",
+  "description": "Delivery rider app: accept deliveries, navigate, share live location and collect payment.",
+  "lang": "en-KE",
+  "dir": "ltr",
+  "start_url": "/rider?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "portrait",
+  "background_color": "#0E1114",
+  "theme_color": "#F26A21",
+  "categories": [
+    "business",
+    "navigation",
+    "productivity"
+  ],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "My deliveries",
+      "short_name": "Deliveries",
+      "url": "/rider?source=shortcut#/home",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

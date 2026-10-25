@@ -8,7 +8,7 @@
   const app = $('#app');
   const qs = new URLSearchParams(location.search);
   const kv = { get: (k) => { try { return localStorage.getItem('rider.' + k); } catch (e) { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem('rider.' + k) : localStorage.setItem('rider.' + k, v); } catch (e) { /* blocked */ } } };
-  let QR = qs.get('t') || decodeURIComponent((location.pathname.match(/\/(?:d|r)\/([^/?#]+)/) || [])[1] || '') || kv.get('qr') || '';
+  let QR = qs.get('t') || decodeURIComponent((location.pathname.match(/\/(?:d|r|rider)\/([^/?#]+)/) || [])[1] || '') || kv.get('qr') || '';
   if (QR) kv.set('qr', QR);
 
   const S = { user: null, biz: null, online: false, pos: null, posErr: null, dash: null, sse: 'down', detail: null, seq: 0, cleanup: [], sound: kv.get('sound') !== '0' };

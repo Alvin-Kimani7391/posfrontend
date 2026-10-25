@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v4.0.1-live-tv-fix';
+const VERSION = 'v4.0.3-rider-pwa';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -19,7 +19,7 @@ const PRECACHE = [
   'rider.html', 'track.html', 'hx-live.html', 'css/live.css', 'js/core/live-kit.js', 'js/rider/rider-app.js', 'js/track/track-app.js', 'js/pages/hx-live.js', 'manifest-rider.json',
   'hx-cashier.html', 'css/hx-cashier.css', 'js/pages/hx-cashier.js', 'hx-floor.html', 'hx-kitchen.html', 'hx-bills.html', 'hx-reservations.html', 'hx-delivery.html', 'hx-storefront.html', 'js/pages/hx-storefront.js', 'hx-tv.html', 'js/pages/hx-tv.js', 'css/tv.css', 'js/core/tv-render.js', 'kiosk.html', 'css/kiosk.css', 'js/pages/kiosk.js', 'hx-selfservice.html', 'js/pages/hx-selfservice.js', 'store.html', 'hx-menu.html', 'hx-stock.html', 'hx-guest.html', 'hx-staff.html', 'hx-desk.html', 'hx-rooms.html', 'hx-stays.html', 'hx-housekeeping.html', 'hx-reports.html', 'js/pages/hx-floor.js', 'js/pages/hx-kitchen.js', 'js/pages/hx-bills.js', 'js/pages/hx-reservations.js', 'js/pages/hx-delivery.js', 'js/pages/hx-menu.js', 'js/pages/hx-stock.js', 'js/pages/hx-guest.js', 'js/pages/hx-staff.js', 'js/pages/hx-desk.js', 'js/pages/hx-rooms.js', 'js/pages/hx-stays.js', 'js/pages/hx-housekeeping.js', 'js/pages/hx-reports.js', 'js/core/qr-encoder.js',
   'hx-dashboard.html', 'hx-services.html', 'js/pages/hx-services.js', 'js/core/business-types.js', 'hx-setup.html', 'hx-settings.html', 'css/hospitality.css', 'css/hx-redesign.css', 'css/hx-pro.css', 'css/hx-fixes.css', 'js/core/hx-art.js', 'js/core/home-route.js', 'js/core/hx-kit.js', 'js/core/hx-pay.js', 'js/core/hx-order.js', 'js/core/hx-recipe.js', 'js/pages/hx-dashboard.js', 'js/pages/hx-setup.js', 'js/pages/hx-settings.js',
-  'offline.html', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'alerts.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'index.html', 'login.html', 'register.html', 'dashboard.html', 'sales.html',
+  'offline.html', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'alerts.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'store.webmanifest', 'index.html', 'login.html', 'register.html', 'dashboard.html', 'sales.html',
   'products.html', 'inventory.html', 'customers.html', 'branches.html', 'employees.html', 'suppliers.html',
   'purchases.html', 'expenses.html', 'refunds.html', 'reports.html', 'audit-logs.html', 'settings.html',
   'cash-register.html', 'notifications.html', 'offline-review.html', 'billing.html', 'crm.html',
@@ -155,6 +155,15 @@ self.addEventListener('fetch', (event) => {
     return; // the backend API is never cached
   }
   if (url.pathname.startsWith('/api/')) return;
+  // Storefront links (/s/TOKEN, /q/b_TOKEN): network first, fall back to the cached store page so the installed app never shows "page not found"
+  const SHELL = url.pathname.startsWith('/rider/') ? 'rider.html' : url.pathname.startsWith('/kiosk/') ? 'kiosk.html' : (url.pathname.startsWith('/s/') || /^\/q\/b_/.test(url.pathname)) ? 'store.html' : '';
+  if (req.mode === 'navigate' && SHELL) {
+    event.respondWith((async () => {
+      try { const res = await fetch(req); if (res && res.ok) return res; throw new Error('bad'); }
+      catch (e) { const cache = await caches.open(CACHE); const hit = await cache.match(scopeUrl(SHELL)); return hit || (await cache.match(scopeUrl(OFFLINE_URL))) || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } }); }
+    })());
+    return;
+  }
   if (url.pathname.startsWith('/s/') || url.pathname === '/s' || url.pathname.startsWith('/q/') || url.pathname === '/q' || url.pathname === '/q.html') return; // guest QR menu: always straight from the network
   if (url.pathname.endsWith('/sw.js')) return;
 

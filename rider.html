@@ -2,25 +2,113 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<script>
+/* capture the install prompt before anything else loads */
+window.__dp = null;
+window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); window.__dp = e; window.dispatchEvent(new Event('rx-bip')); });
+window.addEventListener('appinstalled', function () { window.__dp = null; try { localStorage.setItem('rider.installed', '1'); } catch (e) {} window.dispatchEvent(new Event('rx-inst')); });
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Rider · Six Star POS</title>
+<meta name="description" content="Delivery rider app" />
 <meta name="theme-color" content="#F26A21" />
+<meta name="color-scheme" content="light" />
 <meta name="robots" content="noindex,nofollow" />
 <meta name="apple-mobile-web-app-capable" content="yes" /><meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="Rider" /><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<link rel="manifest" href="manifest-rider.json" />
+<meta name="format-detection" content="telephone=no" />
+<link rel="manifest" href="/manifest-rider.json" />
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <link rel="icon" href="/icons/favicon-32.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
-<link rel="stylesheet" href="css/live.css" />
+<link rel="stylesheet" href="/css/live.css" />
+<style>
+#rxIn{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:calc(78px + env(safe-area-inset-bottom));width:min(456px,calc(100% - 20px));z-index:2000;background:#fff;color:#14171A;border:1px solid #ECEEF0;border-radius:18px;box-shadow:0 12px 36px rgba(20,23,26,.35);padding:14px;font:14px/1.4 "Plus Jakarta Sans",system-ui,sans-serif}
+#rxIn .r{display:flex;gap:12px;align-items:center}
+#rxIn .i{width:46px;height:46px;border-radius:12px;background:#F26A21;color:#fff;display:grid;place-items:center;font-weight:800;font-size:20px;flex:none;overflow:hidden}
+#rxIn .i img{width:100%;height:100%;object-fit:cover}
+#rxIn b{font-size:15px;display:block}#rxIn p{margin:2px 0 0;color:#3B424A;font-size:13px}
+#rxIn ol{margin:10px 0 0;padding-left:20px;color:#3B424A;font-size:13px}#rxIn ol li{margin:3px 0}
+#rxIn .b{display:flex;gap:8px;margin-top:12px}
+#rxIn button{flex:1;min-height:44px;border-radius:12px;font:inherit;font-weight:700;border:0;cursor:pointer}
+#rxIn .p{background:#F26A21;color:#fff}#rxIn .g{background:#fff;color:#14171A;border:1px solid #cfd4d9}
+#rxStrip{display:none;position:fixed;top:0;left:0;right:0;z-index:1900;background:#14171A;color:#fff;text-align:center;font:600 12.5px "Plus Jakarta Sans",system-ui,sans-serif;padding:calc(6px + env(safe-area-inset-top)) 10px 6px;cursor:pointer}
+#rxStrip u{color:#ffb98f}
+#rxOff{display:none;position:fixed;left:0;right:0;top:0;z-index:2100;background:#B45309;color:#fff;text-align:center;font:700 12.5px "Plus Jakarta Sans",system-ui,sans-serif;padding:calc(6px + env(safe-area-inset-top)) 10px 6px}
+#rxUp{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:calc(150px + env(safe-area-inset-bottom));z-index:2100;background:#14171A;color:#fff;border-radius:14px;padding:10px 12px 10px 16px;font:600 13.5px "Plus Jakarta Sans",system-ui,sans-serif;align-items:center;gap:12px;box-shadow:0 10px 28px rgba(0,0,0,.4)}
+#rxUp button{background:#F26A21;color:#fff;border:0;border-radius:10px;padding:9px 14px;font:inherit;font-weight:700;cursor:pointer}
+</style>
 </head>
 <body>
+<div id="rxOff" role="status">You are offline — showing saved data. Deliveries refresh when you reconnect.</div>
+<div id="rxStrip" role="button" tabindex="0">📲 App not installed — <u>tap to install</u> for alerts &amp; reliable GPS</div>
 <div id="app"><div class="pad" style="padding-top:80px"><div class="sk" style="height:90px"></div></div></div>
+<div id="rxIn" role="dialog" aria-label="Install rider app">
+  <div class="r"><div class="i">R</div><div style="flex:1;min-width:0"><b>Install the Rider app</b><p id="rxTxt"></p></div></div>
+  <ol id="rxSteps" style="display:none"></ol>
+  <div class="b"><button class="g" id="rxLater" type="button">Later</button><button class="p" id="rxGo" type="button">Install app</button></div>
+</div>
+<div id="rxUp" role="status"><span>A new version is ready</span><button id="rxUpBtn" type="button">Update</button></div>
+<noscript><p style="padding:24px;font-family:sans-serif">Please enable JavaScript to use the rider app.</p></noscript>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="js/core/config.js"></script>
-<script src="js/core/live-kit.js"></script>
-<script src="js/rider/rider-app.js"></script>
+<script src="/js/core/config.js"></script>
+<script src="/js/core/live-kit.js"></script>
+<script src="/js/rider/rider-app.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  /* ---- service worker + update prompt ---- */
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').then(function (reg) {
+      function offer(w) { if (!w) return; var up = $('rxUp'); up.style.display = 'flex'; $('rxUpBtn').onclick = function () { w.postMessage({ type: 'SKIP_WAITING' }); }; }
+      if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
+      reg.addEventListener('updatefound', function () { var w = reg.installing; if (w) w.addEventListener('statechange', function () { if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w); }); });
+      setInterval(function () { try { reg.update(); } catch (e) {} }, 30 * 60 * 1000);
+    }).catch(function () {});
+    var reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () { if (reloading) return; reloading = true; location.reload(); });
+  }
+
+  /* ---- offline bar ---- */
+  function net() { $('rxOff').style.display = navigator.onLine === false ? 'block' : 'none'; }
+  window.addEventListener('online', net); window.addEventListener('offline', net); net();
+
+  /* ---- install prompt ---- */
+  var ua = navigator.userAgent || '';
+  var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.matchMedia && window.matchMedia('(display-mode: minimal-ui)').matches) || navigator.standalone === true || /[?&]source=pwa/.test(location.search);
+  if (standalone) { set('rider.installed', '1'); return; }
+  var ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var android = /android/i.test(ua);
+  var inApp = /FBAN|FBAV|Instagram|WhatsApp|Line\/|MicroMessenger|Twitter|TikTok|Snapchat|musical_ly/i.test(ua) || (android && /; wv\)/.test(ua));
+  var safari = ios && /safari/i.test(ua) && !/crios|fxios|edgios|opios/i.test(ua);
+  var box = $('rxIn'), strip = $('rxStrip'), steps = $('rxSteps'), txt = $('rxTxt'), go = $('rxGo');
+
+  function hide(snoozeMin) { box.style.display = 'none'; if (snoozeMin) set('rider.instSnooze', String(Date.now() + snoozeMin * 60000)); strip.style.display = 'block'; document.body.style.paddingTop = 'calc(30px + env(safe-area-inset-top))'; }
+  function fill(mode) {
+    steps.style.display = 'none'; go.style.display = '';
+    if (mode === 'prompt') { txt.textContent = 'Install it to get delivery alerts, keep GPS tracking steady and open in one tap.'; go.textContent = 'Install app'; go.onclick = function () { var dp = window.__dp; if (!dp) return fill('manual'); dp.prompt(); dp.userChoice.then(function (c) { window.__dp = null; if (c && c.outcome === 'accepted') { box.style.display = 'none'; strip.style.display = 'none'; document.body.style.paddingTop = ''; } else hide(30); }); }; }
+    else if (mode === 'inapp') { txt.textContent = 'You are inside another app. Open this page in ' + (ios ? 'Safari' : 'Chrome') + ' to install.'; steps.innerHTML = ios ? '<li>Tap <b>•••</b> or the <b>Share</b> icon</li><li>Choose <b>Open in Safari</b></li>' : '<li>Tap the <b>⋮</b> menu</li><li>Choose <b>Open in Chrome / browser</b></li>'; steps.style.display = 'block'; go.style.display = 'none'; }
+    else if (mode === 'ios') { txt.textContent = 'Add it to your Home Screen to receive delivery alerts.'; steps.innerHTML = safari ? '<li>Tap the <b>Share</b> button at the bottom of Safari</li><li>Scroll and tap <b>Add to Home Screen</b></li><li>Tap <b>Add</b>, then open <b>Rider</b> from your Home Screen</li>' : '<li>Open this page in <b>Safari</b> (Chrome on iPhone cannot install apps)</li><li>Tap <b>Share</b> → <b>Add to Home Screen</b></li>'; steps.style.display = 'block'; go.textContent = 'Got it'; go.onclick = function () { hide(30); }; }
+    else { txt.textContent = 'Install it to get delivery alerts and steady GPS tracking.'; steps.innerHTML = '<li>Tap the <b>⋮</b> menu in your browser</li><li>Choose <b>Install app</b> or <b>Add to Home screen</b></li>'; steps.style.display = 'block'; go.textContent = 'Got it'; go.onclick = function () { hide(30); }; }
+    box.style.display = 'block'; strip.style.display = 'none'; document.body.style.paddingTop = '';
+  }
+  function mode() { return window.__dp ? 'prompt' : inApp ? 'inapp' : ios ? 'ios' : 'manual'; }
+  $('rxLater').onclick = function () { hide(30); };
+  strip.onclick = function () { fill(mode()); };
+  strip.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') strip.onclick(); };
+  window.addEventListener('rx-bip', function () { if (box.style.display !== 'block' || $('rxGo').textContent !== 'Install app') fill('prompt'); });
+  window.addEventListener('rx-inst', function () { box.style.display = 'none'; strip.style.display = 'none'; document.body.style.paddingTop = ''; });
+
+  var sn = +get('rider.instSnooze') || 0;
+  if (get('rider.installed') === '1' && !window.__dp && navigator.getInstalledRelatedApps === undefined) { /* may have been installed earlier: still nudge via the slim strip only */ strip.style.display = 'block'; document.body.style.paddingTop = 'calc(30px + env(safe-area-inset-top))'; return; }
+  setTimeout(function () { if (Date.now() < sn) { strip.style.display = 'block'; document.body.style.paddingTop = 'calc(30px + env(safe-area-inset-top))'; } else fill(mode()); }, 1200);
+})();
+</script>
 </body>
 </html>

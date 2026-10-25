@@ -10,6 +10,7 @@
 <meta name="robots" content="noindex,nofollow" />
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <link rel="icon" href="/icons/favicon-32.png" />
+<link rel="manifest" href="/store.webmanifest" />
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
@@ -145,9 +146,9 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 .tot.big b:last-child{color:var(--o)}
 
 /* sheets */
-.ov{position:fixed;inset:0;background:rgba(10,12,14,.55);z-index:60;display:flex;align-items:flex-end;justify-content:center;animation:fade .18s}
+.ov{position:fixed;inset:0;touch-action:manipulation;background:rgba(10,12,14,.55);z-index:60;display:flex;align-items:flex-end;justify-content:center;animation:fade .18s}
 @keyframes fade{from{opacity:0}}
-.sheet{background:#fff;width:min(480px,100%);max-height:92vh;border-radius:24px 24px 0 0;display:flex;flex-direction:column;animation:up .26s cubic-bezier(.2,.8,.2,1);overflow:hidden}
+.sheet{background:#fff;width:min(480px,100%);max-height:92vh;max-height:92dvh;border-radius:24px 24px 0 0;display:flex;flex-direction:column;animation:up .26s cubic-bezier(.2,.8,.2,1);overflow:hidden}
 @keyframes up{from{transform:translateY(40px);opacity:.4}}
 .sheet .hd{padding:18px 18px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px}.sheet .hd h2{font-size:19px}
 .sheet .bd{padding:4px 18px 14px;overflow:auto;flex:1;-webkit-overflow-scrolling:touch}
@@ -238,6 +239,11 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 .pwa b{font-size:15px}.pwa .pt{font-size:13px;color:var(--ink2);margin-top:2px;line-height:1.4}
 .pwa .pb{display:flex;gap:8px;margin-top:12px}.pwa .pb .btn{flex:1}
 .banner{display:none;background:#fff;border:1px solid var(--line);border-radius:14px;margin:12px 16px 0;padding:12px;align-items:center;gap:10px}
+/* grab handle + bigger close target so a sheet can never trap the guest */
+.sheet:before{content:"";display:block;width:42px;height:4px;border-radius:9px;background:#d5d9dd;margin:8px auto 0;flex:none}
+.x{width:42px;height:42px}
+.bkcta{display:flex;gap:12px;align-items:center;background:linear-gradient(135deg,#1f2937,#374151);color:#fff;border-radius:var(--r);padding:16px;margin-top:16px;width:100%;text-align:left;box-shadow:var(--sh)}
+.bkcta .bi{width:46px;height:46px;border-radius:13px;background:var(--o);display:grid;place-items:center;flex:none}.bkcta small{opacity:.8;display:block}
 @media print{body>*:not(#printarea){display:none!important}#printarea{display:block!important}}
 #printarea{display:none}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -257,6 +263,8 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 (function () {
 'use strict';
 var TOKEN = decodeURIComponent((location.pathname.match(/\/(?:s|q)\/([^\/?#]+)/) || [])[1] || new URLSearchParams(location.search).get('t') || '');
+if (TOKEN) { try { localStorage.setItem('sx.lastToken', TOKEN); } catch (e) { /* storage blocked */ } }
+else { try { TOKEN = localStorage.getItem('sx.lastToken') || ''; if (TOKEN && history.replaceState) history.replaceState(null, '', '/s/' + encodeURIComponent(TOKEN) + (location.search && location.search.indexOf('source=pwa') < 0 ? location.search : '')); } catch (e) { /* ignore */ } }
 var BASE = ((window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || 'https://posbackend-5jaq.onrender.com/api/v1') + '/public/store/' + encodeURIComponent(TOKEN);
 var $ = function (s, r) { return (r || document).querySelector(s); }, $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 var E = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
@@ -317,14 +325,23 @@ var tt;
 function toast(msg, bad) { $$('.toast').forEach(function (x) { x.remove(); }); var d = document.createElement('div'); d.className = 'toast' + (bad ? ' bad' : ''); d.innerHTML = ic(bad ? 'alert' : 'check') + '<span>' + E(msg) + '</span>'; document.body.appendChild(d); clearTimeout(tt); tt = setTimeout(function () { d.remove(); }, 3400); }
 function sheet(html, onMount, keep) {
   closeSheet(); var o = document.createElement('div'); o.className = 'ov'; o.innerHTML = '<div class="sheet" role="dialog" aria-modal="true">' + html + '</div>';
-  if (!keep) o.addEventListener('mousedown', function (e) { if (e.target === o) closeSheet(); });
+  if (!keep) o.addEventListener('click', function (e) { if (e.target === o) closeSheet(); });
   $('#layer').appendChild(o); document.body.style.overflow = 'hidden';
   $$('[data-close]', o).forEach(function (b) { b.addEventListener('click', closeSheet); });
   if (onMount) onMount(o); return o;
 }
-function closeSheet() { $('#layer').innerHTML = ''; document.body.style.overflow = ''; }
+function closeSheet() { var l = $('#layer'); if (l) l.innerHTML = ''; document.body.style.overflow = ''; }
 function shd(t) { return '<div class="hd"><h2>' + t + '</h2><button class="x" data-close aria-label="Close">' + ic('x') + '</button></div>'; }
 document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheet(); });
+document.addEventListener('click', function (e) {
+  var t = e.target && e.target.closest ? e.target : null; if (!t) return;
+  if (t.closest('[data-close]')) { closeSheet(); return; }
+  if (t.closest('[data-back]')) { e.preventDefault(); back(); }
+});
+window.addEventListener('popstate', function () {
+  if ($('#layer').firstChild) { closeSheet(); try { history.pushState({ sx: 1 }, ''); } catch (e) { /* ignore */ } return; }
+  if (stack.length) back(); else if (MAIN.indexOf(cur.v) < 0) tab('home');
+});
 function empty(icon, h, p, btn) { return '<div class="empty"><div class="ring">' + ic(icon) + '</div><h3>' + h + '</h3><p>' + p + '</p>' + (btn || '') + '</div>'; }
 function top(title, o) { o = o || {}; return '<div class="top">' + (o.noBack ? '' : '<button class="ib" data-back aria-label="Back">' + ic('back') + '</button>') + '<h1>' + title + '</h1>' + (o.right || '') + '</div>'; }
 function cartCount() { return cart.reduce(function (a, c) { return a + c.qty; }, 0); }
@@ -336,12 +353,12 @@ function dishPic(it, cls) { return it.image ? '<img src="' + E(it.image) + '" al
 function setAcct(a) { acct = a; ss('q.acct', a); if (a && a.account) { DT.name = DT.name || a.account.name; DT.phone = DT.phone || a.account.phone || ''; } }
 
 /* ---------- navigation ---------- */
-function nav(v, p, o) { o = o || {}; if (!o.replace) stack.push(cur); cur = { v: v, p: p || {} }; render(); window.scrollTo(0, 0); }
-function back() { var b = stack.pop(); if (!b) b = { v: 'home', p: {} }; cur = b; render(); window.scrollTo(0, 0); }
-function tab(v) { stack = []; cur = { v: v, p: {} }; render(); window.scrollTo(0, 0); }
+function nav(v, p, o) { o = o || {}; if (!o.replace) { stack.push(cur); try { history.pushState({ sx: 1 }, ''); } catch (e) { /* ignore */ } } cur = { v: v, p: p || {} }; render(); window.scrollTo(0, 0); }
+function back() { closeSheet(); var b = stack.pop(); if (!b) b = { v: 'home', p: {} }; cur = b; render(); window.scrollTo(0, 0); }
+function tab(v) { closeSheet(); stack = []; cur = { v: v, p: {} }; render(); window.scrollTo(0, 0); }
 function drawNav() {
   var n = $('#nav'); var show = MAIN.indexOf(cur.v) >= 0; n.hidden = !show; if (!show) return;
-  var t = [['home', 'home', 'Home'], ['menu', 'utensils', 'Menu'], ['orders', 'receipt', 'Orders'], ['rooms', 'bed', 'Rooms'], ['more', 'user', 'More']];
+  var t = [['home', 'home', 'Home'], ['menu', 'utensils', 'Menu'], ['orders', 'receipt', 'Orders'], ['rooms', 'bed', 'Book Room'], ['more', 'user', 'More']];
   if (ctx && ctx.rooms && !ctx.rooms.enabled) t.splice(3, 1);
   n.style.gridAutoColumns = '1fr'; n.innerHTML = t.map(function (x) { var a = x[0] === 'orders' && activeOrders(); return '<button data-t="' + x[0] + '" class="' + (cur.v === x[0] ? 'on' : '') + '">' + ic(x[1]) + '<span>' + x[2] + '</span>' + (a ? '<span class="bd">' + a + '</span>' : '') + '</button>'; }).join('');
   $$('[data-t]', n).forEach(function (b) { b.onclick = function () { tab(b.dataset.t); }; });
@@ -372,7 +389,7 @@ async function init() {
   try {
     ctx = await call('');
     var tc = ctx.store && ctx.store.themeColor; THEME = tc && tc.toLowerCase() !== '#0f766e' ? tc : '#F26A21';
-    document.documentElement.style.setProperty('--o', THEME); $('#themeMeta').content = THEME; document.title = ctx.business.name;
+    document.documentElement.style.setProperty('--o', THEME); $('#themeMeta').content = THEME; document.title = ctx.business.name; try { var at = document.querySelector('meta[name="apple-mobile-web-app-title"]'); if (at) at.content = ctx.business.name; } catch (e) { /* ignore */ }
     branchId = ctx.branches[0] && ctx.branches[0].id;
     if (acct) { try { var m = await call('/account/me'); acct.account = m.account; ss('q.acct', acct); } catch (e) { if (e.code === 'GUEST_AUTH_REQUIRED') { acct = null; ss('q.acct', null); } } }
     if (acct) { DT.name = acct.account.name; DT.phone = acct.account.phone || ''; loadHist().then(function () { drawNav(); }); }
@@ -387,9 +404,6 @@ async function init() {
 function fail(e) { var net = e.code === 'NETWORK'; $('#view').className = ''; $('#view').innerHTML = '<div class="pad" style="padding-top:60px"><div class="card">' + empty(net ? 'refresh' : 'help', net ? 'You are offline' : 'We could not open this page', E(e.message || '') + (net ? '' : '<br>Please ask a member of staff for help.'), '<div style="margin-top:16px"><button class="btn sm" id="rt">Try again</button></div>') + '</div></div>'; $('#rt').onclick = function () { location.reload(); }; }
 function setupInstall() {
   var base = location.origin, nm = String(ctx.business.name || 'Order online'), sid = base + '/s/' + TOKEN;
-  var m = { id: sid, name: nm, short_name: nm.slice(0, 12), description: 'Order food, book a table or a room from ' + nm, lang: 'en-KE', start_url: sid, scope: base + '/', display: 'standalone', display_override: ['standalone', 'minimal-ui'], orientation: 'portrait', background_color: '#ffffff', theme_color: THEME,
-    icons: [{ src: base + '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' }, { src: base + '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' }, { src: base + '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }] };
-  var l = document.createElement('link'); l.rel = 'manifest'; l.href = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: 'application/manifest+json' })); document.head.appendChild(l);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
 
   var ua = navigator.userAgent || '';
@@ -438,11 +452,12 @@ VIEWS.home = async function () {
   var d = ctx.delivery, open = d.enabled && !d.paused && d.openNow;
   var h = '<div class="hhead"><div class="brandrow">' + logoHtml() + '<div class="bn">' + E(b.name) + '</div><button class="ib" id="hb" aria-label="Account">' + (acct ? '<span class="avatar" style="width:34px;height:34px;font-size:13px;margin:0">' + E(initials(acct.account.name)) + '</span>' : ic('user')) + '</button></div>' +
     '<h2>' + greet() + (name ? ', ' + E(name) : '') + ' 👋</h2><p>' + E(ctx.store.welcomeMessage || 'What would you like today?') + '</p></div><div class="pad">';
-  h += '<div class="sec">Quick actions</div><div class="qa"><button data-g="menu"><span class="ico on">' + ic('utensils') + '</span>New Order</button>' + (ctx.tables.enabled ? '<button data-g="tables"><span class="ico">' + ic('table') + '</span>Book Table</button>' : '') + (ctx.rooms.enabled ? '<button data-g="rooms"><span class="ico">' + ic('bed') + '</span>Rooms</button>' : '') + '<button data-g="orders"><span class="ico">' + ic('receipt') + '</span>My Orders</button></div>';
+  h += '<div class="sec">Quick actions</div><div class="qa"><button data-g="menu"><span class="ico on">' + ic('utensils') + '</span>New Order</button>' + (ctx.tables.enabled ? '<button data-g="tables"><span class="ico">' + ic('table') + '</span>Book Table</button>' : '') + (ctx.rooms.enabled ? '<button data-g="rooms"><span class="ico">' + ic('bed') + '</span>Book Room</button>' : '') + '<button data-g="orders"><span class="ico">' + ic('receipt') + '</span>My Orders</button></div>';
+  if (ctx.rooms.enabled) h += '<button class="bkcta" data-g="rooms"><span class="bi">' + ic('bed') + '</span><span class="grow"><b>Book accommodation</b><small>Pick your dates and reserve a room</small></span>' + ic('chev') + '</button>';
   h += '<div id="liveBox"></div>';
   h += '<div class="stat" style="margin-top:18px"><div class="card"><span class="ic">' + ic('truck') + '</span><div><small>Delivery</small><b>' + (open ? 'Open now' : d.paused ? 'Paused' : !d.enabled ? 'Not offered' : 'Closed') + '</b></div></div><div class="card"><span class="ic">' + ic('clock') + '</span><div><small>Hours</small><b>' + E(d.hours || 'All day') + '</b></div></div></div>';
   h += '<div class="sec">Today\'s top items <button id="all">View all</button></div><div class="hstrip" id="top">' + [1, 2, 3].map(function () { return '<div class="mini"><div class="im sk"></div></div>'; }).join('') + '</div>';
-  if (ctx.rooms.enabled) h += '<div class="card" style="margin-top:6px;display:flex;gap:12px;align-items:center"><span class="stat"><span class="ic" style="width:44px;height:44px;display:grid;place-items:center;background:var(--ol);color:var(--o);border-radius:12px">' + ic('bed') + '</span></span><div class="grow"><b>Stay with us</b><div class="fine">' + (ctx.rooms.depositRequired ? 'Secure your room with a small M-PESA deposit.' : 'Book your room online.') + '</div></div><button class="btn sm" data-g="rooms">View</button></div>';
+  if (ctx.rooms.enabled) h += '<div class="card" style="margin-top:6px;display:flex;gap:12px;align-items:center"><span class="stat"><span class="ic" style="width:44px;height:44px;display:grid;place-items:center;background:var(--ol);color:var(--o);border-radius:12px">' + ic('bed') + '</span></span><div class="grow"><b>Stay with us</b><div class="fine">' + (ctx.rooms.depositRequired ? 'Secure your room with a small M-PESA deposit.' : 'Book your room online.') + '</div></div><button class="btn sm" data-g="rooms">Book now</button></div>';
   h += '<div class="fine center" style="margin:22px 0 6px">' + E(b.name) + (b.phone ? ' · ' + E(b.phone) : '') + '<br>Secure ordering and M-PESA payments</div></div>';
   $('#view').innerHTML = h;
   $$('[data-g]').forEach(function (x) { x.onclick = function () { var g = x.dataset.g; if (g === 'tables') nav('tables'); else if (MAIN.indexOf(g) >= 0) tab(g); }; });
@@ -506,7 +521,7 @@ function addItem(it) {
   if (!vs.length && !gs.length) return pushCart(it, null, [], '');
   sheet(shd(E(it.name)) + '<div class="bd">' + (vs.length ? '<div class="grp"><h4>Size</h4>' + vs.map(function (v, k) { return '<label class="opt"><input type="radio" name="v" value="' + E(v.id) + '"' + (k === 0 ? ' checked' : '') + '><span class="n">' + E(v.name) + '</span><span class="p">' + (v.price != null ? money(v.price) : v.priceDelta ? '+' + money(v.priceDelta) : '') + '</span></label>'; }).join('') + '</div>' : '') +
     gs.map(function (g, gi) { return '<div class="grp"><h4>' + E(g.name) + (g.required ? ' (required)' : '') + (g.max ? ' · up to ' + g.max : '') + '</h4>' + (g.options || []).map(function (o) { return '<label class="opt"><input type="' + (g.max === 1 ? 'radio' : 'checkbox') + '" name="g' + gi + '" data-g="' + gi + '" value="' + E(o.id) + '"><span class="n">' + E(o.name) + '</span><span class="p">' + (o.priceDelta ? '+' + money(o.priceDelta) : '') + '</span></label>'; }).join('') + '</div>'; }).join('') +
-    '<label class="lbl">Notes<input class="field" id="nt" maxlength="150" placeholder="e.g. no onions"></label><div class="err" id="er"></div></div><div class="fx"><button class="btn" id="ok">Add to cart</button></div>', function (o) {
+    '<label class="lbl">Notes<input class="field" id="nt" maxlength="150" placeholder="e.g. no onions"></label><div class="err" id="er"></div></div><div class="fx"><button class="btn ghost" data-close>Cancel</button><button class="btn" id="ok">Add to cart</button></div>', function (o) {
     $('#ok', o).onclick = function () {
       var vEl = $('[name=v]:checked', o), mods = [], bad = '';
       gs.forEach(function (g, gi) { var c = $$('[data-g="' + gi + '"]:checked', o); if (g.required && !c.length) bad = 'Choose ' + g.name; if (g.max && c.length > g.max) bad = g.name + ': pick at most ' + g.max; c.forEach(function (x) { var op = g.options.filter(function (z) { return String(z.id) === x.value; })[0]; mods.push({ groupId: g.id, optionId: x.value, name: op && op.name, priceDelta: (op && op.priceDelta) || 0 }); }); });
@@ -625,7 +640,7 @@ function payFail(msg, o, wait) {
 }
 /* ask which number to pay with, then run an action that returns {reference, amount} */
 function payPrompt(title, amount, phone, startFn, o) {
-  sheet(shd(title) + '<div class="bd"><div class="card" style="background:var(--ol);border-color:#fbd5bd"><div class="tot" style="padding:0"><span>Amount to pay</span><b style="font-size:20px">' + money(amount) + '</b></div></div><label class="lbl">M-PESA number<div class="phonef"><span>+254</span><input id="pp" type="tel" inputmode="numeric" placeholder="712 345 678" value="' + E(localPhone(phone)) + '"></div></label><div class="fine" style="margin-top:8px">You will get a prompt on your phone to enter your M-PESA PIN.</div><div class="err" id="er"></div></div><div class="fx"><button class="btn green" id="go">' + ic('phone') + ' Send M-PESA prompt</button></div>', function (m) {
+  sheet(shd(title) + '<div class="bd"><div class="card" style="background:var(--ol);border-color:#fbd5bd"><div class="tot" style="padding:0"><span>Amount to pay</span><b style="font-size:20px">' + money(amount) + '</b></div></div><label class="lbl">M-PESA number<div class="phonef"><span>+254</span><input id="pp" type="tel" inputmode="numeric" placeholder="712 345 678" value="' + E(localPhone(phone)) + '"></div></label><div class="fine" style="margin-top:8px">You will get a prompt on your phone to enter your M-PESA PIN.</div><div class="err" id="er"></div></div><div class="fx"><button class="btn ghost" data-close>Cancel</button><button class="btn green" id="go">' + ic('phone') + ' Send M-PESA prompt</button></div>', function (m) {
     $('#go', m).onclick = async function () {
       var b = this, v = localPhone($('#pp', m).value); if (v.length !== 9) return $('#er', m).textContent = 'Enter a valid Safaricom number.';
       b.disabled = true; b.textContent = 'Sending…';
@@ -690,8 +705,8 @@ VIEWS.tables = async function () {
   if (!ctx.tables.enabled) { $('#view').innerHTML = top('Restaurant Floor') + '<div class="pad">' + empty('table', 'Table booking is not available', 'Please call us to reserve.') + '</div>'; return; }
   if (!TB.date) TB.date = ymd(new Date());
   var h = top('Restaurant Floor') + '<div class="pad"><div class="card" style="margin-top:14px">' + branchSel() + '<div class="row"><label class="lbl grow" style="margin-top:0">Date<input class="field" id="dt" type="date" min="' + ymd(new Date()) + '" value="' + TB.date + '"></label><label class="lbl" style="margin-top:0;width:112px">Guests<input class="field" id="pt" type="number" min="1" max="50" value="' + TB.party + '"></label></div><label class="lbl">Time<select class="field" id="tm"><option>Loading…</option></select></label></div>' +
-    (ctx.tables.requirePayment ? '<div class="note info">' + ic('shield') + '<div>Your table is confirmed once you pay with M-PESA - pre-order your food (or pay the table deposit).</div></div>' : '') + '<div id="tl"></div></div>';
-  $('#view').innerHTML = h; bindBranch(VIEWS.tables);
+    (ctx.tables.requirePayment ? '<div class="note info">' + ic('shield') + '<div>Your table is confirmed once you pay with M-PESA - pre-order your food (or pay the table deposit).</div></div>' : '') + '<div id="tl"></div>' + (ctx.rooms.enabled ? '<button class="bkcta" id="toRooms"><span class="bi">' + ic('bed') + '</span><span class="grow"><b>Need a room?</b><small>Book accommodation</small></span>' + ic('chev') + '</button>' : '') + '</div>';
+  $('#view').innerHTML = h; bindBranch(VIEWS.tables); var tr = $('#toRooms'); if (tr) tr.onclick = function () { tab('rooms'); };
   $('#dt').onchange = function () { TB.date = this.value; TB.time = ''; VIEWS.tables(); }; $('#pt').onchange = function () { TB.party = Math.max(1, +this.value || 1); loadTables(); }; $('#tm').onchange = function () { TB.time = this.value; loadTables(); };
   try {
     var r = await call('/tables?' + new URLSearchParams({ branchId: branchId || '', date: TB.date, partySize: TB.party })); if (cur.v !== 'tables') return;
@@ -699,7 +714,9 @@ VIEWS.tables = async function () {
     if (!TB.time || r.slots.indexOf(TB.time) < 0) TB.time = r.slots[0]; $('#tm').innerHTML = r.slots.map(function (t) { return '<option' + (t === TB.time ? ' selected' : '') + '>' + t + '</option>'; }).join(''); loadTables();
   } catch (e) { $('#tl').innerHTML = empty('help', 'Could not load tables', E(e.message)); }
 };
+var tblTmr;
 async function loadTables() {
+  clearTimeout(tblTmr); tblTmr = setTimeout(function () { if (cur.v === 'tables' && !document.hidden && !$('#layer').firstChild) loadTables(); }, 20000);
   try {
     var r = await call('/tables?' + new URLSearchParams({ branchId: branchId || '', date: TB.date, time: TB.time, partySize: TB.party })); if (cur.v !== 'tables') return; TB.data = r;
     var cnt = { all: r.tables.length, free: 0, busy: 0, rsv: 0 }; r.tables.forEach(function (t) { if (t.free) cnt.free++; else if (t.reason === 'RESERVED') cnt.rsv++; else if (t.reason === 'OCCUPIED') cnt.busy++; });
@@ -714,7 +731,7 @@ async function loadTables() {
 async function reserveSheet(id, name) {
   var pre = {}, req = ctx.tables.requirePayment, dep = (TB.data && TB.data.deposit) || 0;
   var m = sheet(shd('Table ' + E(name)) + '<div class="bd"><div class="note info" style="margin-top:0">' + ic('cal') + '<div><b>' + fdate(TB.date) + ' at ' + E(TB.time) + '</b><br>' + TB.party + ' guest' + (TB.party > 1 ? 's' : '') + '</div></div><label class="lbl">Your name<input class="field" id="nm" value="' + E(DT.name) + '"></label><label class="lbl">Phone<input class="field" id="ph" type="tel" value="' + E(DT.phone) + '"></label><label class="lbl">Occasion / notes (optional)<input class="field" id="no" placeholder="Birthday, anniversary…"></label>' +
-    '<div class="sec" style="margin-bottom:4px">Pre-order your food' + (req ? ' <span class="tag or">required</span>' : '') + '</div><div class="fine">' + (req ? 'Pay for your food now with M-PESA to confirm the table. It is ready when you arrive.' : 'Optional - have it ready when you arrive.') + '</div><div id="pl" class="muted" style="margin-top:6px">Loading menu…</div><div id="due"></div><div class="err" id="er"></div></div><div class="fx"><button class="btn" id="ok">' + (req ? 'Pay & confirm table' : 'Book table') + '</button></div>', null);
+    '<div class="sec" style="margin-bottom:4px">Pre-order your food' + (req ? ' <span class="tag or">required</span>' : '') + '</div><div class="fine">' + (req ? 'Pay for your food now with M-PESA to confirm the table. It is ready when you arrive.' : 'Optional - have it ready when you arrive.') + '</div><div id="pl" class="muted" style="margin-top:6px">Loading menu…</div><div id="due"></div><div class="err" id="er"></div></div><div class="fx"><button class="btn ghost" data-close>Cancel</button><button class="btn" id="ok">' + (req ? 'Pay & confirm table' : 'Book table') + '</button></div>', null);
   try { if (!menu) menu = await call('/menu?branchId=' + encodeURIComponent(branchId || '')); } catch (e) { $('#pl', m).textContent = 'Could not load the menu.'; }
   function total() { var t = 0; Object.keys(pre).forEach(function (k) { var it = findItem(k); if (it) t += it.price * pre[k]; }); return t; }
   function due() { var t = total(), d = $('#due', m); var amt = t > 0 ? t : (dep || 0); d.innerHTML = amt > 0 ? '<div class="card" style="margin-top:12px;background:var(--ol);border-color:#fbd5bd"><div class="tot" style="padding:0"><span>' + (t > 0 ? 'Food to pay now' : 'Table deposit') + '</span><b style="font-size:18px">' + money(amt) + '</b></div></div>' : ''; }
@@ -749,7 +766,7 @@ async function loadRooms() {
   var box = $('#rl'); if (!box) return; box.innerHTML = '<div class="empty">Checking availability…</div>';
   try {
     var r = await call('/rooms?' + new URLSearchParams({ branchId: branchId || '', checkInDate: RM.ci, checkOutDate: RM.co, adults: RM.ad })); if (cur.v !== 'rooms') return; RM.list = r.roomTypes;
-    box.innerHTML = r.roomTypes.length ? r.roomTypes.map(function (t, k) { return '<button class="room" data-k="' + k + '"><div class="im">' + (t.images && t.images[0] ? '<img alt="" src="' + E(t.images[0]) + '" loading="lazy">' : ic('bed')) + '</div><div class="tx"><div class="row"><h3 class="grow">' + E(t.name) + '</h3><span class="tag gr">' + t.available + ' left</span></div><div class="price" style="margin-top:4px">' + money(t.perNight || t.total) + ' <span class="fine" style="font-weight:500">/ night</span></div><div class="meta"><span>' + ic('users') + ' ' + t.maxAdults + ' adults</span>' + (t.amenities || []).slice(0, 2).map(function (a) { return '<span>' + E(a) + '</span>'; }).join('') + '</div>' + (t.promo ? '<span class="tag or" style="margin-top:6px">' + E(t.promo.title || t.promo.percentOff + '% off') + '</span>' : '') + '</div></button>'; }).join('') : empty('bed', 'No rooms available', 'Try different dates.');
+    box.innerHTML = r.roomTypes.length ? r.roomTypes.map(function (t, k) { return '<button class="room" data-k="' + k + '"><div class="im">' + (t.images && t.images[0] ? '<img alt="" src="' + E(t.images[0]) + '" loading="lazy">' : ic('bed')) + '</div><div class="tx"><div class="row"><h3 class="grow">' + E(t.name) + '</h3><span class="tag gr">' + t.available + ' left</span></div><div class="price" style="margin-top:4px">' + money(t.perNight || t.total) + ' <span class="fine" style="font-weight:500">/ night</span></div><div class="meta"><span>' + ic('users') + ' ' + t.maxAdults + ' adults</span>' + (t.amenities || []).slice(0, 2).map(function (a) { return '<span>' + E(a) + '</span>'; }).join('') + '</div>' + (t.promo ? '<span class="tag or" style="margin-top:6px">' + E(t.promo.title || t.promo.percentOff + '% off') + '</span>' : '') + '<div style="margin-top:8px"><span class="btn sm" style="min-height:36px">Book this room</span></div></div></button>'; }).join('') : empty('bed', 'No rooms available', 'Try different dates.');
     $$('[data-k]', box).forEach(function (b) { b.onclick = function () { nav('room', { k: +b.dataset.k }); }; });
   } catch (e) { box.innerHTML = empty('help', 'Could not check rooms', E(e.message)); }
 }
@@ -765,7 +782,7 @@ VIEWS.room = function (p) {
   $('#bk').onclick = function () { needAuth(function () { bookSheet(t); }, 'Sign in to book a room.'); };
 };
 function bookSheet(t) {
-  sheet(shd(E(t.name)) + '<div class="bd"><div class="note info" style="margin-top:0">' + ic('cal') + '<div>' + fdate(RM.ci) + ' → ' + fdate(RM.co) + ' · ' + money(t.total) + (t.deposit > 0 ? '<br><b>Deposit now: ' + money(t.deposit) + '</b>' : '') + '</div></div><label class="lbl">Your name<input class="field" id="nm" value="' + E(DT.name) + '"></label><label class="lbl">Phone<input class="field" id="ph" type="tel" value="' + E(DT.phone) + '"></label><label class="lbl">Email (optional)<input class="field" id="em" type="email" value="' + E((acct && acct.account.email) || '') + '"></label><label class="lbl">Special requests (optional)<input class="field" id="sr"></label><div class="err" id="er"></div></div><div class="fx"><button class="btn" id="ok">' + (t.deposit > 0 && ctx.mpesa ? 'Confirm & pay deposit' : 'Confirm booking') + '</button></div>', function (m) {
+  sheet(shd(E(t.name)) + '<div class="bd"><div class="note info" style="margin-top:0">' + ic('cal') + '<div>' + fdate(RM.ci) + ' → ' + fdate(RM.co) + ' · ' + money(t.total) + (t.deposit > 0 ? '<br><b>Deposit now: ' + money(t.deposit) + '</b>' : '') + '</div></div><label class="lbl">Your name<input class="field" id="nm" value="' + E(DT.name) + '"></label><label class="lbl">Phone<input class="field" id="ph" type="tel" value="' + E(DT.phone) + '"></label><label class="lbl">Email (optional)<input class="field" id="em" type="email" value="' + E((acct && acct.account.email) || '') + '"></label><label class="lbl">Special requests (optional)<input class="field" id="sr"></label><div class="err" id="er"></div></div><div class="fx"><button class="btn ghost" data-close>Cancel</button><button class="btn" id="ok">' + (t.deposit > 0 && ctx.mpesa ? 'Confirm & pay deposit' : 'Confirm booking') + '</button></div>', function (m) {
     $('#ok', m).onclick = async function () {
       var er = $('#er', m), nm = $('#nm', m).value.trim(), ph = $('#ph', m).value.trim(); er.textContent = '';
       if (nm.length < 2) return er.textContent = 'Enter your name.'; if (ph.replace(/\D/g, '').length < 9) return er.textContent = 'Enter a valid phone number.';
@@ -853,10 +870,10 @@ VIEWS.more = async function () {
   var row = function (i, t, g, x) { return '<button class="mrow" data-g="' + g + '"><span class="ic">' + ic(i) + '</span><span class="grow">' + t + '</span>' + (x || '') + '<span class="go">' + ic('chev') + '</span></button>'; };
   var h = top('Profile', { noBack: true }) + '<div class="pad" style="padding-top:20px"><div class="center"><div class="avatar">' + (a ? (a.picture ? '<img alt="" src="' + E(a.picture) + '">' : E(initials(a.name))) : ic('user')) + '</div><h2>' + (a ? E(a.name) : 'Welcome') + '</h2><div class="fine">' + (a ? E(a.email || (a.phone ? '+254 ' + localPhone(a.phone) : '')) : 'Sign in to track orders and bookings') + '</div></div><div class="sp"></div>';
   if (!a) h += '<button class="btn" id="si">Sign in / Create account</button><div class="sp"></div>';
-  h += '<div class="mlist">' + row('cal', 'My Bookings', 'bookings') + row('receipt', 'My Orders', 'orders', n ? '<span class="tag or">' + n + ' active</span>' : '') + row('receipt', 'E-Receipts', 'receipts') + row('table', 'Book a table', 'tables') + (ctx.business.phone ? '<a class="mrow" href="tel:' + E(ctx.business.phone) + '" style="color:inherit;text-decoration:none"><span class="ic">' + ic('help') + '</span><span class="grow">Help &amp; Support</span><span class="fine">' + E(ctx.business.phone) + '</span></a>' : '') + (a ? row('gear', 'Settings', 'settings') : '') + (a ? '<button class="mrow" id="lo" style="color:var(--bad)"><span class="ic" style="color:var(--bad)">' + ic('logout') + '</span><span class="grow">Log Out</span></button>' : '') + '</div>' +
+  h += '<div class="mlist">' + row('cal', 'My Bookings', 'bookings') + row('receipt', 'My Orders', 'orders', n ? '<span class="tag or">' + n + ' active</span>' : '') + row('receipt', 'E-Receipts', 'receipts') + row('table', 'Book a table', 'tables') + (ctx.rooms.enabled ? row('bed', 'Book accommodation', 'rooms') : '') + (ctx.business.phone ? '<a class="mrow" href="tel:' + E(ctx.business.phone) + '" style="color:inherit;text-decoration:none"><span class="ic">' + ic('help') + '</span><span class="grow">Help &amp; Support</span><span class="fine">' + E(ctx.business.phone) + '</span></a>' : '') + (a ? row('gear', 'Settings', 'settings') : '') + (a ? '<button class="mrow" id="lo" style="color:var(--bad)"><span class="ic" style="color:var(--bad)">' + ic('logout') + '</span><span class="grow">Log Out</span></button>' : '') + '</div>' +
     '<div class="fine center" style="margin:22px 0">' + E(ctx.business.name) + '<br>Secure ordering and M-PESA payments</div></div>';
   $('#view').innerHTML = h; var si = $('#si'); if (si) si.onclick = function () { nav('auth', {}); };
-  $$('[data-g]').forEach(function (b) { b.onclick = function () { var g = b.dataset.g; if (g === 'orders') tab('orders'); else nav(g); }; });
+  $$('[data-g]').forEach(function (b) { b.onclick = function () { var g = b.dataset.g; if (g === 'orders' || g === 'rooms') tab(g); else nav(g); }; });
   var lo = $('#lo'); if (lo) lo.onclick = function () { acct = null; hist = null; ss('q.acct', null); toast('Signed out'); tab('home'); };
 };
 VIEWS.settings = function () {
