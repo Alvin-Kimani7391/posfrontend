@@ -912,7 +912,6 @@ VIEWS.auth = function (p) {
   var reg = !!p.reg, b0 = ctx.business || {}, nm0 = String(b0.name || 'Our kitchen'), ini = E(nm0.charAt(0).toUpperCase());
   var IMG = function (id, w) { return 'https://images.unsplash.com/photo-' + id + '?auto=format&fit=crop&q=70&w=' + (w || 900); };
   var hero = ['1504674900247-0877df9cc836', '1568901346375-23c9450c58cd', '1565299624946-b28f40a0ae38', '1546069901-ba9599a7e63c'];
-  var fl = [['a', '1513104890138-7c749659a591'], ['b', '1567620905732-2d1ec7ab7445'], ['c', '1555939594-58d7cb561ad1']];
   var fld = function (id, icon, label, o) {
     o = o || {};
     return '<div class="sa-f" id="f' + id + '"><span class="li">' + ic(icon) + '</span><input id="' + id + '" type="' + (o.type || 'text') + '" placeholder=" " autocomplete="' + (o.ac || 'off') + '"' + (o.im ? ' inputmode="' + o.im + '"' : '') + (o.enter ? ' enterkeyhint="' + o.enter + '"' : '') + ' autocapitalize="' + (o.cap || 'none') + '" autocorrect="off" spellcheck="false"><label for="' + id + '">' + label + '</label>' +
@@ -924,7 +923,6 @@ VIEWS.auth = function (p) {
       hero.map(function (id) { return '<div class="sa-slide"><img src="' + IMG(id) + '" alt="" decoding="async" onerror="this.remove()"></div>'; }).join('') +
       '<div class="sa-shade"></div><div class="sa-glow"></div>' +
       '<div class="sa-steam"><i></i><i></i><i></i><i></i></div>' +
-      fl.map(function (f) { return '<div class="sa-fl ' + f[0] + '"><img src="' + IMG(f[1], 240) + '" alt="" loading="lazy" onerror="this.parentNode.remove()"></div>'; }).join('') +
       '<div class="sa-bar">' + (stack.length ? '<button class="sa-back" data-back aria-label="Back">' + ic('back') + '</button>' : '') +
         '<div class="sa-brand"><div class="sa-logo">' + (b0.logo ? '<img alt="" src="' + E(b0.logo) + '" onerror="this.remove()">' : '') + '<span style="' + (b0.logo ? 'position:absolute;z-index:-1' : '') + '">' + ini + '</span></div><div class="sa-bn">' + E(nm0) + '<small>Order food online</small></div></div></div>' +
       '<div class="sa-copy"><h1><span class="w"><span id="saT1">' + (reg ? 'Hungry? Let’s' : 'Good food,') + '</span></span><span class="w"><span><em id="saT2">' + (reg ? 'get you started.' : 'right to your door.') + '</em></span></span></h1>' +
