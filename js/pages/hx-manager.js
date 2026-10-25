@@ -91,6 +91,22 @@
     [[880, 0], [1318.5, 0.14], [1046.5, 0.3]].forEach(([f, d]) => { const o = c.createOscillator(), g = c.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0 + d); g.gain.exponentialRampToValueAtTime(0.35, t0 + d + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.26); o.connect(g); g.connect(c.destination); o.start(t0 + d); o.stop(t0 + d + 0.3); });
   }
 
+  /* ---------- "seen" bookkeeping: badges behave like real notifications ----------
+   * A section's badge = items that need attention that you have NOT looked at yet. Opening the section reads 0 and keeps reading 0
+   * while you are in it. If the count drops (things were fixed) the baseline drops with it, so anything new counts again.
+   * Remembered per branch and day, so a reload does not bring read items back. */
+  const seenKey = () => `mg.seen.${window.HX.branchId()}.${date}`;
+  const readSeen = () => { try { return JSON.parse(localStorage.getItem(seenKey()) || '{}'); } catch { return {}; } };
+  const writeSeen = (o) => { try { localStorage.setItem(seenKey(), JSON.stringify(o)); } catch { /* storage blocked */ } };
+  const attnOf = (k) => { const c = prev && prev[k]; return c ? c.attn : 0; };
+  const unseen = (k) => Math.max(0, attnOf(k) - (readSeen()[k] || 0));
+  function markSeen(k) { fresh[k] = 0; const s = readSeen(); s[k] = attnOf(k); writeSeen(s); }
+  function syncSeen() {
+    const s = readSeen(); let ch2 = false;
+    Object.keys(prev || {}).forEach((k) => { const a = attnOf(k); if (tab === k) { fresh[k] = 0; if (s[k] !== a) { s[k] = a; ch2 = true; } } else if ((s[k] || 0) > a) { s[k] = a; ch2 = true; } });
+    if (ch2) writeSeen(s);
+  }
+
   /* ---------- data + "+N" bookkeeping ---------- */
   function cats(d) {
     const g = (o, f) => (o && !o.error && o[f] != null ? o[f] : 0);
@@ -116,7 +132,7 @@
         Object.keys(c).forEach((k) => { const delta = c[k].n - (prev[k] ? prev[k].n : 0); if (delta > 0 && !(tab === k)) { fresh[k] = (fresh[k] || 0) + delta; up = true; } });
         if (up) beep();
       }
-      prev = c;
+      prev = c; syncSeen();
       const total = Object.values(fresh).reduce((a, b) => a + b, 0);
       document.title = (total ? `(+${total}) ` : '') + 'Manager dashboard · Kenya POS';
     }
@@ -149,7 +165,7 @@
     }).join('');
     return `<div class="mg-wrap"><table class="mg-tbl"><thead><tr>${cols.map((c) => `<th>${E(c[0])}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>${o.detail ? '<p class="mg-sub" style="padding:6px 8px">Tap a row for details.</p>' : ''}`;
   }
-  const tabBtn = ([k, l, ic]) => { const c = prev && prev[k]; const a = c ? c.attn : 0; return `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${E(l)}${a ? `<i class="mg-n">${a}</i>` : ''}${fresh[k] ? `<i class="mg-new">+${fresh[k]}</i>` : ''}</button>`; };
+  const tabBtn = ([k, l, ic]) => { const c = prev && prev[k]; const a = unseen(k); return `<button type="button" data-tab="${k}" class="${tab === k ? 'on' : ''}">${E(l)}${a ? `<i class="mg-n">${a}</i>` : ''}${fresh[k] ? `<i class="mg-new">+${fresh[k]}</i>` : ''}</button>`; };
 
   /* ---------- render ---------- */
   function render() {
@@ -162,12 +178,12 @@
     h += ({ overview, orders, kitchen, reservations, staff, payments, delivery, qr, menu, stock, money, loss }[tab] || overview)();
     el.innerHTML = h; bind();
   }
-  function go(cat) { tab = cat; fresh[cat] = 0; ch = ''; st = ''; q = ''; render(); window.scrollTo(0, 0); }
+  function go(cat) { tab = cat; markSeen(cat); ch = ''; st = ''; q = ''; render(); window.scrollTo(0, 0); }
   function bind() {
     const $ = (s) => el.querySelector(s);
     el.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); go(b.dataset.tab); }));
     el.querySelectorAll('[data-go]').forEach((b) => (b.onclick = () => go(b.dataset.go)));
-    el.querySelectorAll('[data-goch]').forEach((b) => (b.onclick = () => { tab = 'orders'; fresh.orders = 0; ch = b.dataset.goch; st = ''; q = ''; render(); window.scrollTo(0, 0); }));
+    el.querySelectorAll('[data-goch]').forEach((b) => (b.onclick = () => { tab = 'orders'; markSeen('orders'); ch = b.dataset.goch; st = ''; q = ''; render(); window.scrollTo(0, 0); }));
     el.querySelectorAll('details[data-box]').forEach((d) => d.addEventListener('toggle', () => { const k = d.dataset.box; if (d.open) { userOpen.add(k); userClosed.delete(k); } else { userOpen.delete(k); userClosed.add(k); } }));
     el.querySelectorAll('tr[data-row]').forEach((r) => (r.onclick = (e) => { if (e.target.closest('a,button')) return; const k = r.dataset.row; rowOpen.has(k) ? rowOpen.delete(k) : rowOpen.add(k); const y = window.scrollY; render(); window.scrollTo(0, y); }));
     $('#mg-date').onchange = (e) => { date = e.target.value || date; prev = null; fresh = {}; load(false); };
@@ -226,7 +242,7 @@
     h += `<div class="hx-section"><h2>Needs your attention</h2>${alertsHtml()}</div>`;
     h += `<div class="hx-section"><h2>Jump to a section</h2><div class="hx-tiles">${TABS.filter((x) => x[0] !== 'overview').map(([key, label, ic]) => {
       const cc = c[key] || { attn: 0 }; const sub = tileSub(key);
-      return `<a class="hx-tile" data-tab="${key}" href="#"><span class="ic">${icon(ic)}</span><b>${E(label)}</b><small>${sub}</small><span class="mg-tb">${cc.attn ? `<i class="mg-n">${cc.attn}</i>` : ''}${fresh[key] ? `<i class="mg-new">+${fresh[key]}</i>` : ''}</span></a>`;
+      return `<a class="hx-tile" data-tab="${key}" href="#"><span class="ic">${icon(ic)}</span><b>${E(label)}</b><small>${sub}</small><span class="mg-tb">${unseen(key) ? `<i class="mg-n">${unseen(key)}</i>` : ''}${fresh[key] ? `<i class="mg-new">+${fresh[key]}</i>` : ''}</span></a>`;
     }).join('')}</div></div>`;
     h += `<div class="hx-section"><h2>Orders by channel <span class="mg-sub">tap one to open its orders</span></h2><div class="hx-kpis">${data.orders.byChannel.filter((r) => r.orders || r.cancelled).map((r) => {
       const T = { DINE_IN: ['blue', 'table'], TAKEAWAY: ['ember', 'receipt'], SELF_SERVICE: ['purple', 'receipt'], ONLINE: ['green', 'bike'], DELIVERY: ['amber', 'bike'], QR_ORDER: ['slate', 'table'], ROOM_SERVICE: ['blue', 'key'], COUNTER: ['red', 'cash'] }[r.key] || ['blue', 'receipt'];
