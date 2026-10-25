@@ -493,10 +493,28 @@ function bindBranch(fn) { var s = $('#brSel'); if (s) s.onchange = function () {
 
 /* ---------- splash ---------- */
 VIEWS.splash = function () {
-  var b = ctx.business; $('#view').innerHTML = '<div class="splash"><div class="brand">' + logoHtml() + '<div><b>' + E(b.name) + '</b><small>' + E(ctx.store.tagline || 'Restaurant' + (ctx.rooms.enabled ? ' & Accommodation' : '')) + '</small></div></div>' +
-    '<div class="art"><div class="plate">' + ic('utensils') + '</div></div><h1>Great Food<em>' + (ctx.rooms.enabled ? 'Comfortable Stays' : 'Delivered Fast') + '</em></h1><p>' + (ctx.rooms.enabled ? 'Dine, relax, enjoy - all in one place.' : 'Order from your phone and pay with M-PESA.') + '</p>' +
-    '<button class="btn" id="gs">Get Started</button><button class="btn dark" id="lg" style="border:1px solid rgba(255,255,255,.5);background:transparent">Login</button></div>';
-  $('#gs').onclick = function () { tab('home'); }; $('#lg').onclick = function () { cur = { v: 'home', p: {} }; nav('auth', { why: '' }); };
+  /* First screen: moving food wall, animated headline, live open/closed badge. Styles: /css/store-auth.css (.sl). */
+  var b = ctx.business, d = ctx.delivery || {}, rooms = !!(ctx.rooms && ctx.rooms.enabled);
+  var IMG = function (id) { return 'https://images.unsplash.com/photo-' + id + '?auto=format&fit=crop&q=70&w=420'; };
+  var r1 = [['1513104890138-7c749659a591', 'Pizza'], ['1568901346375-23c9450c58cd', 'Burgers'], ['1546069901-ba9599a7e63c', 'Fresh bowls'], ['1555939594-58d7cb561ad1', 'Grill']];
+  var r2 = [['1504674900247-0877df9cc836', 'Chef’s picks'], ['1567620905732-2d1ec7ab7445', 'Breakfast'], ['1565299624946-b28f40a0ae38', 'Hot & fresh'], ['1512621776951-a57141f2eefd', 'Healthy']];
+  var cards = function (list) { var one = list.map(function (x) { return '<div class="sl-card"><img src="' + IMG(x[0]) + '" alt="" decoding="async" onerror="this.remove()"><span>' + x[1] + '</span></div>'; }).join(''); return one + one; };   // doubled so the loop is seamless
+  var open = d.enabled && !d.paused && d.openNow;
+  var live = d.enabled ? '<div class="sl-live' + (open ? '' : ' off') + '"><i></i>' + (open ? 'Open now · Delivering' : 'Closed right now') + '</div>' : '';
+  $('#view').innerHTML = '<div class="sl"><div class="sl-bg"></div>' +
+    '<div class="sl-bar"><div class="sl-logo">' + (b.logo ? '<img alt="" src="' + E(b.logo) + '" onerror="this.remove()">' : '') + '<span style="' + (b.logo ? 'position:absolute;z-index:-1' : '') + '">' + E(String(b.name || '?').charAt(0).toUpperCase()) + '</span></div>' +
+      '<div class="sl-bn"><b>' + E(b.name) + '</b><small>' + E(ctx.store.tagline || 'Restaurant' + (rooms ? ' & Accommodation' : '')) + '</small></div>' +
+      '<button class="sl-login" id="lg" type="button">' + ic('user') + 'Log in</button></div>' + live +
+    '<div class="sl-wall" aria-hidden="true"><div class="sl-tilt"><div class="sl-row">' + cards(r1) + '</div><div class="sl-row r">' + cards(r2) + '</div></div><div class="sl-steam"><i></i><i></i><i></i></div></div>' +
+    '<div class="sl-body"><h1 class="sl-h"><span class="w"><span>Great food,</span></span><span class="w"><span><em>' + (rooms ? 'comfortable stays.' : 'delivered fast.') + '</em></span></span></h1>' +
+      '<p class="sl-p">' + (rooms ? 'Dine, relax, enjoy – all in one place.' : 'Order from your phone and pay with M-PESA. Track your rider all the way to your door.') + '</p>' +
+      '<div class="sl-feat"><span>' + ic('bike') + 'Fast delivery</span><span>' + ic('pin') + 'Live tracking</span><span>' + ic('card') + 'M-PESA</span></div>' +
+      '<div class="sl-cta"><button class="sl-go" id="gs" type="button">' + (rooms ? 'Explore' : 'Order now') + '<span class="arr">' + ic('arrow') + '</span></button>' +
+        '<div class="sl-sec"><button id="sin" type="button">' + ic('lock') + 'Sign in</button><button id="sup" type="button">' + ic('sparkles') + 'Create account</button></div></div>' +
+      '<p class="sl-note">No account needed to browse the menu.</p></div></div>';
+  $('#gs').onclick = function () { tab('home'); };
+  $('#lg').onclick = $('#sin').onclick = function () { cur = { v: 'home', p: {} }; nav('auth', { why: '' }); };
+  $('#sup').onclick = function () { cur = { v: 'home', p: {} }; nav('auth', { why: '', reg: true }); };
 };
 
 /* ---------- home ---------- */
