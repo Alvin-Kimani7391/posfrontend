@@ -181,10 +181,12 @@
   }
 
   /* ---------- Leaflet map wrapper ---------- */
-  const TILES = {
-    light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  };
+  // Keyless OpenStreetMap tiles. CARTO's basemaps now return "API KEY REQUIRED" without a key.
+  // To use a keyed provider later (MapTiler, Stadia, Geoapify...), set window.APP_CONFIG.MAP_TILE_URL
+  // (and optionally MAP_TILE_ATTRIBUTION) in js/core/config.js, e.g. 'https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=YOUR_KEY'.
+  const CFG = () => window.APP_CONFIG || {};
+  const TILE_URL = () => CFG().MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  const TILE_ATTR = () => CFG().MAP_TILE_ATTRIBUTION || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
   const mk = (cls, html) => window.L.divIcon({ className: 'lv-mk-wrap', html: `<div class="lv-mk ${cls}">${html}</div>`, iconSize: [44, 44], iconAnchor: [22, 22] });
   const ICONS = {
     rider: () => mk('rider', `<span class="pulse"></span><span class="core">${ic('bike')}</span>`),
@@ -195,7 +197,7 @@
   function map(el, { theme = 'light', center = [-1.2921, 36.8219], zoom = 13, controls = false } = {}) {
     if (!window.L) { el.innerHTML = '<div class="lv-nomap">Map could not load. Check your internet connection.</div>'; return null; }
     const L = window.L; const m = L.map(el, { zoomControl: controls, attributionControl: true, tap: true }).setView(center, zoom);
-    L.tileLayer(TILES[theme] || TILES.light, { maxZoom: 19, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(m);
+    L.tileLayer(TILE_URL(), { maxZoom: 19, attribution: TILE_ATTR(), className: theme === 'dark' ? 'lv-tiles-dark' : '' }).addTo(m);
     const markers = {}; let line = null, trail = null, user = false;
     m.on('dragstart zoomstart', () => { user = true; });
     setTimeout(() => m.invalidateSize(), 120);

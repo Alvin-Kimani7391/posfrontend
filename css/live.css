@@ -182,3 +182,6 @@ label.lbl{display:block;font-weight:700;font-size:13px;margin:0 0 6px;color:var(
 .lb-tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}.lb-tabs button{padding:9px 16px;border-radius:99px;background:#fff;border:1px solid #e4e7ec;font-weight:700;font-size:13.5px}.lb-tabs button.on{background:var(--o);border-color:var(--o);color:#fff}
 .lb-qr{display:flex;gap:24px;align-items:center;background:#fff;border:1px solid #e4e7ec;border-radius:16px;padding:22px;flex-wrap:wrap}.lb-qr .box{width:220px;height:220px;padding:10px;background:#fff;border:1px solid #e4e7ec;border-radius:14px}.lb-qr .box svg{width:100%;height:100%}
 @media(max-width:980px){.lb-wrap{grid-template-columns:1fr}.lb-stats{grid-template-columns:repeat(2,1fr)}}
+
+/* Dark map: OSM has no dark style, so invert the light tiles */
+.lv-tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9); }
