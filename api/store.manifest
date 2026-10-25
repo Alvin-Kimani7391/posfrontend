@@ -1,0 +1,33 @@
+/**
+ * /api/store-manifest?t=<store token>  ->  the web app manifest for ONE restaurant, so the installed app carries the restaurant's own name.
+ * It is a real URL (not a blob), which is what browsers need before they offer "Install app". Falls back to a generic name if the lookup fails.
+ * Vercel serverless function; set API_BASE_URL in the project env to override the backend address.
+ */
+const API = process.env.API_BASE_URL || 'https://posbackend-5jaq.onrender.com/api/v1';
+module.exports = async (req, res) => {
+  const token = String((req.query && req.query.t) || '').slice(0, 200);
+  let name = 'Order online', theme = '#F26A21';
+  if (token) {
+    try {
+      const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 6000);
+      const r = await fetch(`${API}/public/store/${encodeURIComponent(token)}`, { signal: ctl.signal }); clearTimeout(timer);
+      const j = await r.json(); const d = (j && j.data) || j;
+      if (d && d.business && d.business.name) name = String(d.business.name).trim().slice(0, 80);
+      const tc = d && d.store && d.store.themeColor; if (tc && /^#[0-9a-f]{6}$/i.test(tc) && tc.toLowerCase() !== '#0f766e') theme = tc;
+    } catch (e) { /* generic name */ }
+  }
+  const short = name.length > 12 ? (name.slice(0, 12).replace(/\s+\S*$/, '') || name.slice(0, 12)) : name;
+  const id = token ? `/s/${encodeURIComponent(token)}` : '/store';
+  res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=86400');
+  res.status(200).send(JSON.stringify({
+    id, name, short_name: short, description: `Order food, book a table or a room at ${name}.`, lang: 'en-KE',
+    start_url: `${id}?source=pwa`, scope: '/', display: 'standalone', display_override: ['standalone', 'minimal-ui'], orientation: 'portrait',
+    background_color: '#ffffff', theme_color: theme, prefer_related_applications: false,
+    icons: [
+      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+  }));
+};
