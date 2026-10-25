@@ -4,10 +4,12 @@
   const num = (v) => (v === '' || v == null ? undefined : +v);
   /** Generic modal form. fields: [name,label,type|options[],default]. Resolves values to submit(v). */
   function form(title, fields, submit, btn = 'Save') {
-    const body = fields.map(([n, l, t = 'text', d = '']) => `<div class="field"><label>${l}</label>${Array.isArray(t) ? `<select class="select" name="${n}">${t.map((o) => `<option value="${E(o.v ?? o)}">${E(o.l ?? o)}</option>`).join('')}</select>` : `<input class="input" name="${n}" type="${t}" value="${E(d)}">`}</div>`).join('');
+    const body = fields.map(([n, l, t = 'text', d = '']) => `<div class="field"><label>${l}</label>${Array.isArray(t) ? `<select class="select" name="${n}">${t.map((o) => `<option value="${E(o.v ?? o)}">${E(o.l ?? o)}</option>`).join('')}</select>` : t === 'file' ? `<input class="input" name="${n}" type="file" accept="image/jpeg,image/png,image/webp" multiple>` : `<input class="input" name="${n}" type="${t}" value="${E(d)}">`}</div>`).join('');
     const m = UI.openModal({ title, bodyHtml: `<form id="hf">${body}</form>`, footerHtml: `<button class="btn btn-primary" id="hs">${btn}</button>` });
-    $('#hs', m).onclick = () => api(async () => { const v = {}; m.querySelectorAll('[name]').forEach((e) => { if (e.value !== '') v[e.name] = e.value; }); await submit(v); UI.closeModal(); });
+    $('#hs', m).onclick = () => api(async () => { const v = {}; m.querySelectorAll('[name]').forEach((e) => { if (e.type === 'file') { const fs = [...e.files].filter((f) => f.size <= 5 * 1024 * 1024).slice(0, 8); if (fs.length) v[e.name] = fs; } else if (e.value !== '') v[e.name] = e.value; }); await submit(v); UI.closeModal(); });
   }
+  /** Photos are uploaded first and come back as links, so they are saved together with the room type in one step. */
+  const uploadPhotos = async (files) => { if (!files || !files.length) return []; const fd = new FormData(); files.forEach((f) => fd.append('images', f)); const { data } = await Api.upload('/accommodation/images', fd); return (data && data.urls) || []; };
   const table = (cols, rows) => rows.length ? `<div class="hx-card" style="padding:0;overflow:auto"><table class="table"><thead><tr>${cols.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : UI.emptyStateHtml({ title: 'Nothing here yet' });
   const head = (t, btn, id) => `<div style="display:flex;justify-content:space-between;align-items:center;margin:0 0 12px"><h3 style="margin:0">${t}</h3>${btn ? `<button class="btn btn-primary" id="${id}">${btn}</button>` : ''}</div>`;
   const ymd = (d = 0) => new Date(Date.now() + d * 864e5).toISOString().slice(0, 10);
@@ -41,10 +43,10 @@
     pg.innerHTML = head('Room types', 'Add room type', 'ar') + table(['Type', 'Nightly rate', 'Sleeps', ''], types.map((t) => [`<b>${E(t.name)}</b><br><small>${E(t.bedConfig || '')}</small>`, money(t.baseRate), (t.maxAdults || 2) + ' adults', `<button class="btn btn-sm btn-secondary" data-ed="${t._id}">Edit</button>`])) +
       `<div style="margin:18px 0 12px">${head('Rooms', 'Add rooms', 'ab')}<p class="text-muted">Add many at once, e.g. 101, 102, 103. They appear on the room board.</p></div>`;
     const f = (x = {}) => [['name', 'Name', 'text', x.name || ''], ['baseRate', 'Base rate per night', 'number', x.baseRate ?? ''], ['weekendRate', 'Weekend rate (optional)', 'number', x.weekendRate ?? ''], ['maxAdults', 'Max adults', 'number', x.maxAdults || 2], ['bedConfig', 'Beds', 'text', x.bedConfig || '']];
-    const pack = (v) => ({ ...v, baseRate: num(v.baseRate), weekendRate: num(v.weekendRate), maxAdults: num(v.maxAdults) });
-    $('#ar').onclick = () => form('Add room type', f(), async (v) => { await Api.post('/accommodation/room-types', pack(v)); V.roomsetup(pg); });
+    const pack = (v) => { const { images, ...rest } = v; return { ...rest, baseRate: num(v.baseRate), weekendRate: num(v.weekendRate), maxAdults: num(v.maxAdults) }; };
+    $('#ar').onclick = () => form('Add room type', [...f(), ['images', 'Room photos (optional)', 'file']], async (v) => { const urls = await uploadPhotos(v.images); await Api.post('/accommodation/room-types', { ...pack(v), ...(urls.length ? { images: urls } : {}) }); V.roomsetup(pg); });
     pg.querySelectorAll('[data-ed]').forEach((b) => b.onclick = () => form('Edit room type', f(types.find((t) => t._id === b.dataset.ed)), async (v) => { await Api.put('/accommodation/room-types/' + b.dataset.ed, pack(v)); V.roomsetup(pg); }));
-    $('#ab').onclick = () => { if (!types.length) return UI.toast.warning('Add a room type first'); form('Add rooms', [['roomTypeId', 'Room type', types.map((t) => ({ v: t._id, l: t.name }))], ['numbers', 'Room numbers (comma separated)'], ['floor', 'Floor']], async (v) => { await Api.post('/accommodation/rooms/bulk', { branchId: S.branch, roomTypeId: v.roomTypeId, floor: v.floor, numbers: v.numbers.split(',').map((x) => x.trim()).filter(Boolean) }); UI.toast.success('Rooms added'); }); };
+    $('#ab').onclick = () => { if (!types.length) return UI.toast.warning('Add a room type first'); form('Add rooms', [['roomTypeId', 'Room type', types.map((t) => ({ v: t._id, l: t.name }))], ['numbers', 'Room numbers (comma separated)'], ['floor', 'Floor'], ['images', 'Room photos (optional)', 'file']], async (v) => { const urls = await uploadPhotos(v.images); await Api.post('/accommodation/rooms/bulk', { branchId: S.branch, roomTypeId: v.roomTypeId, floor: v.floor, numbers: v.numbers.split(',').map((x) => x.trim()).filter(Boolean), ...(urls.length ? { images: urls } : {}) }); UI.toast.success('Rooms added'); }); };
   };
 
   /* ---------- Reservations ---------- */

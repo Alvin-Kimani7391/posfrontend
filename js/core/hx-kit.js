@@ -73,6 +73,7 @@
   function fieldHtml(f) {
     const id = 'f_' + f.name, v = f.value == null ? '' : f.value;
     if (f.type === 'checkbox') return `<label class="hx-check"><input type="checkbox" id="${id}" name="${f.name}" ${f.value ? 'checked' : ''}> <span>${E(f.label)}${f.hint ? `<br><small class="hx-sub">${E(f.hint)}</small>` : ''}</span></label>`;
+    if (f.type === 'images') return `<div class="field"><label for="${id}">${E(f.label)}${f.required ? ' *' : ''}</label><input class="input" id="${id}" name="${f.name}" type="file" accept="image/jpeg,image/png,image/webp" multiple data-img><div id="${id}_pv" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div><small class="hx-sub">${E(f.hint || 'JPG, PNG or WEBP. Up to 8 photos, 5 MB each.')}</small></div>`;
     let ctl;
     if (f.type === 'select') {
       ctl = `<select class="select" id="${id}" name="${f.name}">${(f.options || []).map((o) => { const [val, lab] = Array.isArray(o) ? o : [o, o]; return `<option value="${E(val)}" ${String(v) === String(val) ? 'selected' : ''}>${E(lab)}</option>`; }).join('')}</select>`;
@@ -90,6 +91,7 @@
     fields.forEach((f) => {
       const el = root.querySelector('#f_' + f.name); if (!el) return;
       if (f.type === 'checkbox') { out[f.name] = el.checked; return; }
+      if (f.type === 'images') { if (el.files && el.files.length) out[f.name] = [...el.files]; return; }
       let val = el.value.trim();
       if (val === '' && !f.keepBlank) return;
       if (f.type === 'number') val = Number(val);
@@ -123,7 +125,13 @@
         };
         save.addEventListener('click', go);
         root.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); go(); });
-        const first = root.querySelector('input,select,textarea'); if (first) first.focus();
+        root.querySelectorAll('input[data-img]').forEach((inp) => inp.addEventListener('change', () => {      // photo pickers: preview what was chosen, skip anything too big
+          const box = root.querySelector('#' + inp.id + '_pv'); if (!box) return; box.innerHTML = '';
+          const ok = [...inp.files].filter((f) => { if (f.size > 5 * 1024 * 1024) { window.UI.toast.warning(`${f.name} is over 5 MB and was skipped`); return false; } return /^image\/(jpe?g|png|webp)$/.test(f.type); }).slice(0, 8);
+          if (ok.length !== inp.files.length) { const dt = new DataTransfer(); ok.forEach((f) => dt.items.add(f)); inp.files = dt.files; }
+          ok.forEach((f) => { const im = document.createElement('img'); im.src = URL.createObjectURL(f); im.alt = ''; im.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--color-border)'; box.appendChild(im); });
+        }));
+        const first = root.querySelector('input:not([type=file]),select,textarea'); if (first) first.focus();
       },
     });
   }
@@ -164,6 +172,13 @@
   HX.unwrap = (data, key) => (data && (data[key] || (data.data && data.data[key]))) || data || {};
   HX.PAY = ['CASH', 'MPESA', 'MOBILE_MONEY', 'CARD', 'BANK', 'CREDIT', 'OTHER'];
   HX.payLabel = (m) => ({ MPESA: 'M-PESA', MOBILE_MONEY: 'Mobile money', CREDIT: 'On account' }[m] || m.charAt(0) + m.slice(1).toLowerCase());
+  /** Uploads photos first and returns their links, so they are saved together with the room / room type in one step. */
+  HX.uploadImages = async (files) => {
+    if (!files || !files.length) return [];
+    const fd = new FormData(); files.slice(0, 8).forEach((f) => fd.append('images', f));
+    const { data } = await window.Api.upload('/accommodation/images', fd);
+    return (data && data.urls) || [];
+  };
   HX.empty = (title, message) => window.UI.emptyStateHtml({ icon: 'store', title, message });
   HX.tabs = (items, cur) => `<div class="hx-cats hx-tabs">${items.map(([k, l]) => `<button class="hx-chip ${k === cur ? 'on' : ''}" data-tab="${k}">${HX.E(l)}</button>`).join('')}</div>`;
   HX.ask = (title, label, opts = {}) => new Promise((res) => {

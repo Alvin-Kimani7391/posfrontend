@@ -30,9 +30,13 @@
       { name: 'requireTableCleaning', label: 'Tables need cleaning before they can be seated again', type: 'checkbox' },
       { name: 'paymentsRequireShift', label: 'Cash payments need an open cash shift', type: 'checkbox' },
       { name: 'hideOutOfStockItems', label: 'Hide sold-out dishes from waiters', type: 'checkbox' },
-      { h: 'Reservations' },
-      { row: [{ name: 'reservation.durationMinutes', label: 'Default length (minutes)', type: 'number', min: 15, max: 600 }, { name: 'reservation.holdMinutes', label: 'Hold table for late guests (minutes)', type: 'number', min: 0, max: 120 }] },
-      { name: 'reservation.depositRequired', label: 'Ask for a deposit', type: 'checkbox' },
+      { h: 'Table reservations' },
+      { row: [{ name: 'reservation.durationMinutes', label: 'Default length of a booking (minutes)', type: 'number', min: 15, max: 600 }, { name: 'reservation.lockMinutes', label: 'Lock the table before the booking (minutes)', type: 'number', min: 0, max: 480, hint: 'From then on the table shows Reserved and no walk-in can be seated there.' }] },
+      { row: [{ name: 'reservation.remindMinutes', label: 'Alert staff before a booking (minutes)', type: 'number', min: 0, max: 1440, hint: '0 = no alert.' }, { name: 'reservation.lateAlertMinutes', label: 'Alert staff when the guest is late by (minutes)', type: 'number', min: 0, max: 120, hint: '0 = no alert.' }] },
+      { row: [{ name: 'reservation.holdMinutes', label: 'Release the table if the guest has not come after (minutes)', type: 'number', min: 0, max: 120, hint: 'The booking becomes a no-show and the table is freed. 0 = never release automatically.' }, { name: 'reservation.noShowAction', label: 'If a guest never comes, their prepaid money', type: 'select', options: [['HOLD', 'Is held: a manager decides'], ['FORFEIT', 'Is kept by the business']] }] },
+      { row: [{ name: 'reservation.minSpendPerGuestCents', label: 'Minimum food to prepay per guest online (KSh)', type: 'number', min: 0, step: '0.01', scale: 100, hint: '0 = guests may prepay any amount.' }, { name: 'reservation.maxNoShows', label: 'Stop online booking after this many no-shows', type: 'number', min: 0, max: 20, hint: '0 = never stop.' }] },
+      { name: 'reservation.depositRequired', label: 'Ask for a table deposit when the guest does not prepay food', type: 'checkbox' },
+      { name: 'reservation.depositCents', label: 'Table deposit (KSh)', type: 'number', min: 0, step: '0.01', scale: 100 },
     ],
     guest: [
       { h: 'QR ordering' },
@@ -128,7 +132,7 @@
   function paint(values) {
     const editable = tab === 'rooms' ? can('accommodation.settings.manage') : can('restaurant.settings.manage');
     const fields = SPEC[tab], flat = fields.flatMap((f) => (f.row ? f.row : f.h ? [] : [f]));
-    const withVal = (f) => ({ ...f, value: dig(values, f.name) });
+    const withVal = (f) => { const v = dig(values, f.name); return { ...f, value: f.scale && typeof v === 'number' ? v / f.scale : v }; };     // money is stored in cents, shown and typed in KSh
     const body = fields.map((f) => (f.h ? `<h4>${E(f.h)}</h4>` : f.row ? `<div class="two">${f.row.map((x) => fieldHtml(withVal(x))).join('')}</div>` : fieldHtml(withVal(f)))).join('');
     const box = el.querySelector('#hx-set');
     box.innerHTML = `<form class="hx-card hx-form" style="max-width:720px" novalidate><fieldset ${editable ? '' : 'disabled'} style="border:0;padding:0;display:grid;gap:var(--space-3)">${body}</fieldset>

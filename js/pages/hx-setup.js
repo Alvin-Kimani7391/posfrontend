@@ -116,13 +116,20 @@
     if (action === 'roomtype') return formModal({ title: 'Add a room type', intro: 'A room type groups rooms that share a rate, such as Standard Double.', fields: [
       { name: 'name', label: 'Name', required: true, placeholder: 'Standard double' },
       { row: [{ name: 'baseRate', label: 'Rate per night', type: 'number', required: true, min: 0, step: '0.01' }, { name: 'maxAdults', label: 'Max adults', type: 'number', value: 2, min: 1 }] },
-    ], onSubmit: async (v) => after(await send('post', '/accommodation/room-types', v)) });
+      { name: 'images', label: 'Room photos (optional)', type: 'images', hint: 'Guests see these when they book online.' },
+    ], onSubmit: async (v) => {
+      let urls = []; if (v.images && v.images.length) { try { urls = await window.HX.uploadImages(v.images); } catch (e) { window.UI.toast.error((e && e.message) || 'Could not upload the photos'); return false; } }
+      const { images, ...rest } = v;
+      return after(await send('post', '/accommodation/room-types', { ...rest, ...(urls.length ? { images: urls } : {}) }));
+    } });
     if (action === 'rooms') return formModal({ title: 'Add rooms', intro: 'Type room numbers separated by commas, or a range like 101-110.', fields: [
       { name: 'roomTypeId', label: 'Room type', type: 'select', options: f.roomTypes.map((t) => [t._id, t.name]) },
       { name: 'numbers', label: 'Room numbers', required: true, placeholder: '101-110, 201' }, { name: 'floor', label: 'Floor (optional)' },
+      { name: 'images', label: 'Room photos (optional)', type: 'images', hint: 'With several rooms, they all get the same photos.' },
     ], onSubmit: async (v) => {
       const numbers = expand(v.numbers); if (!numbers.length) { window.UI.toast.warning('Enter at least one room number'); return false; }
-      return after(await send('post', '/accommodation/rooms/bulk', { branchId: b, roomTypeId: v.roomTypeId, numbers, ...(v.floor ? { floor: v.floor } : {}) }));
+      let urls = []; if (v.images && v.images.length) { try { urls = await window.HX.uploadImages(v.images); } catch (e) { window.UI.toast.error((e && e.message) || 'Could not upload the photos'); return false; } }
+      return after(await send('post', '/accommodation/rooms/bulk', { branchId: b, roomTypeId: v.roomTypeId, numbers, ...(v.floor ? { floor: v.floor } : {}), ...(urls.length ? { images: urls } : {}) }));
     } });
   }
 

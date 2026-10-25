@@ -51,7 +51,16 @@
       floor = list(d, 'tables'); paintSummary();
       const box = el.querySelector('#floor');
       box.innerHTML = floor.length ? floor.map(tile).join('') : window.HX.empty('No tables yet', 'Add tables in the Setup guide.');
-      box.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => window.HX.order.openTable(floor.find((t) => t._id === b.dataset.t), { onChange: load, onClose: load })));
+      box.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', async () => {
+        const t = floor.find((x) => x._id === b.dataset.t), rv = t && t.reservation;
+        if (rv && !t.order && t.status === 'RESERVED') {                 // the table is held for a booking: seat that guest, nobody else can take it
+          if (!can('restaurant.reservations.manage')) { window.UI.toast.warning(`Table ${t.name} is reserved for ${rv.guestName} at ${window.HX.hm(rv.startsAt)}.`); return; }
+          if (!confirm(`Table ${t.name} is reserved for ${rv.guestName} (${rv.partySize} guests) at ${window.HX.hm(rv.startsAt)}.\n\nIs this guest here? OK seats them and opens their order.`)) return;
+          if (await send('post', `/restaurant/reservations/${rv._id}/seat`, {})) { window.UI.toast.success('Guest seated'); load(); }
+          return;
+        }
+        window.HX.order.openTable(t, { onChange: load, onClose: load });
+      }));
       const mine = list(others, 'orders').filter((o) => o.orderType && o.orderType !== 'DINE_IN');
       const oo = el.querySelector('#open-others');
       oo.innerHTML = mine.length ? `<div class="hx-section"><h2>Takeaway, pickup, tabs and deliveries</h2><div class="hx-orders">${mine.map((o) => `<div class="hx-ocard" role="button" tabindex="0" data-o="${o._id}"><div class="oh"><span class="oic">${icon(TYPE_ICON[o.orderType] || 'bag')}</span><div><b>${E(o.orderNumber)}</b><small>${E((o.orderType || '').replace('_', ' ').toLowerCase())}${o.customerName ? ' · ' + E(o.customerName) : ''}</small></div></div>${o.customerPhone || o.tableName ? `<small class="hx-sub">${E(o.tableName || '')}${o.customerPhone ? ' ' + E(o.customerPhone) : ''}</small>` : ''}<div class="of"><span class="hx-money">${M(o.totals && o.totals.total)}</span>${can('restaurant.bills.generate') && o.items && o.items.length ? `<button class="btn btn-sm btn-primary" data-bp="${o._id}">Bill &amp; pay</button>` : '<span class="hx-sub">Open</span>'}</div></div>`).join('')}</div></div>` : '';
@@ -61,6 +70,6 @@
   }
   function tile(t) {
     const o = t.order, st = t.status || 'AVAILABLE';
-    return `<button type="button" class="hx-tbl hx-st-${TONE[st] || 'mute'}" data-t="${t._id}"><span class="dot"></span>${o && o.readyItems ? `<span class="ready">${o.readyItems} ready</span>` : ''}${window.HX.art.table(t.seats)}<span class="nm">${E(t.name)}</span><span class="meta"><span>${t.seats || '-'} seats</span>${t.waiterName ? `<span>· ${E(t.waiterName)}</span>` : ''}${t.occupiedMinutes != null ? `<span>· ${t.occupiedMinutes} min</span>` : ''}</span>${o ? `<span class="amt"><small>${E(LABEL[st] || st)}</small>${M(o.total)}</span>` : ''}</button>`;
+    return `<button type="button" class="hx-tbl hx-st-${TONE[st] || 'mute'}" data-t="${t._id}"><span class="dot"></span>${o && o.readyItems ? `<span class="ready">${o.readyItems} ready</span>` : ''}${window.HX.art.table(t.seats)}<span class="nm">${E(t.name)}</span><span class="meta"><span>${t.seats || '-'} seats</span>${t.waiterName ? `<span>· ${E(t.waiterName)}</span>` : ''}${t.occupiedMinutes != null ? `<span>· ${t.occupiedMinutes} min</span>` : ''}</span>${o ? `<span class="amt"><small>${E(LABEL[st] || st)}</small>${M(o.total)}</span>` : ''}${!o && t.reservation ? `<span class="amt"><small>${st === 'RESERVED' ? 'Held for' : 'Booked'} ${E(window.HX.hm(t.reservation.startsAt))}</small>${E(t.reservation.guestName)} · ${t.reservation.partySize}${t.reservation.prepaid > 0 ? ' · prepaid' : ''}</span>` : ''}</button>`;
   }
 })();

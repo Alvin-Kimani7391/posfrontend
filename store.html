@@ -406,6 +406,30 @@ function setupInstall() {
   var base = location.origin, nm = String(ctx.business.name || 'Order online'), sid = base + '/s/' + TOKEN;
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
 
+  /* Per-restaurant manifest: the installed app takes the restaurant's own name (static store.webmanifest is only a fallback). */
+  try {
+    var short = nm.length > 12 ? (nm.slice(0, 12).replace(/\s+\S*$/, '') || nm.slice(0, 12)) : nm;
+    var mf = {
+      id: '/s/' + encodeURIComponent(TOKEN), name: nm, short_name: short,
+      description: 'Order food, book a table or a room at ' + nm + '.', lang: 'en-KE',
+      start_url: base + '/s/' + encodeURIComponent(TOKEN) + '?source=pwa', scope: base + '/',
+      display: 'standalone', display_override: ['standalone', 'minimal-ui'], orientation: 'portrait',
+      background_color: '#ffffff', theme_color: THEME, prefer_related_applications: false,
+      icons: [
+        { src: base + '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: base + '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: base + '/icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+      ]
+    };
+    var ml = document.querySelector('link[rel="manifest"]'); if (ml) ml.parentNode.removeChild(ml);
+    var nl = document.createElement('link'); nl.rel = 'manifest';
+    nl.href = URL.createObjectURL(new Blob([JSON.stringify(mf)], { type: 'application/manifest+json' }));
+    document.head.appendChild(nl);
+    var an = document.querySelector('meta[name="application-name"]');
+    if (!an) { an = document.createElement('meta'); an.name = 'application-name'; document.head.appendChild(an); }
+    an.content = nm;
+  } catch (e) { /* falls back to the static manifest */ }
+
   var ua = navigator.userAgent || '';
   var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
   if (standalone) return;                                                          // already installed and opened as the app
@@ -722,30 +746,37 @@ async function loadTables() {
     var cnt = { all: r.tables.length, free: 0, busy: 0, rsv: 0 }; r.tables.forEach(function (t) { if (t.free) cnt.free++; else if (t.reason === 'RESERVED') cnt.rsv++; else if (t.reason === 'OCCUPIED') cnt.busy++; });
     var f = TB.filter, list = r.tables.filter(function (t) { return f === 'all' || (f === 'free' && t.free) || (f === 'busy' && t.reason === 'OCCUPIED') || (f === 'rsv' && t.reason === 'RESERVED'); });
     $('#tl').innerHTML = '<div class="chips" style="position:static;padding:14px 0 10px">' + [['all', 'All'], ['free', 'Available'], ['busy', 'Occupied'], ['rsv', 'Reserved']].map(function (x) { return '<button class="chip ' + (f === x[0] ? 'on' : '') + '" data-f="' + x[0] + '">' + x[1] + ' (' + cnt[x[0]] + ')</button>'; }).join('') + '</div><div class="fgrid" style="padding:0">' +
-      (list.map(function (t) { var cl = t.free ? 'free' : t.reason === 'RESERVED' ? 'rsv' : t.reason === 'OCCUPIED' ? 'busy' : 'small'; var lb = t.free ? 'Available' : { RESERVED: 'Reserved', OCCUPIED: 'Occupied', TOO_SMALL: 'Too small' }[t.reason] || 'Taken'; return '<button class="tb ' + cl + '" ' + (t.free ? 'data-t="' + t.id + '" data-n="' + E(t.name) + '" data-s="' + t.seats + '"' : 'disabled') + '><span class="sq">' + ic('table') + '</span><b>Table ' + E(t.name) + '</b><small>' + lb + '</small><div class="fine">' + t.seats + ' seats</div></button>'; }).join('') || '<div class="empty" style="grid-column:1/-1">No tables match.</div>') + '</div>' +
+      (list.map(function (t) { var cl = t.free ? 'free' : t.reason === 'RESERVED' ? 'rsv' : t.reason === 'OCCUPIED' ? 'busy' : 'small'; var lb = t.free ? 'Available' : { RESERVED: 'Reserved', OCCUPIED: 'Occupied', TOO_SMALL: 'Too small' }[t.reason] || 'Taken'; return '<button class="tb ' + cl + '" ' + (t.free ? 'data-t="' + t.id + '" data-n="' + E(t.name) + '" data-s="' + t.seats + '"' : 'disabled') + '><span class="sq">' + ic('table') + '</span><b>Table ' + E(t.name) + '</b><small>' + lb + '</small><div class="fine">' + t.seats + ' seats</div>' + ((t.booked || []).length ? '<div class="fine" style="color:var(--blue);margin-top:2px">Booked ' + t.booked.slice(0, 2).map(function (b) { return ftime(b.from) + '–' + ftime(b.to); }).join(', ') + (t.booked.length > 2 ? '…' : '') + '</div>' : '') + '</button>'; }).join('') || '<div class="empty" style="grid-column:1/-1">No tables match.</div>') + '</div>' +
       '<div class="legend"><span><i style="background:var(--ok)"></i>Available</span><span><i style="background:var(--o)"></i>Occupied</span><span><i style="background:var(--blue)"></i>Reserved</span></div>';
     $$('[data-f]').forEach(function (b) { b.onclick = function () { TB.filter = b.dataset.f; loadTables(); }; });
     $$('[data-t]').forEach(function (b) { b.onclick = function () { needAuth(function () { reserveSheet(b.dataset.t, b.dataset.n); }, 'Sign in to book a table.'); }; });
   } catch (e) { $('#tl').innerHTML = empty('help', 'Could not load tables', E(e.message)); }
 }
 async function reserveSheet(id, name) {
-  var pre = {}, req = ctx.tables.requirePayment, dep = (TB.data && TB.data.deposit) || 0;
-  var m = sheet(shd('Table ' + E(name)) + '<div class="bd"><div class="note info" style="margin-top:0">' + ic('cal') + '<div><b>' + fdate(TB.date) + ' at ' + E(TB.time) + '</b><br>' + TB.party + ' guest' + (TB.party > 1 ? 's' : '') + '</div></div><label class="lbl">Your name<input class="field" id="nm" value="' + E(DT.name) + '"></label><label class="lbl">Phone<input class="field" id="ph" type="tel" value="' + E(DT.phone) + '"></label><label class="lbl">Occasion / notes (optional)<input class="field" id="no" placeholder="Birthday, anniversary…"></label>' +
-    '<div class="sec" style="margin-bottom:4px">Pre-order your food' + (req ? ' <span class="tag or">required</span>' : '') + '</div><div class="fine">' + (req ? 'Pay for your food now with M-PESA to confirm the table. It is ready when you arrive.' : 'Optional - have it ready when you arrive.') + '</div><div id="pl" class="muted" style="margin-top:6px">Loading menu…</div><div id="due"></div><div class="err" id="er"></div></div><div class="fx"><button class="btn ghost" data-close>Cancel</button><button class="btn" id="ok">' + (req ? 'Pay & confirm table' : 'Book table') + '</button></div>', null);
+  var pre = {}, req = ctx.tables.requirePayment, dep = (TB.data && TB.data.deposit) || 0, minPer = ctx.tables.minSpendPerGuest || 0, minTot = Math.round(minPer * TB.party * 100) / 100;
+  var tinfo = ((TB.data && TB.data.tables) || []).filter(function (x) { return String(x.id) === String(id); })[0] || {}, seatsTxt = tinfo.seats ? ' · ' + tinfo.seats + ' seats' : '';
+  var others = (tinfo.booked || []).length ? '<div class="fine" style="margin-top:6px">Also booked today: ' + tinfo.booked.map(function (b) { return ftime(b.from) + '–' + ftime(b.to); }).join(', ') + '</div>' : '';
+  var chipAmts = minTot > 0 ? [minTot, minTot + 500, minTot + 1000] : [TB.party * 500, TB.party * 1000, TB.party * 1500];
+  var creditHtml = req ? '<div class="sec" style="margin-bottom:4px">Pay towards your food <span class="tag or">required</span></div><div class="fine">' + (minPer > 0 ? 'At least ' + money(minPer) + ' per person (' + money(minTot) + ' for ' + TB.party + '). ' : '') + 'This is taken off your bill when you dine, so at the restaurant you only pay the rest.</div><label class="lbl">Amount (KSh)<input class="field" id="fc" type="number" inputmode="decimal" min="0" step="50" value="' + (minTot || '') + '"></label><div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">' + chipAmts.map(function (a) { return '<button type="button" class="chip" data-amt="' + a + '">' + money(a) + '</button>'; }).join('') + '</div>' : '';
+  var m = sheet(shd('Table ' + E(name)) + '<div class="bd"><div class="note info" style="margin-top:0">' + ic('cal') + '<div><b>Table ' + E(name) + seatsTxt + '</b><br>' + fdate(TB.date) + ' at ' + E(TB.time) + ' · ' + TB.party + ' guest' + (TB.party > 1 ? 's' : '') + '<br><span class="fine">Held for you from ' + E(TB.time) + (ctx.tables.holdMinutes ? ' for ' + ctx.tables.holdMinutes + ' minutes after, then released' : '') + '.</span>' + others + '</div></div><label class="lbl">Your name<input class="field" id="nm" value="' + E(DT.name) + '"></label><label class="lbl">Phone<input class="field" id="ph" type="tel" value="' + E(DT.phone) + '"></label><label class="lbl">Occasion / notes (optional)<input class="field" id="no" placeholder="Birthday, anniversary…"></label>' +
+    creditHtml + '<div class="sec" style="margin:14px 0 4px">' + (req ? 'Choose dishes to have ready (optional)' : 'Pre-order your food (optional)') + '</div><div class="fine">' + (req ? 'Dishes you pick count towards the amount above.' : 'Have it ready when you arrive.') + '</div><div id="pl" class="muted" style="margin-top:6px">Loading menu…</div><div id="due"></div><div class="err" id="er"></div></div><div class="fx"><button class="btn ghost" data-close>Cancel</button><button class="btn" id="ok">' + (req ? 'Pay & confirm table' : 'Book table') + '</button></div>', null);
   try { if (!menu) menu = await call('/menu?branchId=' + encodeURIComponent(branchId || '')); } catch (e) { $('#pl', m).textContent = 'Could not load the menu.'; }
   function total() { var t = 0; Object.keys(pre).forEach(function (k) { var it = findItem(k); if (it) t += it.price * pre[k]; }); return t; }
-  function due() { var t = total(), d = $('#due', m); var amt = t > 0 ? t : (dep || 0); d.innerHTML = amt > 0 ? '<div class="card" style="margin-top:12px;background:var(--ol);border-color:#fbd5bd"><div class="tot" style="padding:0"><span>' + (t > 0 ? 'Food to pay now' : 'Table deposit') + '</span><b style="font-size:18px">' + money(amt) + '</b></div></div>' : ''; }
+  function credit() { var f = $('#fc', m); return f ? Math.max(0, +f.value || 0) : 0; }
+  function due() { var t = total(), c = credit(), food = Math.max(t, c), d = $('#due', m); var amt = food > 0 ? food : (dep || 0); d.innerHTML = amt > 0 ? '<div class="card" style="margin-top:12px;background:var(--ol);border-color:#fbd5bd"><div class="tot" style="padding:0"><span>' + (food > 0 ? 'Food to prepay now' : 'Table deposit') + '</span><b style="font-size:18px">' + money(amt) + '</b></div></div>' : ''; }
   if (menu) { var its = []; menu.categories.forEach(function (c) { c.items.forEach(function (i) { if (i.available !== false && i.price != null && !(i.variants || []).length && !(i.modifierGroups || []).length) its.push(i); }); });
     $('#pl', m).innerHTML = its.slice(0, 60).map(function (i) { return '<div class="row" style="padding:7px 0;border-bottom:1px solid var(--line)"><div class="grow"><b style="font-size:14px">' + E(i.name) + '</b><div class="fine">' + money(i.price) + ' · ⏱ ' + (i.prepMinutes || 10) + ' min</div></div><div class="qty"><button data-i="' + E(i.id) + '" data-d="-1">' + ic('minus') + '</button><b data-q="' + E(i.id) + '">0</b><button data-i="' + E(i.id) + '" data-d="1">' + ic('plus') + '</button></div></div>'; }).join('') || 'No dishes available to pre-order.';
     $$('[data-i]', m).forEach(function (b) { b.onclick = function () { var k = b.dataset.i; pre[k] = Math.max(0, (pre[k] || 0) + +b.dataset.d); $('[data-q="' + k + '"]', m).textContent = pre[k]; due(); }; }); }
+  var fcIn = $('#fc', m); if (fcIn) fcIn.oninput = due; $$('[data-amt]', m).forEach(function (b) { b.onclick = function () { fcIn.value = b.dataset.amt; due(); }; });
   due();
   $('#ok', m).onclick = async function () {
     var er = $('#er', m), nm = $('#nm', m).value.trim(), ph = $('#ph', m).value.trim(); er.textContent = '';
     if (nm.length < 2) return er.textContent = 'Enter your name.'; if (ph.replace(/\D/g, '').length < 9) return er.textContent = 'Enter a valid phone number.';
-    if (req && !(total() > 0 || dep > 0)) return er.textContent = 'Choose at least one dish to pre-order - your table is confirmed once the food is paid.';
+    if (req && !(Math.max(total(), credit()) > 0 || dep > 0)) return er.textContent = 'Enter how much food you want to prepay (or pick dishes) - your table is confirmed once it is paid.';
+    if (req && minTot > 0 && Math.max(total(), credit()) < minTot) return er.textContent = 'Please prepay at least ' + money(minTot) + ' (' + money(minPer) + ' per person).';
     var btn = this; btn.disabled = true; btn.textContent = 'Booking…'; DT.name = nm; DT.phone = ph;
     try {
-      var r = await call('/reservations', 'POST', { branchId: branchId || undefined, name: nm, phone: ph, date: TB.date, time: TB.time, partySize: TB.party, tableId: id, occasion: $('#no', m).value.trim() || undefined, preOrder: Object.keys(pre).filter(function (k) { return pre[k] > 0; }).map(function (k) { return { menuItemId: k, quantity: pre[k] }; }) });
+      var r = await call('/reservations', 'POST', { branchId: branchId || undefined, name: nm, phone: ph, date: TB.date, time: TB.time, partySize: TB.party, tableId: id, foodCredit: credit() || undefined, occasion: $('#no', m).value.trim() || undefined, preOrder: Object.keys(pre).filter(function (k) { return pre[k] > 0; }).map(function (k) { return { menuItemId: k, quantity: pre[k] }; }) });
       closeSheet(); loadHist();
       if (r.pay && r.pay.state === 'AWAITING') payPrompt('Pay to confirm table', r.deposit.amount, ph, function (p) { return call('/deposit', 'POST', { kind: 'RESERVATION', ref: r.reference, phone: ph, payerPhone: p }); }, { onOk: function () { nav('bookings', { open: 'RES:' + r.reference }, { replace: true }); }, onClose: function () { nav('bookings', {}, { replace: true }); } });
       else { toast('Table booked'); nav('bookings', {}, { replace: true }); }
@@ -810,12 +841,13 @@ VIEWS.bookings = async function (p) {
   h += list.length ? list.map(function (x) {
     var s = x.s, aw = s.pay && s.pay.state === 'AWAITING', st = aw ? '<span class="tag or">Payment due</span>' : '<span class="tag ' + (x.done ? 'rd' : 'gr') + '">' + E((s.status || '').replace(/_/g, ' ').toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); })) + '</span>';
     return '<div class="card bk" style="margin-top:12px"><div class="hd2"><div><b>' + (x.k === 'STAY' ? E(s.roomType) + (s.roomNumber ? ' · Room ' + E(s.roomNumber) : '') : 'Table ' + E((s.tables || []).map(function (t) { return t.name; }).join(', '))) + '</b><div class="fine">' + (x.k === 'STAY' ? 'Check-in: ' + fdate(s.checkInDate) + '<br>Check-out: ' + fdate(s.checkOutDate) : fdt(s.startsAt) + ' · ' + s.partySize + ' guests') + '</div></div>' + st + '</div>' +
-      '<p class="fine" style="margin-top:8px">' + E(s.message || '') + '</p>' + (x.k === 'RES' && s.preOrder && s.preOrder.length ? '<div class="fine">Pre-order: ' + s.preOrder.map(function (i) { return i.quantity + '× ' + E(i.name); }).join(', ') + '</div>' : '') +
-      '<div class="row" style="margin-top:10px"><span class="grow fine">Ref <b style="color:var(--ink)">' + E(x.k === 'STAY' ? s.bookingCode : s.reference) + '</b></span>' + (s.pay && s.pay.receiptRef ? '<button class="btn sm ghost" data-r="' + E(s.pay.receiptRef) + '">' + ic('receipt') + ' Receipt</button>' : '') + (aw ? '<button class="btn sm" data-pay="' + x.k + ':' + E(x.k === 'STAY' ? s.bookingCode : s.reference) + ':' + (x.k === 'STAY' ? s.deposit.due : s.deposit.amount) + '">Pay now</button>' : '') + '</div></div>';
+      '<p class="fine" style="margin-top:8px">' + E(s.message || '') + '</p>' + (x.k === 'RES' && s.deposit && s.deposit.paid ? '<div class="fine">' + (s.deposit.kind === 'FOOD' ? 'Food prepaid: ' : 'Deposit paid: ') + '<b style="color:var(--ink)">' + money(s.deposit.amount) + '</b>' + (s.deposit.used ? ' (used ' + money(s.deposit.used) + ')' : ' · comes off your bill') + '</div>' : '') + (x.k === 'RES' && s.preOrder && s.preOrder.length ? '<div class="fine">Pre-order: ' + s.preOrder.map(function (i) { return i.quantity + '× ' + E(i.name); }).join(', ') + '</div>' : '') +
+      '<div class="row" style="margin-top:10px"><span class="grow fine">Ref <b style="color:var(--ink)">' + E(x.k === 'STAY' ? s.bookingCode : s.reference) + '</b></span>' + (s.pay && s.pay.receiptRef ? '<button class="btn sm ghost" data-r="' + E(s.pay.receiptRef) + '">' + ic('receipt') + ' Receipt</button>' : '') + (x.k === 'RES' && s.canCancel ? '<button class="btn sm ghost" data-cx="' + E(s.reference) + '" data-ph="' + E(s.phone || '') + '">Cancel</button>' : '') + (aw ? '<button class="btn sm" data-pay="' + x.k + ':' + E(x.k === 'STAY' ? s.bookingCode : s.reference) + ':' + (x.k === 'STAY' ? s.deposit.due : s.deposit.amount) + '">Pay now</button>' : '') + '</div></div>';
   }).join('') : empty('cal', BK.seg === 'cur' ? 'No current bookings' : 'No past bookings', 'Book a table or a room to see it here.');
   v.innerHTML = h + '</div>';
   $$('[data-s]').forEach(function (b) { b.onclick = function () { BK.seg = b.dataset.s; VIEWS.bookings({}); }; });
   $$('[data-r]').forEach(function (b) { b.onclick = function () { nav('receipt', { ref: b.dataset.r }); }; });
+  $$('[data-cx]').forEach(function (b) { b.onclick = async function () { if (!window.confirm('Cancel this table booking?' + (b.closest('.bk') && /prepaid|Deposit paid/.test(b.closest('.bk').textContent) ? ' The restaurant will be told to refund what you prepaid.' : ''))) return; b.disabled = true; try { await call('/reservations/cancel', 'POST', { reference: b.dataset.cx, phone: b.dataset.ph || DT.phone || (acct && acct.account.phone) || '' }); toast('Booking cancelled'); VIEWS.bookings({}); } catch (e) { b.disabled = false; toast(e.message, true); } }; });
   $$('[data-pay]').forEach(function (b) { b.onclick = function () { var q = b.dataset.pay.split(':'), kind = q[0] === 'STAY' ? 'STAY' : 'RESERVATION', ph = DT.phone || (acct.account.phone || ''); payPrompt(kind === 'STAY' ? 'Pay deposit' : 'Pay to confirm table', +q[2], ph, function (p) { return call('/deposit', 'POST', { kind: kind, ref: q[1], phone: ph, payerPhone: p }); }, { onOk: function () { VIEWS.bookings({}); }, onClose: function () { VIEWS.bookings({}); } }); }; });
 };
 
