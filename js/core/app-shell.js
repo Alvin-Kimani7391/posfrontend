@@ -64,6 +64,7 @@
     { key: 'hx-housekeeping', group: 'Accommodation', label: 'Housekeeping',         icon: 'broom',    href: 'hx-housekeeping.html', permission: 'accommodation.housekeeping.view', feature: ['accommodation'] },
     { key: 'hx-reports',      group: 'Reports & setup', label: 'Reports',         icon: 'reports',  href: 'hx-reports.html',      permAny: ['restaurant.reports.view', 'accommodation.reports.view'], feature: ['restaurantOrdering', 'accommodation'] },
     { key: 'hx-setup',        group: 'Reports & setup', label: 'Setup guide',     icon: 'rocket',   href: 'hx-setup.html',        permAny: ['restaurant.settings.manage', 'restaurant.tables.manage', 'restaurant.menu.manage', 'accommodation.rooms.manage'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-operations',   group: 'Reports & setup', label: 'Devices & printing', icon: 'sliders', href: 'hx-operations.html', permAny: ['restaurant.settings.view'], feature: ['restaurantOrdering'] },
     { key: 'hx-settings',     group: 'Reports & setup', label: 'Service settings',icon: 'sliders',  href: 'hx-settings.html',     permAny: ['restaurant.settings.view', 'accommodation.settings.view'], feature: ['restaurantOrdering', 'accommodation'] },
     { key: 'hx-services',     group: 'Reports & setup', label: 'Services & system check', icon: 'sliders', href: 'hx-services.html', permission: 'settings.update' },
     { key: 'products',      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },

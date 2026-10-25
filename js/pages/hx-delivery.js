@@ -17,7 +17,9 @@
     el.querySelector('#np')?.addEventListener('click', () => window.HX.order.start('PICKUP', { onChange: refresh, onClose: refresh }));
     window.HX.live(() => { if (!document.querySelector('.modal-backdrop')) refresh(); }, 20000); refresh();
   }
+  let plan = {};
   async function load(rider) {
+    plan = await window.HX.plan().catch(() => ({}));
     const d = await get(rider ? '/restaurant/delivery/mine' : '/restaurant/delivery', { branchId: window.HX.branchId() });
     rows = list(d, 'deliveries', 'orders'); paint(rider);
   }
@@ -27,6 +29,7 @@
     el.querySelector('#dl').innerHTML = v.length ? `<div class="hx-cols">${v.map(card).join('')}</div>` : window.HX.empty('Nothing here', 'New delivery and pickup orders show up automatically.');
     el.querySelectorAll('[data-as]').forEach((b) => b.addEventListener('click', () => assign(b.dataset.as)));
     el.querySelectorAll('[data-st]').forEach((b) => b.addEventListener('click', () => status(b.dataset.id, b.dataset.st)));
+    el.querySelectorAll('[data-mr]').forEach((b) => b.addEventListener('click', async () => { if (await send('post', `/restaurant/orders/${b.dataset.mr}/ready`, { all: true })) { window.UI.toast.success('Marked ready'); load(rider); } }));
     el.querySelectorAll('[data-pk]').forEach((b) => b.addEventListener('click', () => collect(b.dataset.pk)));
     el.querySelectorAll('[data-op]').forEach((b) => b.addEventListener('click', () => window.HX.order.open(b.dataset.op, { onChange: () => load(rider), onClose: () => load(rider) })));
     el.querySelectorAll('[data-bp]').forEach((b) => b.addEventListener('click', () => window.HX.bill.forOrder(b.dataset.bp, { pay: true, onChange: () => load(rider) })));
@@ -37,7 +40,7 @@
     return `<div class="hx-card"><div class="hx-row" style="padding-top:0"><div class="grow"><b>#${E(o.orderNumber)} · ${E(d.contactName || o.customerName || 'Customer')}</b><small class="hx-sub">${mins(o.createdAt)} min ago · ${M(o.totals && o.totals.total)}</small></div>${pill(st, TONE[st] || 'warn')}</div>
       ${d.online ? `<p><span class="hx-pill hx-st-plan">Online order</span>${d.etaMinutes ? ` · promised in ${d.etaMinutes} min` : ''}${d.payment ? ` · pay ${E(String(d.payment).toLowerCase())}` : ''}</p>` : ''}${d.address ? `<p>${E(d.address)}${d.landmark ? ' · ' + E(d.landmark) : ''}${d.lat != null && d.lng != null ? ` · <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${d.lat},${d.lng}">Open in Google Maps</a>` : ''}</p>` : ''}${d.instructions ? `<p><small>Rider note: ${E(d.instructions)}</small></p>` : ''}${d.phone || o.customerPhone ? `<p><a href="tel:${E(d.phone || o.customerPhone)}">${E(d.phone || o.customerPhone)}</a></p>` : ''}${d.instructions ? `<small class="hx-sub">${E(d.instructions)}</small>` : ''}${d.riderName ? `<p class="hx-sub">Rider: ${E(d.riderName)}</p>` : ''}
       <div class="hx-actions" style="margin-top:var(--space-3)">
-        ${can('restaurant.orders.create') && !['DELIVERED', 'FAILED'].includes(st) ? `<button class="btn btn-sm btn-secondary" data-op="${id}">Order</button>` : ''}${can('restaurant.bills.generate') && can('restaurant.bills.pay') && o.billStatus !== 'PAID' ? `<button class="btn btn-sm btn-secondary" data-bp="${id}">Bill &amp; pay</button>` : ''}
+        ${can('restaurant.orders.create') && !['DELIVERED', 'FAILED'].includes(st) ? `<button class="btn btn-sm btn-secondary" data-op="${id}">Order</button>` : ''}${plan.kitchenScreen === false && !rider && can('restaurant.orders.create') && !['DELIVERED', 'FAILED', 'OUT_FOR_DELIVERY'].includes(st) && !(o.pickup && o.pickup.status === 'COLLECTED') ? `<button class="btn btn-sm btn-success" data-mr="${id}">Mark food ready</button>` : ''}${can('restaurant.bills.generate') && can('restaurant.bills.pay') && o.billStatus !== 'PAID' ? `<button class="btn btn-sm btn-secondary" data-bp="${id}">Bill &amp; pay</button>` : ''}
         ${o.orderType === 'PICKUP' ? (o.pickup && o.pickup.status === 'COLLECTED' ? '' : (can('restaurant.orders.create') ? `<button class="btn btn-sm btn-primary" data-pk="${id}">Handed over</button>` : '')) : ''}
         ${o.orderType !== 'PICKUP' && can('restaurant.delivery.manage') && !['DELIVERED', 'FAILED'].includes(st) ? `<button class="btn btn-sm btn-secondary" data-as="${id}">${d.riderName ? 'Change rider' : 'Assign rider'}</button>` : ''}
         ${can('restaurant.delivery.self') && st === 'ASSIGNED' ? b('OUT_FOR_DELIVERY', 'Picked up') : ''}${can('restaurant.delivery.self') && st === 'OUT_FOR_DELIVERY' ? b('DELIVERED', 'Delivered', 'btn-success') + b('FAILED', 'Failed', 'btn-secondary') : ''}</div></div>`;

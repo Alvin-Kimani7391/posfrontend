@@ -21,6 +21,7 @@
     if (gone()) return null;
     if (!od) { early.close(); window.UI.toast.error('Could not open that order'); return null; }
     let order = unwrap(od, 'order'); const type = order.orderType || 'DINE_IN';
+    const plan = await HX.plan().catch(() => ({}));
     const menu = (type === 'DINE_IN' && (!order.branchId || String(order.branchId) === String(HX.branchId())) && warm) ? warm : await loadMenu(order.branchId || HX.branchId(), type);
     if (gone()) return null;
     let draft = [], cat = 0, q = '', root = null, timer = null, busy = false;
@@ -121,6 +122,9 @@
         <div class="hx-cart-foot"><div class="hx-totals"><div><span>Sub total</span><span>${M(sub)}</span></div>${t.serviceCharge ? `<div><span>Service charge</span><span>${M(t.serviceCharge)}</span></div>` : ''}${t.tax ? `<div><span>Tax</span><span>${M(t.tax)}</span></div>` : ''}${t.discount ? `<div><span>Discount</span><span>−${M(t.discount)}</span></div>` : ''}<div class="grand"><span>Amount to be paid</span><span>${M((t.total || 0) + dtot)}</span></div></div>
           <div class="hx-cartbtns">
             ${draft.length ? '<button type="button" class="btn btn-primary" id="send">Place order · send to kitchen</button>' : ''}
+            ${draft.length && plan.kitchenMode === 'PRINT_ONLY' ? '<p class="hx-sub" style="text-align:center;margin:0">The kitchen works from paper: a ticket prints when you send.</p>' : ''}
+            ${(() => { const waiting = sent.filter((i) => ['PENDING', 'ACCEPTED', 'PREPARING'].includes(i.status)).length; return waiting && isOpen && plan.kitchenScreen === false && (can('restaurant.orders.create') || can('restaurant.bills.view')) ? `<button type="button" class="btn btn-success" id="mkready">Mark ${waiting} item${waiting > 1 ? 's' : ''} ready</button>` : ''; })()}
+            ${sent.length && isOpen && plan.printing && plan.printing.kitchenTicketAt && can('restaurant.orders.create') ? '<button type="button" class="btn btn-secondary" id="reprintk">Reprint kitchen ticket</button>' : ''}
             ${ready ? `<button type="button" class="btn btn-success" id="serve">Mark ${ready} ready item${ready > 1 ? 's' : ''} served</button>` : ''}
             ${sent.length && !draft.length && isOpen && can('restaurant.bills.generate') ? '<div class="hx-btnrow"><button type="button" class="btn btn-secondary" id="bill">Bill</button>' + (can('restaurant.bills.pay') ? '<button type="button" class="btn btn-primary" id="billpay">Bill &amp; pay</button>' : '') + '</div>' : ''}
             ${draft.length ? '<button type="button" class="btn btn-secondary" id="clear">Clear new items</button>' : ''}
@@ -131,6 +135,8 @@
       c.querySelectorAll('[data-x]').forEach((b) => b.addEventListener('click', async (e) => { e.preventDefault(); const reason = await HX.ask('Remove item', 'Reason'); if (reason === null) return; if (await act('/items/' + b.dataset.x + '/cancel', { reason, expectedVersion: order.version })) refresh(); }));
       const on = (s, f) => c.querySelector(s)?.addEventListener('click', f);
       on('#clear', () => { draft = []; paintCart(); paintMenu(); }); on('#send', sendDraft);
+      on('#mkready', async () => { if (await act('/ready', { all: true })) refresh(); });
+      on('#reprintk', async () => { if (await send('post', '/restaurant/orders/' + order._id + '/print/kitchen', {})) window.UI.toast.success('Kitchen ticket sent to the printer'); });
       on('#serve', async () => { if (await act('/serve', { allReady: true })) refresh(); });
       on('#bill', () => HX.bill.forOrder(order._id, { onChange: () => refresh() }));
       on('#billpay', () => HX.bill.forOrder(order._id, { pay: true, onChange: () => refresh() }));

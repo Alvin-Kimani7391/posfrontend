@@ -303,10 +303,11 @@
     if (!el || !el.isConnected) return null;
     if (id && id.choose) { mm.close(); return chooser(id.choose, opts); }
     if (!id) { mm.close(); return null; }
+    let plan = {};
     const [d, c] = await Promise.all([get('/restaurant/bills/' + id), payCtx('restaurant')]);
     if (!el.isConnected) return null;
     if (!d) { mm.close(); toast().error('Could not open that bill'); return null; }
-    ctx = c; bill = unwrap(d, 'bill'); sale = d.sale || (d.data && d.data.sale) || null;
+    plan = await HX.plan().catch(() => ({})); ctx = c; bill = unwrap(d, 'bill'); sale = d.sale || (d.data && d.data.sale) || null;
     el.querySelector('.modal-header h3').textContent = `Bill ${bill.billNumber}`;
     const reload = async () => { const r = await get('/restaurant/bills/' + id); if (r) { bill = unwrap(r, 'bill'); sale = r.sale || (r.data && r.data.sale) || null; } if (opts.onChange) opts.onChange(bill); paint(); };
     function payable() { return (bill.status === 'OPEN' || bill.status === 'PARTIAL') && can('restaurant.bills.pay') && dueOf(bill) > 0; }
@@ -316,8 +317,8 @@
       const act = (k, label, show) => (show ? `<button type="button" class="btn btn-sm btn-secondary" data-a="${k}">${label}</button>` : '');
       const more = [act('disc', 'Discount', open && can('restaurant.orders.discount')), act('split', 'Split bill', open && can('restaurant.bills.split')), act('sc', b.scWaived ? 'Restore service charge' : 'Waive service charge', open && b.serviceCharge > 0 && can('restaurant.bills.waive_service_charge')), act('tip', 'Add tip', ['PAID', 'PARTIAL', 'OPEN'].includes(b.status) && can('restaurant.bills.pay')), act('refund', 'Refund', b.status === 'PAID' && can('restaurant.bills.refund')), act('void', 'Void bill', open && can('restaurant.bills.generate'))].join('');
       el.querySelector('.hx-billbody').innerHTML = `<div class="hx-paper">${paperHtml(billDoc(b, ctx, sale))}</div><div class="hx-billstat">${HX.pill(b.status, BILL_TONE[b.status])}${open ? `<span>Amount due <b>${M(dueOf(b))}</b></span>` : ''}</div>${more ? `<details class="hx-more"><summary>More actions</summary><div class="hx-morerow">${more}</div></details>` : ''}`;
-      el.querySelector('.hx-foot').innerHTML = `<button type="button" class="btn btn-secondary" data-a="close">Close</button><button type="button" class="btn btn-secondary" data-a="print">${open ? 'Print bill' : 'Print receipt'}</button>${payable() ? `<button type="button" class="btn btn-primary" data-a="pay">${b.status === 'PARTIAL' ? 'Pay balance' : 'Take payment'}</button>` : ''}`;
-      const H = { close: () => mm && mm.close(), print: () => receipt.print(billDoc(bill, ctx, sale)), pay: () => takePayment(), disc: () => discount(), split: () => split(), sc: () => waive(), tip: () => tip(), refund: () => refund(), void: () => voidIt() };
+      el.querySelector('.hx-foot').innerHTML = `<button type="button" class="btn btn-secondary" data-a="close">Close</button><button type="button" class="btn btn-secondary" data-a="print">${open ? 'Print bill' : 'Print receipt'}</button>${plan.printing && plan.printing.billAt ? `<button type="button" class="btn btn-secondary" data-a="tillprint">Send to till printer</button>` : ''}${payable() ? `<button type="button" class="btn btn-primary" data-a="pay">${b.status === 'PARTIAL' ? 'Pay balance' : 'Take payment'}</button>` : ''}`;
+      const H = { tillprint: async () => { if (await HX.send('post', `/restaurant/bills/${bill._id}/print`, {})) toast().success('Sent to the till printer'); }, close: () => mm && mm.close(), print: () => receipt.print(billDoc(bill, ctx, sale)), pay: () => takePayment(), disc: () => discount(), split: () => split(), sc: () => waive(), tip: () => tip(), refund: () => refund(), void: () => voidIt() };
       el.querySelectorAll('[data-a]').forEach((x) => x.addEventListener('click', () => (H[x.dataset.a] || (() => {}))()));
     }
     function takePayment() {

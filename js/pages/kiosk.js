@@ -359,7 +359,7 @@
       <div class="pb-t">${(b.totals || []).map((t) => `<div class="${t[2] ? 'big' : ''}"><span>${E(t[0])}</span><span>${E(t[1])}</span></div>`).join('')}</div><div class="pb-f">${E(b.footer || '')}</div></div>`;
   }
   async function ensureBill() { if (S.bill || !S.code) return; try { const d = await api('/orders/' + S.code + '/bill'); S.bill = d.bill; if (S.order && S.order.stage === 'AWAITING_CASHIER') showPay(); } catch (e) { /* items list still shows */ } }
-  function autoPrint() { S.queued = true; api('/orders/' + S.code + '/print', { method: 'POST' }).catch(() => {}); }
+  function autoPrint() { if (S.ctx && S.ctx.options && S.ctx.options.printAvailable === false) return; S.queued = true; api('/orders/' + S.code + '/print', { method: 'POST' }).catch(() => {}); }
   async function printBill() {
     try { if (!S.bill) { const d = await api('/orders/' + S.code + '/bill'); S.bill = d.bill; } }
     catch (e) { return note(e.message); }
@@ -384,9 +384,9 @@
       h = `<div class="pcard"><div class="ico bad">${IC.cross}</div><h1>Order cancelled</h1><p class="lead">${E(o.message)}</p><div class="acts"><button class="btn" data-p="new">Start a new order</button></div>${cdLine}</div>`;
     } else if (stage === 'AWAITING_CASHIER') {
       if (!S.cashArm) { S.cashArm = true; armReset(60000); }
-      h = `<div class="pcard"><div class="ico warn">${IC.cash}</div><h1>Pay at the cashier</h1><p class="lead">Print your bill, take it to the cashier and pay <b>${money(o.totals.total)}</b>. Your order goes to the kitchen as soon as you have paid.</p>
+      h = `<div class="pcard"><div class="ico warn">${IC.cash}</div><h1>Pay at the cashier</h1><p class="lead">${S.ctx.options.printAvailable === false ? 'Go to the cashier, say your order number and pay' : 'Print your bill, take it to the cashier and pay'} <b>${money(o.totals.total)}</b>. Your order goes to the kitchen as soon as you have paid.</p>${S.ctx.options.printAvailable === false ? `<div style="text-align:center;margin:12px 0"><small>Your order number</small><div style="font-size:3.2rem;font-weight:800;letter-spacing:.06em">${E(o.pickupNumber || o.orderNumber || S.code)}</div></div>` : ''}
         ${S.bill ? billHtml(S.bill) : itemsBlock(o)}<p class="msg">Your bill has everything the cashier needs. Just hand it over.</p>
-        <div class="acts"><button class="btn" data-p="print">${IC.print} Print my bill</button>${S.ctx.options.mpesa ? '<button class="btn alt" data-p="mpesa">Pay with M-PESA instead</button>' : ''}<button class="btn red" data-p="cancel">Cancel order</button></div><p class="msg" id="rs"></p><div class="acts"><button class="btn" data-p="new">Done · next customer</button></div>${cdLine}</div>`;
+        <div class="acts">${S.ctx.options.printAvailable === false ? '' : `<button class="btn" data-p="print">${IC.print} Print my bill</button>`}${S.ctx.options.mpesa ? '<button class="btn alt" data-p="mpesa">Pay with M-PESA instead</button>' : ''}<button class="btn red" data-p="cancel">Cancel order</button></div><p class="msg" id="rs"></p><div class="acts"><button class="btn" data-p="new">Done · next customer</button></div>${cdLine}</div>`;
     } else {
       const failed = ['FAILED', 'CANCELLED', 'TIMEOUT'].includes(p.status) || p.retry || !p.status;
       if (failed) {

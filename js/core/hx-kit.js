@@ -159,7 +159,16 @@
     return () => { clearInterval(t); window.removeEventListener('branchchange', fn); document.removeEventListener('visibilitychange', tick); };
   }
 
-  window.HX = { pct, pctNum, count, errors: errs, E, M, user, can, canAny, branchId, feature, list, get, send, pill, head, icon, fieldHtml, formModal, readForm, mount, live, skel };
+  /** The restaurant's operating plan (kitchen screen? which printer? mark-ready by hand?). Cached 30 s; never throws. */
+  let _plan = null, _planAt = 0;
+  async function plan(force) {
+    if (!force && _plan && Date.now() - _planAt < 30000) return _plan;
+    const d = await get('/restaurant/operations/plan');
+    _plan = (d && (d.plan || d)) || _plan || { configured: false, kitchenScreen: true, printers: {}, printing: {}, markReadyByHand: [] }; _planAt = Date.now();
+    return _plan;
+  }
+
+  window.HX = { plan, pct, pctNum, count, errors: errs, E, M, user, can, canAny, branchId, feature, list, get, send, pill, head, icon, fieldHtml, formModal, readForm, mount, live, skel };
 })(window);
 /* ---- extra helpers shared by the order, bill and stay screens ---- */
 (function (window) {
