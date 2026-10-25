@@ -16,6 +16,7 @@ const CDN_HOSTS = /^(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|fonts\
 // Missing files are skipped (all
 // Settled), so listing a file that does not exist is harmless.
 const PRECACHE = [
+  'rider.html', 'track.html', 'hx-live.html', 'css/live.css', 'js/core/live-kit.js', 'js/rider/rider-app.js', 'js/track/track-app.js', 'js/pages/hx-live.js', 'manifest-rider.json',
   'hx-cashier.html', 'css/hx-cashier.css', 'js/pages/hx-cashier.js', 'hx-floor.html', 'hx-kitchen.html', 'hx-bills.html', 'hx-reservations.html', 'hx-delivery.html', 'hx-storefront.html', 'js/pages/hx-storefront.js', 'kiosk.html', 'css/kiosk.css', 'js/pages/kiosk.js', 'hx-selfservice.html', 'js/pages/hx-selfservice.js', 'store.html', 'hx-menu.html', 'hx-stock.html', 'hx-guest.html', 'hx-staff.html', 'hx-desk.html', 'hx-rooms.html', 'hx-stays.html', 'hx-housekeeping.html', 'hx-reports.html', 'js/pages/hx-floor.js', 'js/pages/hx-kitchen.js', 'js/pages/hx-bills.js', 'js/pages/hx-reservations.js', 'js/pages/hx-delivery.js', 'js/pages/hx-menu.js', 'js/pages/hx-stock.js', 'js/pages/hx-guest.js', 'js/pages/hx-staff.js', 'js/pages/hx-desk.js', 'js/pages/hx-rooms.js', 'js/pages/hx-stays.js', 'js/pages/hx-housekeeping.js', 'js/pages/hx-reports.js', 'js/core/qr-encoder.js',
   'hx-dashboard.html', 'hx-services.html', 'js/pages/hx-services.js', 'js/core/business-types.js', 'hx-setup.html', 'hx-settings.html', 'css/hospitality.css', 'css/hx-redesign.css', 'css/hx-pro.css', 'css/hx-fixes.css', 'js/core/hx-art.js', 'js/core/home-route.js', 'js/core/hx-kit.js', 'js/core/hx-pay.js', 'js/core/hx-order.js', 'js/core/hx-recipe.js', 'js/pages/hx-dashboard.js', 'js/pages/hx-setup.js', 'js/pages/hx-settings.js',
   'offline.html', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'alerts.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'index.html', 'login.html', 'register.html', 'dashboard.html', 'sales.html',
@@ -160,4 +161,19 @@ self.addEventListener('fetch', (event) => {
   if (req.mode === 'navigate') { event.respondWith(networkFirst(event, true)); return; }
   if (/\.(?:png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf)$/i.test(url.pathname)) { event.respondWith(cacheFirst(event)); return; }
   event.respondWith(networkFirst(event, false));
+});
+
+// ---- Web Push: "Your rider is 100 m away" (customer) and "New delivery" (rider). Needs VAPID keys on the server.
+self.addEventListener('push', (event) => {
+  let d = {}; try { d = event.data ? event.data.json() : {}; } catch (e) { d = { title: 'Six Star POS', body: event.data ? event.data.text() : '' }; }
+  const title = d.title || 'Six Star POS';
+  event.waitUntil(self.registration.showNotification(title, { body: d.body || d.message || '', icon: '/icons/icon-192.png', badge: '/icons/favicon-32.png', tag: d.tag || 'delivery', renotify: true, vibrate: [160, 80, 160], data: { url: d.url || d.link || '/' } }));
+});
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close(); const url = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil((async () => {
+    const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of all) { if (c.url.includes('/rider.html') || c.url.includes('/track.html')) { try { await c.focus(); return; } catch (e) { /* open new */ } } }
+    return clients.openWindow(url);
+  })());
 });

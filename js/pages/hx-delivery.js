@@ -11,7 +11,7 @@
     el = window.HX.mount('Delivery & pickup'); if (!el) return; await window.AppShell.whenProfileReady?.();
     const rider = !can('restaurant.delivery.view');
     if (!rider && can('restaurant.delivery.manage')) { const e = await get('/employees', { limit: 100 }); riders = list(e, 'employees').filter((x) => x.role === 'DELIVERY_RIDER'); }
-    el.innerHTML = head(rider ? 'My deliveries' : 'Delivery & pickup', rider ? 'Runs assigned to you.' : 'Assign riders and follow each order to the door.', (rider || !can('restaurant.orders.create') ? '' : '<button class="btn btn-secondary" id="np">New pickup</button><button class="btn btn-primary" id="nd">New delivery</button>') + '<span class="hx-live">Live</span>') + (rider ? '' : '<div id="tb"></div>') + '<div id="dl"></div>';
+    el.innerHTML = head(rider ? 'My deliveries' : 'Delivery & pickup', rider ? 'Runs assigned to you.' : 'Assign riders and follow each order to the door.', (rider || !can('restaurant.orders.create') ? '' : '<button class="btn btn-secondary" id="np">New pickup</button><button class="btn btn-primary" id="nd">New delivery</button>') + (rider ? '' : '<a class="btn btn-secondary" href="hx-live.html">Live map</a>') + '<span class="hx-live">Live</span>') + (rider ? '' : '<div id="tb"></div>') + '<div id="dl"></div>';
     const refresh = () => load(rider);
     el.querySelector('#nd')?.addEventListener('click', () => window.HX.order.start('DELIVERY', { onChange: refresh, onClose: refresh }));
     el.querySelector('#np')?.addEventListener('click', () => window.HX.order.start('PICKUP', { onChange: refresh, onClose: refresh }));

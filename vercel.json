@@ -40,6 +40,14 @@
   ],
   "rewrites": [
     {
+      "source": "/rider/:token",
+      "destination": "/rider.html"
+    },
+    {
+      "source": "/track/:token/:key",
+      "destination": "/track.html"
+    },
+    {
       "source": "/kiosk/:token",
       "destination": "/kiosk.html"
     },
