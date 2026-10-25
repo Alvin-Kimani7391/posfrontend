@@ -105,6 +105,7 @@
     if (!A.has() || !S.user) { if (r.v !== 'login') return go('#/login'); }
     else if (r.v === 'login') return go('#/home');
     S.view = r.v; window.scrollTo(0, 0);
+    const tm = document.querySelector('meta[name=theme-color]'); if (tm) tm.content = r.v === 'login' ? '#0b0f14' : '#F26A21';
     const V = { login: vLogin, home: vHome, list: vList, d: vDetail, map: vMap, pay: vPay, profile: vProfile, wallet: vWallet, earnings: vEarnings }[r.v] || vHome;
     if (r.v !== 'login') { openStream(); }
     try { await V(r.id, my); } catch (e) { if (my === S.seq) { app.innerHTML = `${top('Something went wrong', { back: r.v !== 'home' })}<div class="empty"><div class="em">${ic('alert')}</div><b>${esc(e.message || 'Could not load')}</b><button class="btn sm" style="margin-top:14px" id="rt">Try again</button></div>`; bindBack(); const b = $('#rt'); if (b) b.onclick = render; } }
@@ -112,35 +113,133 @@
   window.addEventListener('hashchange', render);
 
   /* =================== views =================== */
-  async function vLogin() {
-    stopTracker(); let ctx = null, mode = kv.get('mode') || 'phone', bad = '';
-    if (!QR) { app.innerHTML = splash('<div class="login-card center"><div class="empty" style="padding:20px 8px"><div class="em">' + ic('qr') + '</div><b>Scan your rider QR code</b><p>Ask your manager for the rider QR code, then scan it with your phone camera to open this app.</p></div></div>'); return; }
-    app.innerHTML = splash('<div class="sk" style="height:300px;border-radius:22px"></div>');
-    try { ctx = await A.get('/public/rider/' + encodeURIComponent(QR)); } catch (e) { bad = e.message; }
-    if (ctx && ctx.business) { S.biz = ctx.business; kv.set('biz', JSON.stringify(ctx.business)); Lv.setCurrency(ctx.business.currency); }
-    const name = ctx && ctx.business ? ctx.business.name : 'Six Star POS';
-    const form = () => `<div class="login-card"><div class="seg"><button data-m="phone" class="${mode === 'phone' ? 'on' : ''}">Phone &amp; password</button><button data-m="code" class="${mode === 'code' ? 'on' : ''}">Code &amp; PIN</button></div>
-      <form id="lf" autocomplete="on">
-      ${mode === 'phone' ? `<label class="lbl">Phone or email</label><input class="field" id="a" inputmode="email" autocomplete="username" placeholder="0712 345 678" required><div class="sp"></div><label class="lbl">Password</label><div class="pwrap"><input class="field" id="b" type="password" autocomplete="current-password" placeholder="Your password" required><button type="button" class="ib" id="eye" aria-label="Show">${ic('eye')}</button></div>`
-        : `<label class="lbl">Employee code</label><input class="field" id="a" autocomplete="username" placeholder="e.g. R001" required><div class="sp"></div><label class="lbl">PIN</label><input class="field" id="b" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Your PIN" required>`}
-      <div id="em" class="note bad" style="display:${bad ? 'flex' : 'none'}">${ic('alert')}<div>${esc(bad)}</div></div><div class="sp"></div>
-      <button class="btn" id="go" ${bad && !ctx ? 'disabled' : ''}>Login</button></form>
-      <p class="fine center" style="margin-top:12px">${ic('lock')} Riders only. Staff sign in from the main POS app.</p></div>`;
-    const paint = () => { app.innerHTML = splash(form(), name); $$('[data-m]').forEach((b) => b.onclick = () => { mode = b.dataset.m; kv.set('mode', mode); paint(); });
-      const eye = $('#eye'); if (eye) eye.onclick = () => { const i = $('#b'); i.type = i.type === 'password' ? 'text' : 'password'; };
-      $('#lf').onsubmit = async (e) => { e.preventDefault(); const btn = $('#go'), em = $('#em'); em.style.display = 'none'; busy(btn, true, 'Signing in...');
-        try {
-          const body = mode === 'phone' ? { identifier: $('#a').value.trim(), password: $('#b').value } : { employeeCode: $('#a').value.trim(), pin: $('#b').value };
-          const r = await A.post('/public/rider/' + encodeURIComponent(QR) + '/login', body);
-          A.setSession(r.accessToken, r.refreshToken); S.user = r.user; kv.set('user', JSON.stringify(r.user));
-          const cur = r.country && (r.country.currency || r.country.currencyCode); if (cur) { Lv.setCurrency(cur); S.biz = Object.assign({}, S.biz, { currency: cur }); kv.set('biz', JSON.stringify(S.biz)); }
-          go('#/home');
-        } catch (x) { busy(btn, false); em.style.display = 'flex'; em.lastElementChild.textContent = x.message; } }; };
-    paint();
+  /* =================== sign-in screen =================== */
+  // Icons: Lucide (ISC licence), the standard open-source set used by many production apps.
+  const LI = {
+    eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+    eyeoff: '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>',
+    lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    phone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
+    user: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+    idcard: '<path d="M16 10h2"/><path d="M16 14h2"/><path d="M6.17 15a3 3 0 0 1 5.66 0"/><circle cx="9" cy="11" r="2"/><rect x="2" y="5" width="20" height="14" rx="2"/>',
+    shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+    alert: '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
+    arrow: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    qr: '<rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/>',
+    bike: '<circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/>',
+    pkg: '<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.29 7 8.71 5 8.71-5"/>',
+    ok: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+    cash: '<rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>',
+    map: '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+  };
+  const li = (n, cls) => `<svg${cls ? ` class="${cls}"` : ''} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LI[n]}</svg>`;
+
+  // city skyline tiles (generated once; seamless so they can scroll forever)
+  let SKY = null;
+  function tile(W, H, seed, fill, win, dens) {
+    let s = seed; const r = () => (s = (s * 16807) % 2147483647) / 2147483647; let x = 0, o = '';
+    while (x < W) {
+      const w = Math.min(26 + ((r() * 44) | 0), W - x), h = (H * (0.28 + r() * 0.62)) | 0; o += `<rect x="${x}" y="${H - h}" width="${w}" height="${h}" fill="${fill}"/>`;
+      if (r() < 0.25) o += `<rect x="${x + w / 2 - 1}" y="${H - h - 12}" width="2" height="12" fill="${fill}"/>`;
+      for (let wy = H - h + 8; wy < H - 8; wy += 11) for (let wx = x + 6; wx < x + w - 6; wx += 9) if (r() < dens) o += `<rect x="${wx}" y="${wy}" width="3.5" height="5" rx=".8" fill="${win}" opacity="${(0.3 + r() * 0.65).toFixed(2)}"/>`;
+      x += w + (r() < 0.3 ? 5 : 0);
+    }
+    return `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${o}</svg>`)}")`;
   }
-  function splash(inner, name) {
-    return `<div class="splash"><div class="logo"><div class="star"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4 6.1 20.5l1.2-6.5L2.5 9.4l6.6-.9L12 2.5z"/></svg></div><div><h1>${esc(name || 'Six Star POS')}</h1><div class="sub">Rider Delivery</div></div></div>
-    <div class="hero"><div class="rd">${ic('bike')}</div><h2>Delivering Happiness</h2><p>Fast · Safe · Reliable</p></div>${inner}</div>`;
+  const skies = () => SKY || (SKY = { far: tile(520, 120, 7, '#1b2632', '#ffcf8a', 0.2), near: tile(520, 92, 23, '#0d1218', '#ffb36b', 0.34) });
+
+  const SCOOTER = `<svg viewBox="0 0 220 150" role="img" aria-label="Delivery rider on a scooter"><defs><linearGradient id="rlg" x1="0" x2="1"><stop offset="0" stop-color="#FFE08A" stop-opacity=".55"/><stop offset="1" stop-color="#FFE08A" stop-opacity="0"/></linearGradient></defs>
+    <ellipse cx="112" cy="134" rx="84" ry="5" fill="rgba(0,0,0,.45)"/>
+    <path d="M180 64 L218 50 L218 80 Z" fill="url(#rlg)"/>
+    <g><circle cx="52" cy="112" r="20" fill="#0f1317" stroke="#2c3440" stroke-width="3"/><g class="rl-spin"><circle cx="52" cy="112" r="12" fill="none" stroke="#98a2ad" stroke-width="2"/><path d="M52 100v24M40 112h24M43.5 103.5l17 17M60.5 103.5l-17 17" stroke="#6b7480" stroke-width="1.6"/></g><circle cx="52" cy="112" r="4.5" fill="#cfd4d9"/></g>
+    <rect x="22" y="72" width="46" height="5" rx="2" fill="#1c2229"/>
+    <rect x="12" y="30" width="60" height="44" rx="8" fill="#F26A21"/><rect x="12" y="30" width="60" height="11" rx="8" fill="#FF8A3D"/><rect x="12" y="38" width="60" height="3" fill="#D9560F"/>
+    <path d="M42 46.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.8-5.3-2.8-5.3 2.8 1.1-5.8-4.3-4.1 5.9-.8z" fill="#fff"/>
+    <path d="M34 104C34 85 48 74 72 74H106V100H80Z" fill="#F26A21"/><path d="M30 110A22 22 0 0 1 74 110" fill="none" stroke="#D9560F" stroke-width="5" stroke-linecap="round"/>
+    <rect x="62" y="65" width="44" height="10" rx="5" fill="#1c2229"/><rect x="100" y="96" width="54" height="10" rx="5" fill="#1c2229"/>
+    <g class="rl-rider"><polyline points="92,68 117,86 123,100" fill="none" stroke="#374151" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/><rect x="115" y="97" width="18" height="8" rx="3.5" fill="#14171A"/>
+    <line x1="90" y1="66" x2="118" y2="36" stroke="#1e293b" stroke-width="22" stroke-linecap="round"/><line x1="96" y1="58" x2="108" y2="46" stroke="#F26A21" stroke-width="3" stroke-linecap="round" opacity=".9"/>
+    <polyline points="117,40 135,54 154,46" fill="none" stroke="#1e293b" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="155" cy="46" r="5" fill="#F26A21"/>
+    <circle cx="128" cy="19" r="14" fill="#fff"/><path d="M118 15A14 14 0 0 1 131 6" fill="none" stroke="#F26A21" stroke-width="3.5" stroke-linecap="round"/><path d="M131 13A14 14 0 0 1 142 24L128 25Z" fill="#14171A" opacity=".88"/></g>
+    <path d="M150 100 L158 62 Q160 55 167 55 H171 L176 100Z" fill="#F26A21"/><path d="M168 56 L176 100" stroke="#D9560F" stroke-width="3"/>
+    <line x1="169" y1="66" x2="175" y2="112" stroke="#3a4552" stroke-width="5" stroke-linecap="round"/>
+    <g><circle cx="174" cy="112" r="20" fill="#0f1317" stroke="#2c3440" stroke-width="3"/><g class="rl-spin"><circle cx="174" cy="112" r="12" fill="none" stroke="#98a2ad" stroke-width="2"/><path d="M174 100v24M162 112h24M165.5 103.5l17 17M182.5 103.5l-17 17" stroke="#6b7480" stroke-width="1.6"/></g><circle cx="174" cy="112" r="4.5" fill="#cfd4d9"/></g>
+    <line x1="161" y1="55" x2="151" y2="45" stroke="#1c2229" stroke-width="5" stroke-linecap="round"/><rect x="143" y="41" width="14" height="6" rx="3" fill="#1c2229"/>
+    <circle cx="177" cy="63" r="5.5" fill="#FFE08A"/><circle cx="177" cy="63" r="9" fill="#FFE08A" opacity=".25"/></svg>`;
+
+  const CHIPS = [['pkg', 'New delivery', 'Kilimani · 2.4 km'], ['bike', 'Order picked up', 'Heading to the customer'], ['ok', 'Delivered', 'Great job, rider!'], ['cash', 'Cash handed over', 'Cashier confirmed']];
+  let chipT = null;
+  function stage(brand, logo) {
+    clearInterval(chipT);
+    const st = Array.from({ length: 24 }, (_, i) => `<i style="left:${(i * 37 + (i % 5) * 11) % 100}%;top:${(i * 53 + (i % 7) * 9) % 100}%;animation-delay:${(i % 9) * 0.4}s"></i>`).join('');
+    const k = skies(); const c0 = CHIPS[0];
+    return `<div class="rl" id="rl"><div class="rl-hero" aria-hidden="false">
+      <div class="rl-stars">${st}</div><div class="rl-sun"></div>
+      <div class="rl-layer rl-far" style="background-image:${k.far};background-size:520px 120px"></div><div class="rl-layer rl-near" style="background-image:${k.near};background-size:520px 92px"></div>
+      <svg class="rl-route" viewBox="0 0 360 150" preserveAspectRatio="xMaxYMax meet" aria-hidden="true"><path d="M150 128C190 66 252 150 292 102"/></svg>
+      <div class="rl-pin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3" fill="#fff" stroke="none"/></svg></div>
+      <div class="rl-road"></div>
+      <div class="rl-ride"><div class="rl-spd"><i></i><i></i><i></i></div><div class="rl-bob">${SCOOTER}</div></div>
+      <div class="rl-bar"><div class="rl-logo">${logo ? `<img src="${esc(logo)}" alt="" onerror="this.remove()">` : ''}<svg viewBox="0 0 24 24" fill="currentColor" ${logo ? 'style="position:absolute;z-index:-1"' : ''}><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4 6.1 20.5l1.2-6.5L2.5 9.4l6.6-.9L12 2.5z"/></svg></div><div class="rl-bn"><b id="rlbn">${esc(brand)}</b><span>Rider</span></div></div>
+      <div class="rl-copy"><h1>Ready to<br><em>deliver?</em></h1><p>Sign in to see your orders and start earning.</p></div>
+      <div class="rl-chip" id="rlchip" aria-hidden="true"><div class="ci" id="rlci">${li(c0[0])}</div><div class="tx"><b id="rlct">${c0[1]}</b><small id="rlcs">${c0[2]}</small></div></div>
+    </div><div class="rl-sheet"><div class="rl-st" id="rlb"></div></div></div>`;
+  }
+  function chipLoop() {
+    let i = 0; chipT = setInterval(() => {
+      const ch = $('#rlchip'); if (!ch) return clearInterval(chipT); ch.classList.add('sw');
+      setTimeout(() => { i = (i + 1) % CHIPS.length; const c = CHIPS[i]; const a = $('#rlci'); if (!a) return; a.innerHTML = li(c[0]); $('#rlct').textContent = c[1]; $('#rlcs').textContent = c[2]; ch.classList.remove('sw'); }, 280);
+    }, 3200);
+  }
+
+  async function vLogin() {
+    stopTracker(); let ctx = null, mode = kv.get('mode') === 'code' ? 'code' : 'phone', bad = '';
+    app.innerHTML = stage((S.biz && S.biz.name) || 'Six Star POS', S.biz && S.biz.logo); chipLoop();
+    const body = $('#rlb'); S.cleanup.push(() => clearInterval(chipT));
+    if (!QR) {
+      body.innerHTML = `<h2 class="rl-h2">Scan your rider QR code</h2><p class="rl-sub">Your manager gives each rider a QR code for this business.</p>
+        <div class="rl-steps"><div><span class="n">${li('qr')}</span><span><b>Scan the QR code</b><span>Use your phone camera</span></span></div><div><span class="n">${li('user')}</span><span><b>Sign in</b><span>Phone and password, or employee code and PIN</span></span></div><div><span class="n">${li('bike')}</span><span><b>Go online</b><span>Start receiving deliveries</span></span></div></div>
+        <div class="rl-help">${li('shield')} Secure sign-in for delivery partners</div>`; return;
+    }
+    body.innerHTML = `<h2 class="rl-h2">Welcome back</h2><p class="rl-sub">Checking your restaurant...</p><div class="rl-loading"><i></i><i></i><i></i></div>`;
+    try { ctx = await A.get('/public/rider/' + encodeURIComponent(QR)); } catch (e) { bad = e.message; }
+    if (!$('#rlb')) return;
+    if (ctx && ctx.business) { S.biz = ctx.business; kv.set('biz', JSON.stringify(ctx.business)); Lv.setCurrency(ctx.business.currency); const bn = $('#rlbn'); if (bn) bn.textContent = ctx.business.name; }
+    const field = (id, icon, label, o = {}) => `<div class="rl-f" id="f${id}"><span class="li">${li(icon)}</span><input id="${id}" name="${o.name || id}" type="${o.type || 'text'}" placeholder=" " autocomplete="${o.ac || 'off'}" ${o.im ? `inputmode="${o.im}"` : ''} ${o.enter ? `enterkeyhint="${o.enter}"` : ''} autocapitalize="none" autocorrect="off" spellcheck="false" ${o.max ? `maxlength="${o.max}"` : ''}><label for="${id}">${label}</label>${o.eye ? `<button type="button" class="rl-eye" aria-pressed="false" aria-label="Show ${o.eye}" data-for="${id}" data-what="${o.eye}">${li('eye', 'on')}${li('eyeoff', 'off')}</button>` : ''}</div>`;
+    const fields = () => mode === 'phone'
+      ? field('a', 'user', 'Phone number or email', { name: 'username', ac: 'username', im: 'email', enter: 'next' }) + field('b', 'lock', 'Password', { type: 'password', name: 'password', ac: 'current-password', enter: 'go', eye: 'password' })
+      : field('a', 'idcard', 'Employee code', { name: 'employeeCode', ac: 'username', enter: 'next' }) + field('b', 'lock', 'PIN', { type: 'password', name: 'pin', ac: 'current-password', im: 'numeric', enter: 'go', eye: 'PIN', max: 12 });
+    body.innerHTML = `<h2 class="rl-h2">Welcome back</h2><p class="rl-sub">Sign in to start receiving deliveries.</p>
+      <div class="rl-seg" id="seg" data-m="${mode}" role="tablist"><button type="button" data-m="phone" role="tab" class="${mode === 'phone' ? 'on' : ''}">${li('phone')} Phone</button><button type="button" data-m="code" role="tab" class="${mode === 'code' ? 'on' : ''}">${li('idcard')} Employee code</button></div>
+      <form id="lf" novalidate><div id="ff">${fields()}</div><div id="em">${bad ? `<div class="rl-err" role="alert">${li('alert')}<span>${esc(bad)}</span></div>` : ''}</div>
+      <button class="rl-btn" id="go" type="submit" ${bad && !ctx ? 'disabled' : ''}><span id="gl">Sign in</span>${li('arrow', 'ar')}</button></form>
+      <div class="rl-help">${li('shield')} Secure sign-in · Delivery partners only</div><p class="rl-fine">Forgot your password or PIN? Ask your manager to reset it.</p>`;
+    const clearErr = () => { $('#em').innerHTML = ''; $$('.rl-f').forEach((f) => f.classList.remove('bad')); };
+    const seg = $('#seg');
+    $$('[data-m]', seg).forEach((b) => b.onclick = () => { if (mode === b.dataset.m) return; mode = b.dataset.m; kv.set('mode', mode); seg.dataset.m = mode; $$('[data-m]', seg).forEach((x) => x.classList.toggle('on', x === b)); const ff = $('#ff'); ff.style.opacity = 0; setTimeout(() => { ff.innerHTML = fields(); ff.style.transition = 'opacity .25s'; ff.style.opacity = 1; clearErr(); }, 140); });
+    // show / hide password + PIN (works for every password-type field in this form)
+    $('#lf').addEventListener('mousedown', (e) => { if (e.target.closest('.rl-eye')) e.preventDefault(); });
+    $('#lf').addEventListener('click', (e) => { const b = e.target.closest('.rl-eye'); if (!b) return; const i = $('#' + b.dataset.for), show = i.type === 'password'; const had = document.activeElement === i; i.type = show ? 'text' : 'password'; b.setAttribute('aria-pressed', String(show)); b.setAttribute('aria-label', (show ? 'Hide ' : 'Show ') + b.dataset.what); if (had) { i.focus(); const n = i.value.length; try { i.setSelectionRange(n, n); } catch (x) { /* some input types */ } } });
+    $('#lf').addEventListener('input', () => { if ($('#em').firstChild) clearErr(); });
+    const fail = (msg, ids) => { const em = $('#em'); em.innerHTML = `<div class="rl-err" role="alert">${li('alert')}<span>${esc(msg)}</span></div>`; (ids || ['a', 'b']).forEach((id) => { const f = $('#f' + id); if (f) { f.classList.add('bad'); f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); } }); };
+    $('#lf').onsubmit = async (e) => {
+      e.preventDefault(); const btn = $('#go'), gl = $('#gl'); if (btn.disabled) return; clearErr();
+      const a = $('#a').value.trim(), p = $('#b').value;
+      if (!a || !p) return fail(mode === 'phone' ? 'Enter your phone number (or email) and password.' : 'Enter your employee code and PIN.', [!a && 'a', !p && 'b'].filter(Boolean));
+      btn.disabled = true; btn.innerHTML = '<span class="sp"></span><span>Signing in...</span>';
+      try {
+        const r = await A.post('/public/rider/' + encodeURIComponent(QR) + '/login', mode === 'phone' ? { identifier: a, password: p } : { employeeCode: a, pin: p });
+        A.setSession(r.accessToken, r.refreshToken); S.user = r.user; kv.set('user', JSON.stringify(r.user));
+        const cur = r.country && (r.country.currency || r.country.currencyCode); if (cur) { Lv.setCurrency(cur); S.biz = Object.assign({}, S.biz, { currency: cur }); kv.set('biz', JSON.stringify(S.biz)); }
+        btn.classList.add('ok'); btn.innerHTML = `<svg class="ck" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Welcome back</span>`;
+        try { navigator.vibrate && navigator.vibrate(30); } catch (x) { /* none */ }
+        setTimeout(() => { const rl = $('#rl'); if (rl) rl.classList.add('leave'); setTimeout(() => go('#/home'), 480); }, 650);
+      } catch (x) {
+        btn.disabled = false; btn.classList.remove('ok'); btn.innerHTML = `<span id="gl">Sign in</span>${li('arrow', 'ar')}`;
+        fail(x.code === 'NETWORK' ? x.message : x.status === 429 ? 'Too many attempts. Please wait a few minutes and try again.' : x.message || 'Sign-in failed. Please try again.', x.code === 'NETWORK' ? [] : x.code === 'NOT_A_RIDER' ? ['a'] : ['a', 'b']);
+      }
+    };
   }
 
   /* ---- home ---- */

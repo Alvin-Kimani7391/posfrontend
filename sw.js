@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v4.0.6-store-pwa';
+const VERSION = 'v4.0.7-rider-login';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -16,7 +16,7 @@ const CDN_HOSTS = /^(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|fonts\
 // Missing files are skipped (all
 // Settled), so listing a file that does not exist is harmless.
 const PRECACHE = [
-  'rider.html', 'track.html', 'hx-live.html', 'css/live.css', 'js/core/live-kit.js', 'js/rider/rider-app.js', 'js/track/track-app.js', 'js/pages/hx-live.js', 'manifest-rider.json',
+  'rider.html', 'track.html', 'hx-live.html', 'css/live.css', 'css/rider-login.css', 'js/core/live-kit.js', 'js/rider/rider-app.js', 'js/track/track-app.js', 'js/pages/hx-live.js', 'manifest-rider.json',
   'hx-cashier.html', 'css/hx-cashier.css', 'js/pages/hx-cashier.js', 'hx-floor.html', 'hx-kitchen.html', 'hx-bills.html', 'hx-reservations.html', 'hx-delivery.html', 'hx-storefront.html', 'js/pages/hx-storefront.js', 'hx-tv.html', 'js/pages/hx-tv.js', 'css/tv.css', 'js/core/tv-render.js', 'kiosk.html', 'css/kiosk.css', 'js/pages/kiosk.js', 'hx-selfservice.html', 'js/pages/hx-selfservice.js', 'store.html', 'hx-menu.html', 'hx-stock.html', 'hx-guest.html', 'hx-staff.html', 'hx-desk.html', 'hx-rooms.html', 'hx-stays.html', 'hx-housekeeping.html', 'hx-reports.html', 'js/pages/hx-floor.js', 'js/pages/hx-kitchen.js', 'js/pages/hx-bills.js', 'js/pages/hx-reservations.js', 'js/pages/hx-delivery.js', 'js/pages/hx-menu.js', 'js/pages/hx-stock.js', 'js/pages/hx-guest.js', 'js/pages/hx-staff.js', 'js/pages/hx-desk.js', 'js/pages/hx-rooms.js', 'js/pages/hx-stays.js', 'js/pages/hx-housekeeping.js', 'js/pages/hx-reports.js', 'js/core/qr-encoder.js',
   'hx-dashboard.html', 'hx-services.html', 'js/pages/hx-services.js', 'js/core/business-types.js', 'hx-setup.html', 'hx-settings.html', 'css/hospitality.css', 'css/hx-redesign.css', 'css/hx-pro.css', 'css/hx-fixes.css', 'js/core/hx-art.js', 'js/core/home-route.js', 'js/core/hx-kit.js', 'js/core/hx-pay.js', 'js/core/hx-order.js', 'js/core/hx-recipe.js', 'js/pages/hx-dashboard.js', 'js/pages/hx-setup.js', 'js/pages/hx-settings.js',
   'offline.html', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'alerts.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'index.html', 'login.html', 'register.html', 'dashboard.html', 'sales.html',

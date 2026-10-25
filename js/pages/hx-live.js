@@ -6,7 +6,7 @@
 (function () {
   const Lv = window.Live;
   const { E, M, can, get, send, list, head, formModal } = window.HX;
-  let el, board = { stats: {}, riders: [], deliveries: [] }, map = null, tab = 'map', sel = null, filter = 'ALL', sse = null, state = 'down', cash = null, qr = null, refetchT = null, pendingFit = true, riders = [];
+  let el, board = { stats: {}, riders: [], deliveries: [] }, map = null, tab = 'map', sel = null, filter = 'ALL', sse = null, state = 'down', cash = null, qr = null, rs = null, pk = null, refetchT = null, pendingFit = true, riders = [];
   const TONE = { PENDING: 'ye', ASSIGNED: 'bl', PICKED_UP: 'ye', ON_THE_WAY: 'or', ARRIVED: 'gr', DELIVERED: 'gr', FAILED: 'rd', CANCELLED: 'gy' };
   const LBL = { PENDING: 'Pending', ASSIGNED: 'Assigned', PICKED_UP: 'Picked up', ON_THE_WAY: 'On the way', ARRIVED: 'Arrived', DELIVERED: 'Delivered', FAILED: 'Failed' };
   const tag = (s, l) => `<span class="tag ${TONE[s] || 'gy'}">${E(l || LBL[s] || s)}</span>`;
@@ -29,7 +29,7 @@
   const ago = (t) => Lv.ago(t);
 
   function shell() {
-    const tabs = [['map', 'Live map', true], ['cash', 'Rider cash', can('restaurant.delivery.cash')], ['qr', 'Rider QR code', can('restaurant.delivery.qr')]].filter((x) => x[2]);
+    const tabs = [['map', 'Live map', true], ['cash', 'Rider cash', can('restaurant.delivery.cash')], ['qr', 'Rider QR code', can('restaurant.delivery.qr')], ['set', 'Rider settings & alerts', can('restaurant.settings.view')]].filter((x) => x[2]);
     el.innerHTML = head('Live Delivery Tracking', 'Follow every rider and customer in real time.', `<span class="lb-live off" id="lst">Connecting</span><a class="btn btn-secondary" href="hx-delivery.html">Delivery &amp; pickup</a>`) +
       `<div class="lb-stats" id="stats"></div><div class="lb-tabs" id="tabs">${tabs.map(([k, l]) => `<button data-t="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div><div id="body"></div>`;
     el.querySelectorAll('#tabs [data-t]').forEach((b) => b.onclick = () => { tab = b.dataset.t; el.querySelectorAll('#tabs [data-t]').forEach((x) => x.classList.toggle('on', x === b)); paint(); });
@@ -39,7 +39,7 @@
   }
   function paint() {
     stats(); if (map) { map.destroy(); map = null; } const b = el.querySelector('#body');
-    if (tab === 'map') paintMap(b); else if (tab === 'cash') paintCash(b); else paintQr(b);
+    if (tab === 'map') paintMap(b); else if (tab === 'cash') paintCash(b); else if (tab === 'set') paintSet(b); else paintQr(b);
   }
   function paintLive() { stats(); if (tab !== 'map') return; paintSide(); drawMap(); }
 
@@ -108,6 +108,36 @@
     formModal({ title: 'Receive rider cash', maxWidth: '420px', fields: [{ name: 'receivedAmount', label: `Cash received (expected ${M(r.total)})`, type: 'number', value: r.total, step: 'any', min: 0, required: true }, { name: 'note', label: 'Note (optional)', type: 'text' }], onSubmit: async (v) => {
       const out = await send('post', '/delivery-live/cash/handover', { riderId: r.rider.id, receivedAmount: Number(v.receivedAmount), note: v.note || undefined }); if (!out) return false;
       window.UI.toast.success('Cash recorded'); cash = null; await loadCash(); queue(); return true; } });
+  }
+
+
+  /* ---------------- rider settings + lock-screen alerts ---------------- */
+  async function paintSet(b) {
+    if (!rs) { b.innerHTML = window.HX.skel('rows', 4); const [st, k] = await Promise.all([get('/restaurant/settings'), get('/delivery-live/push/key')]); rs = (st && (st.settings || st).rider) || {}; pk = k || {}; }
+    const r = rs, pay = r.pay || {}, ed = can('restaurant.settings.manage'), dis = ed ? '' : 'disabled';
+    const ds = (r.alertDistancesM && r.alertDistancesM.length ? r.alertDistancesM : [500, 200, 100, 50]).join(', ');
+    const chk = (id, label, on, hint) => `<label class="sf-toggle"><input type="checkbox" id="${id}" ${on ? 'checked' : ''} ${dis}><span class="sf-sw" aria-hidden="true"></span><span class="sf-tt">${E(label)}${hint ? `<small>${E(hint)}</small>` : ''}</span></label>`;
+    const push = pk && pk.enabled
+      ? `<div class="lb-panel" style="margin-bottom:16px"><h3>Lock-screen alerts <span class="tag gr">On for this business</span></h3><div style="padding:14px 16px"><p class="hx-sub" style="margin:0 0 10px">The server can send "Your rider is 100 m away" and "New delivery" to phones even when the app is closed. Each person turns it on once on their own phone: riders in <b>Profile, Settings</b>, customers on the tracking page ("Alert me when the rider is close"), and you below.</p><button class="btn btn-secondary" id="pn">Turn on alerts on this device</button></div></div>`
+      : `<div class="lb-panel" style="margin-bottom:16px;border-color:#fedf89"><h3>Lock-screen alerts <span class="tag ye">Not set up on the server yet</span></h3><div style="padding:14px 16px"><p class="hx-sub" style="margin:0 0 10px">This is a one-time setup on your backend (it applies to every business on it). Until then, alerts still pop up inside the rider and tracking pages while they are open.</p><ol class="hx-sub" style="margin:0 0 0 18px;padding:0"><li>On the backend run <code>npm i web-push</code> and <code>npx web-push generate-vapid-keys</code></li><li>In your hosting dashboard (e.g. Render, Environment) add <code>VAPID_PUBLIC_KEY</code>, <code>VAPID_PRIVATE_KEY</code> and <code>VAPID_SUBJECT</code> (mailto:you@yourbusiness.co.ke)</li><li>Redeploy the backend, then reload this page</li></ol></div></div>`;
+    b.innerHTML = push + `<div class="lb-panel"><h3>Rider &amp; delivery tracking settings</h3><div style="padding:6px 16px 16px">
+      ${chk('r_en', 'Rider app is switched on', r.enabled !== false, 'Riders can sign in from the rider QR code.')}
+      ${chk('r_sc', 'Riders can take unassigned deliveries themselves', r.selfClaim)}
+      ${chk('r_pp', 'Payment must be collected before "Delivered"', r.requirePaymentBeforeDelivered !== false)}
+      ${chk('r_ca', 'Riders can take cash', r.allowCash !== false)}${chk('r_mp', 'Riders can request M-PESA from the customer', r.allowMpesa !== false)}
+      ${chk('r_au', 'Mark "Arrived" automatically at the customer', r.autoArrive, 'Otherwise the rider taps the button.')}${chk('r_ph', 'Show the rider\u2019s phone to the customer once on the way', r.shareRiderPhone !== false)}
+      <div class="field" style="margin-top:14px"><label for="r_ds">Tell the customer when the rider is this close (metres)</label><input class="input" id="r_ds" value="${E(ds)}" ${dis} placeholder="500, 200, 100, 50"><small class="hx-sub">Up to 6 distances between 10 and 5000 m, separated by commas.</small></div>
+      <div class="sf-two" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px"><div class="field"><label for="r_pm">Rider pay per delivery</label><select class="select" id="r_pm" ${dis}><option value="NONE">Not tracked</option><option value="FLAT">Flat amount</option><option value="FEE_PERCENT">% of delivery fee</option></select></div><div class="field"><label for="r_fl">Flat amount</label><input class="input" id="r_fl" type="number" min="0" step="any" value="${(pay.flatCents || 0) / 100}" ${dis}></div><div class="field"><label for="r_fp">% of fee</label><input class="input" id="r_fp" type="number" min="0" max="100" step="any" value="${pay.feePercent == null ? 100 : pay.feePercent}" ${dis}></div></div>
+      ${ed ? '<div style="margin-top:14px"><button class="btn btn-primary" id="r_sv">Save settings</button></div>' : '<p class="hx-sub">Only an owner or manager with settings access can change these.</p>'}</div></div>`;
+    const pm = b.querySelector('#r_pm'); pm.value = pay.mode || 'NONE';
+    const pn = b.querySelector('#pn'); if (pn) pn.onclick = async () => { try { await Lv.enablePush(() => Promise.resolve(pk), (sub) => window.Api.post('/delivery-live/push/subscribe', sub)); window.UI.toast.success('Alerts are on for this device'); } catch (e) { window.UI.toast.error(e.message || 'Could not turn on alerts'); } };
+    const sv = b.querySelector('#r_sv'); if (sv) sv.onclick = async () => {
+      const v = (id) => b.querySelector('#' + id); const raw = v('r_ds').value.split(/[\s,;]+/).filter(Boolean).map(Number);
+      const list = Array.from(new Set(raw)).sort((x, y) => y - x);
+      if (!list.length || list.length > 6 || list.some((n) => !Number.isInteger(n) || n < 10 || n > 5000)) return window.UI.toast.error('Enter 1 to 6 whole distances between 10 and 5000 metres.');
+      const body = { rider: { enabled: v('r_en').checked, selfClaim: v('r_sc').checked, requirePaymentBeforeDelivered: v('r_pp').checked, allowCash: v('r_ca').checked, allowMpesa: v('r_mp').checked, autoArrive: v('r_au').checked, shareRiderPhone: v('r_ph').checked, alertDistancesM: list, pay: { mode: v('r_pm').value, flatCents: Number(v('r_fl').value || 0), feePercent: Number(v('r_fp').value || 0) } } };
+      const out = await send('put', '/restaurant/settings', body); if (out) { window.UI.toast.success('Rider settings saved'); rs = null; paintSet(b); }
+    };
   }
 
   /* ---------------- rider QR ---------------- */
