@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <script>window.__dp=null;window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__dp=e;window.dispatchEvent(new Event('sx-bip'));});window.addEventListener('appinstalled',function(){window.__dp=null;try{localStorage.setItem('store:installed',String(Date.now()));}catch(e){}window.dispatchEvent(new Event('sx-inst'));});</script>
+<script>/* attach the restaurant's manifest as early as possible so the browser can offer "Install" */(function(){try{var m=location.pathname.match(/\/(?:s|q)\/([^\/?#]+)/),t=m?decodeURIComponent(m[1]):(new URLSearchParams(location.search).get('t')||localStorage.getItem('sx.lastToken')||'');if(t&&/^[A-Za-z0-9_-]{8,200}$/.test(t)){var l=document.createElement('link');l.rel='manifest';l.href='/api/store-manifest?t='+encodeURIComponent(t);document.head.appendChild(l);}}catch(e){}})();</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Order online</title>
 <meta name="theme-color" content="#F26A21" id="themeMeta" />
@@ -254,7 +255,7 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 <body>
 <div id="app">
   <main id="view"><div class="pad" style="padding-top:60px"><div class="sk" style="height:26px;width:55%;margin-bottom:14px"></div><div class="sk" style="height:110px"></div></div></main>
-  <div class="pwa" id="install" role="dialog" aria-label="Install app"><div class="pr"><div class="pi" id="installIc">O</div><div class="grow"><b id="installTtl">Install our app</b><div class="pt" id="installTxt">Add it to your home screen to order faster and track your food.</div></div></div><div class="pb"><button class="btn sm ghost" id="installX">Not now</button><button class="btn sm" id="installBtn">Install</button></div></div>
+  <div class="pwa" id="install" role="dialog" aria-label="Install app"><div class="pr"><div class="pi" id="installIc">O</div><div class="grow"><b id="installTtl">Install our app</b><div class="pt" id="installTxt">Add it to your home screen to order faster and track your food.</div></div></div><ul class="pwa-b"><li>Order in two taps</li><li>Live rider tracking</li><li>Receipts &amp; offers saved</li></ul><div class="pb"><button class="btn sm ghost" id="installX">Not now</button><button class="btn sm" id="installBtn">Install</button></div></div>
   <div class="cartbar" id="cartbar"></div>
   <nav class="nav" id="nav" hidden></nav>
 </div>
@@ -412,15 +413,25 @@ var INST = { ready: false, installed: false, ios: false, android: false, phone: 
 function instFlag() { var v = sg('store:installed'); return v === 1 || (typeof v === 'number' && Date.now() - v < 60 * 86400000); }   // remembered for 60 days
 function noop() {}
 function attachManifest(nm) {
-  if (document.querySelector('link[rel="manifest"]')) return;                       // exactly one manifest, ever
-  var l = document.createElement('link'); l.rel = 'manifest';
-  l.href = '/api/store-manifest?t=' + encodeURIComponent(TOKEN) + '&n=' + encodeURIComponent(nm.slice(0, 60)) + '&c=' + encodeURIComponent(String(THEME).replace('#', ''));
-  document.head.appendChild(l);
+  var href = '/api/store-manifest?t=' + encodeURIComponent(TOKEN) + '&n=' + encodeURIComponent(nm.slice(0, 60)) + '&c=' + encodeURIComponent(String(THEME).replace('#', ''));
+  var l = document.querySelector('link[rel="manifest"]');                           // exactly one manifest, ever
+  if (!l) { l = document.createElement('link'); l.rel = 'manifest'; l.href = href; document.head.appendChild(l); }
+  else if (/\/api\/store-manifest/.test(l.getAttribute('href') || '') && (l.getAttribute('href') || '').indexOf('&n=') < 0) {
+    // the early link has no name hint: if the server could not reach the backend (it was waking up), retry once with the name we already know
+    try { fetch(l.href, { cache: 'no-store' }).then(function (r) { if (!r.ok) l.setAttribute('href', href); }).catch(function () { l.setAttribute('href', href); }); } catch (e) { /* optional */ }
+  }
   var an = document.querySelector('meta[name="application-name"]');
   if (!an) { an = document.createElement('meta'); an.name = 'application-name'; document.head.appendChild(an); }
   an.content = nm;
 }
-function refreshInstallUi() { if (cur && (cur.v === 'home' || cur.v === 'more')) render(); }
+function refreshInstallUi() { if (cur && cur.v === 'splash') return splashInstall(); if (cur && (cur.v === 'home' || cur.v === 'more')) render(); }
+function splashInstall() {
+  var c = $('.sl-cta'); if (!c) return; var old = $('#sinst'); if (old) old.remove();
+  if (!INST.ready || INST.installed) return;
+  var b = document.createElement('button'); b.type = 'button'; b.id = 'sinst'; b.className = 'sl-inst';
+  b.innerHTML = '<span class="ii">' + ic('phone') + '</span><span class="tt"><b>Install ' + E(INST.name) + ' app</b><small>Order faster and track your food live</small></span><span class="go">Get</span>';
+  b.onclick = installNow; c.appendChild(b);
+}
 function markInstalled(announce) {
   ss('store:installed', Date.now()); INST.installed = true; INST.ready = false;
   var b = $('#install'); if (b) b.style.display = 'none';
@@ -464,7 +475,8 @@ function setupInstall() {
   INST.android = /android/i.test(ua); INST.phone = INST.ios || INST.android || /mobile/i.test(ua);
   INST.inApp = /FBAN|FBAV|Instagram|WhatsApp|Line\/|MicroMessenger|Twitter|TikTok|Snapchat|musical_ly/i.test(ua) || (INST.android && /; wv\)/.test(ua));
   INST.safari = INST.ios && /safari/i.test(ua) && !/crios|fxios|edgios|opios/i.test(ua);
-  if (instFlag()) { INST.installed = true; return; }
+  if (instFlag() && !window.__dp) { INST.installed = true; return; }           // remembered install (a fresh install prompt from the browser means it is NOT installed, so that wins)
+  if (window.__dp && instFlag()) ss('store:installed', null);
   // Chrome on Android can tell us the app is already installed even when this page is open in a browser tab.
   try { if (navigator.getInstalledRelatedApps) navigator.getInstalledRelatedApps().then(function (l) { if (l && l.length) markInstalled(false); }).catch(noop); } catch (e) { /* optional */ }
   INST.ready = INST.phone || !!window.__dp;                                          // a desktop browser only when it offers its own install prompt
@@ -475,17 +487,18 @@ function setupInstall() {
   function showBanner() {
     var snooze = sg('store:instSnooze');
     if (INST.installed || shown || !INST.ready || (snooze && Date.now() < snooze)) return;
+    if (!cur || ['home', 'menu', 'orders', 'more', 'rooms'].indexOf(cur.v) < 0) return;   // not over the landing page, sign-in or checkout
     shown = true;
-    $('#installTxt').textContent = window.__dp ? 'Add it to your home screen to order faster, track your food and keep your receipts.' : INST.inApp ? 'Open this page in your browser to install the app.' : 'Install it on your phone to order faster and follow your food live.';
+    $('#installTxt').textContent = window.__dp ? 'Add it to your home screen \u2013 it opens like a real app.' : INST.inApp ? 'Open this page in your browser first, then install the app.' : INST.ios ? 'Add it to your Home Screen \u2013 it opens like a real app.' : 'Install it on your phone \u2013 it opens like a real app.';
     btn.textContent = window.__dp ? 'Install' : 'Show me how';
     btn.onclick = function () { box.style.display = 'none'; installNow(); };
     box.style.display = 'block';
   }
   x.onclick = function () { box.style.display = 'none'; var n = (sg('store:instN') || 0) + 1; ss('store:instN', n); ss('store:instSnooze', Date.now() + (n >= 3 ? 14 : 2) * 86400000); };   // asks again later, not never
   window.addEventListener('sx-inst', function () { markInstalled(true); });
-  window.addEventListener('sx-bip', function () { var was = INST.ready; INST.ready = true; if (!was) refreshInstallUi(); setTimeout(showBanner, 1200); });   // Chrome / Edge / Samsung Internet
+  window.addEventListener('sx-bip', function () { var was = INST.ready || INST.installed; if (INST.installed) { INST.installed = false; ss('store:installed', null); } INST.ready = true; refreshInstallUi(); setTimeout(showBanner, 1200); });   // Chrome / Edge / Samsung Internet
   if (window.__dp) setTimeout(showBanner, 1200);
-  setTimeout(showBanner, 5000);                                                      // iPhone / Firefox / in-app browsers never send a prompt: explain how, once the page has settled
+  var tries = 0, iv = setInterval(function () { if (shown || INST.installed || ++tries > 40) return clearInterval(iv); showBanner(); }, 2500);   // iPhone / Firefox / in-app browsers never send a prompt: explain how, as soon as the member is browsing
 }
 function logoHtml(c) { var b = ctx.business; return '<div class="' + (c || 'lg') + '">' + (b.logo ? '<img alt="" src="' + E(b.logo) + '" onerror="this.parentNode.textContent=\'' + E(String(b.name || '?').charAt(0).toUpperCase()) + '\'">' : E(String(b.name || '?').charAt(0).toUpperCase())) + '</div>'; }
 function branchSel() { if (!ctx.branches || ctx.branches.length < 2) return ''; return '<label class="lbl">Branch<select class="field" id="brSel">' + ctx.branches.map(function (b) { return '<option value="' + b.id + '"' + (b.id === branchId ? ' selected' : '') + '>' + E(b.name) + '</option>'; }).join('') + '</select></label>'; }
@@ -512,6 +525,7 @@ VIEWS.splash = function () {
       '<div class="sl-cta"><button class="sl-go" id="gs" type="button">' + (rooms ? 'Explore' : 'Order now') + '<span class="arr">' + ic('arrow') + '</span></button>' +
         '<div class="sl-sec"><button id="sin" type="button">' + ic('lock') + 'Sign in</button><button id="sup" type="button">' + ic('sparkles') + 'Create account</button></div></div>' +
       '<p class="sl-note">No account needed to browse the menu.</p></div></div>';
+  splashInstall();
   $('#gs').onclick = function () { tab('home'); };
   $('#lg').onclick = $('#sin').onclick = function () { cur = { v: 'home', p: {} }; nav('auth', { why: '' }); };
   $('#sup').onclick = function () { cur = { v: 'home', p: {} }; nav('auth', { why: '', reg: true }); };

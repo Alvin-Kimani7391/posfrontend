@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v4.1.7-store-auth';
+const VERSION = 'v4.1.8-store-auth';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
