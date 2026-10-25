@@ -325,6 +325,7 @@
         const changed = JSON.stringify(profile && { ...profile, fetchedAt: 0 }) !== JSON.stringify({ ...next, fetchedAt: 0 });
         profile = next;
         try { localStorage.setItem(PROFILE_KEY, JSON.stringify(next)); } catch { /* storage blocked */ }
+        setTimeout(loadOpsPlan, 0);
         if (changed) { rebuildSidebarNav(); window.dispatchEvent(new CustomEvent('businessprofilechange', { detail: next })); }
       } catch { /* offline or no access: keep the cached copy */ }
       return profile;
@@ -363,9 +364,36 @@
     return item.key === activePage;
   }
 
+  // ---- Restaurant operating plan: once the owner has saved "Devices & printing", pages the restaurant has no device for are hidden.
+  //      Never configured = show everything as before. The plan is cached so the menu is right on first paint.
+  const OPS_KEY = 'pos.opsPlan';
+  const uid = () => { try { const u = window.Storage.getUser(); return u && String(u._id || u.id); } catch { return null; } };
+  let opsPlan = (() => { try { const p = JSON.parse(localStorage.getItem(OPS_KEY) || 'null'); return p && p.__u === uid() ? p : null; } catch { return null; } })();
+  const OPS_RULES = {
+    'hx-kitchen': (p) => p.kitchenScreen === true,                       // kitchen & bar screen
+    'hx-cashier': (p) => p.devices && p.devices.cashierStation === true,  // cashier desk
+    'hx-selfservice': (p) => p.devices && p.devices.selfServiceKiosk === true,
+    'hx-staff': (p) => p.devices && (p.devices.waiterTablet === true || p.devices.cashierStation === true),
+  };
+  function opsAllows(item) {
+    if (!opsPlan || opsPlan.configured !== true || !hasFeature('restaurantOrdering')) return true;
+    const rule = OPS_RULES[item.key];
+    return rule ? !!rule(opsPlan) : true;
+  }
+  async function loadOpsPlan() {
+    try {
+      if (!hasFeature('restaurantOrdering')) return;
+      const { data } = await window.Api.get('/restaurant/operations/plan', {}, { background: true });
+      const raw = data && (data.plan || data); if (!raw || typeof raw !== 'object') return; const next = { ...raw, __u: uid() };
+      const changed = JSON.stringify(next) !== JSON.stringify(opsPlan);
+      opsPlan = next; try { localStorage.setItem(OPS_KEY, JSON.stringify(next)); } catch { /* storage blocked */ }
+      if (changed) rebuildSidebarNav();
+    } catch { /* offline / no permission: keep the cached plan */ }
+  }
+
   function itemVisibleForBusiness(item) {
-    if (!item.feature) return true;
-    return hasFeature(...item.feature);
+    if (item.feature && !hasFeature(...item.feature)) return false;
+    return opsAllows(item);
   }
 
   function setupBadgeHtml() {
