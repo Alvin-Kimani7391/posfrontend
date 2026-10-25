@@ -13,7 +13,9 @@
 <!-- no static manifest on purpose: the single, restaurant-named manifest is attached by the page once the restaurant is known -->
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="/css/store-auth.css" />
 <style>
 :root{--o:#F26A21;--od:#D9560F;--ol:#FFF1E8;--ink:#14171A;--ink2:#3B424A;--mut:#7A828A;--line:#ECEEF0;--bg:#F5F5F6;--card:#fff;--ok:#1F9D55;--okl:#E3F6EA;--blue:#3B82F6;--bluel:#E5EFFE;--bad:#D92D20;--badl:#FEE4E2;--warn:#B45309;--warnl:#FEF3C7;--r:16px;--sh:0 1px 2px rgba(20,23,26,.05),0 6px 18px rgba(20,23,26,.06);--nav:64px}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -284,6 +286,7 @@ var IC = {
   pin: '<path d="M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>', card: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/>', cash: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/>', bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17v.3"/>', gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', eyeoff: '<path d="M3 3l18 18M10.6 6.2A9.8 9.8 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.6 7.6A16.6 16.6 0 0 0 2 12s3.6 7 10 7a9.6 9.6 0 0 0 4.2-1M9.9 9.9a3 3 0 0 0 4.2 4.2"/>', arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>', flame: '<path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3.2 2-4 .2 1.2.8 2 1.6 2.4C10.2 8.6 10.6 5.6 12 3z"/>', bike: '<circle cx="6" cy="16.5" r="3.5"/><circle cx="18" cy="16.5" r="3.5"/><path d="M6 16.5l3.5-7h5l3.5 7M9.5 9.5 8.5 7H6M13 6h3l1 3.5"/>', gift: '<rect x="3.5" y="9" width="17" height="11" rx="1.5"/><path d="M3 9h18M12 9v11M12 9c-1-4-5-4-5-1.5S11 9 12 9zm0 0c1-4 5-4 5-1.5S13 9 12 9z"/>',
   logout: '<path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"/>', cal: '<rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>', tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
   table: '<rect x="3" y="9" width="18" height="4" rx="1.5"/><path d="M6 13v6M18 13v6M7 9V6M17 9V6"/>', wifi: '<path d="M2 9a15 15 0 0 1 20 0M5 12.5a10.5 10.5 0 0 1 14 0M8.5 16a5.5 5.5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8"/>',
   tv: '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>', snow: '<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/>', coffee: '<path d="M4 8h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5zM17 10h2a2 2 0 0 1 0 4h-2M7 3v2M11 3v2"/>',
@@ -905,22 +908,118 @@ function receiptHtml(r) {
 
 /* ---------- account: auth, profile, settings ---------- */
 VIEWS.auth = function (p) {
-  var reg = !!p.reg, h = top(reg ? 'Create account' : 'Sign in') + '<div class="pad"><div style="text-align:center;margin:22px 0 14px">' + logoHtml('lg2').replace('class="lg2"', 'style="width:64px;height:64px;border-radius:18px;background:var(--o);color:#fff;display:grid;place-items:center;font-size:28px;font-weight:800;margin:0 auto 10px;overflow:hidden"') + '<h2>' + E(ctx.business.name) + '</h2>' + (p.why ? '<p class="muted" style="margin-top:6px;font-size:14px">' + E(p.why) + '</p>' : '<p class="muted" style="margin-top:6px;font-size:14px">One account for ordering, bookings and receipts.</p>') + '</div>' +
-    '<div class="seg"><button data-m="in" class="' + (reg ? '' : 'on') + '">Sign in</button><button data-m="up" class="' + (reg ? 'on' : '') + '">Create account</button></div><div class="card">' +
-    (reg ? '<label class="lbl" style="margin-top:0">Full name<input class="field" id="a1" autocomplete="name"></label><label class="lbl">Phone<input class="field" id="a2" type="tel" placeholder="0712 345 678" autocomplete="tel"></label><label class="lbl">Email (optional)<input class="field" id="a3" type="email" autocomplete="email"></label><label class="lbl">Password<input class="field" id="a4" type="password" autocomplete="new-password" placeholder="At least 6 characters"></label>' :
-      '<label class="lbl" style="margin-top:0">Email or phone<input class="field" id="a1" autocomplete="username" placeholder="you@email.com or 0712 345 678"></label><label class="lbl">Password<input class="field" id="a4" type="password" autocomplete="current-password"></label>') +
-    '<div class="err" id="er"></div><button class="btn" id="sb" style="margin-top:8px">' + (reg ? 'Create account' : 'Sign in') + '</button><div id="gwrap" hidden><div class="or">or</div><div id="gbtn" style="display:flex;justify-content:center"></div></div></div></div>';
-  $('#view').innerHTML = h; $$('[data-m]').forEach(function (b) { b.onclick = function () { VIEWS.auth(Object.assign({}, p, { reg: b.dataset.m === 'up' })); }; });
-  var done = async function (res) { setAcct(res); await loadHist(); toast('Welcome, ' + String(res.account.name).split(' ')[0]); var f = p.after; cur = stack.pop() || { v: 'home', p: {} }; render(); if (f) f(); };
-  $('#sb').onclick = async function () {
-    var er = $('#er'), b = this; er.textContent = ''; b.disabled = true;
-    try {
-      if (reg) { var nm = $('#a1').value.trim(), ph = $('#a2').value.trim(), em = $('#a3').value.trim(), pw = $('#a4').value; if (nm.length < 2) throw new Error('Enter your name'); if (!ph && !em) throw new Error('Add a phone number or an email'); if (pw.length < 6) throw new Error('Password must be at least 6 characters'); await done(await call('/account/register', 'POST', { name: nm, phone: ph || undefined, email: em || undefined, password: pw })); }
-      else { var id = $('#a1').value.trim(), pw2 = $('#a4').value; if (!id || !pw2) throw new Error('Enter your email or phone, and password'); await done(await call('/account/login', 'POST', { identifier: id, password: pw2 })); }
-    } catch (e) { er.textContent = e.message; b.disabled = false; }
+  /* Sign in / create account - food-app style screen. Styles: /css/store-auth.css (scoped under .sa). Same API calls as before. */
+  var reg = !!p.reg, b0 = ctx.business || {}, nm0 = String(b0.name || 'Our kitchen'), ini = E(nm0.charAt(0).toUpperCase());
+  var IMG = function (id, w) { return 'https://images.unsplash.com/photo-' + id + '?auto=format&fit=crop&q=70&w=' + (w || 900); };
+  var hero = ['1504674900247-0877df9cc836', '1568901346375-23c9450c58cd', '1565299624946-b28f40a0ae38', '1546069901-ba9599a7e63c'];
+  var fl = [['a', '1513104890138-7c749659a591'], ['b', '1567620905732-2d1ec7ab7445'], ['c', '1555939594-58d7cb561ad1']];
+  var fld = function (id, icon, label, o) {
+    o = o || {};
+    return '<div class="sa-f" id="f' + id + '"><span class="li">' + ic(icon) + '</span><input id="' + id + '" type="' + (o.type || 'text') + '" placeholder=" " autocomplete="' + (o.ac || 'off') + '"' + (o.im ? ' inputmode="' + o.im + '"' : '') + (o.enter ? ' enterkeyhint="' + o.enter + '"' : '') + ' autocapitalize="' + (o.cap || 'none') + '" autocorrect="off" spellcheck="false"><label for="' + id + '">' + label + '</label>' +
+      (o.eye ? '<button type="button" class="sa-eye" data-eye="' + id + '" aria-pressed="false" aria-label="Show password">' + ic('eye', 'on') + ic('eyeoff', 'off') + '</button>' : '') + '</div>';
   };
+  var chip = [['utensils', 'Fresh from the kitchen', 'Cooked when you order'], ['bike', 'Fast delivery', 'Hot to your door'], ['pin', 'Track your order live', 'See your rider on the map'], ['receipt', 'Every order saved', 'Reorder in one tap']];
+  var h = '<div class="sa" id="sa" data-m="' + (reg ? 'up' : 'in') + '">' +
+    '<div class="sa-hero">' +
+      hero.map(function (id) { return '<div class="sa-slide"><img src="' + IMG(id) + '" alt="" decoding="async" onerror="this.remove()"></div>'; }).join('') +
+      '<div class="sa-shade"></div><div class="sa-glow"></div>' +
+      '<div class="sa-steam"><i></i><i></i><i></i><i></i></div>' +
+      fl.map(function (f) { return '<div class="sa-fl ' + f[0] + '"><img src="' + IMG(f[1], 240) + '" alt="" loading="lazy" onerror="this.parentNode.remove()"></div>'; }).join('') +
+      '<div class="sa-bar">' + (stack.length ? '<button class="sa-back" data-back aria-label="Back">' + ic('back') + '</button>' : '') +
+        '<div class="sa-brand"><div class="sa-logo">' + (b0.logo ? '<img alt="" src="' + E(b0.logo) + '" onerror="this.remove()">' : '') + '<span style="' + (b0.logo ? 'position:absolute;z-index:-1' : '') + '">' + ini + '</span></div><div class="sa-bn">' + E(nm0) + '<small>Order food online</small></div></div></div>' +
+      '<div class="sa-copy"><h1><span class="w"><span id="saT1">' + (reg ? 'Hungry? Let’s' : 'Good food,') + '</span></span><span class="w"><span><em id="saT2">' + (reg ? 'get you started.' : 'right to your door.') + '</em></span></span></h1>' +
+        '<p id="saP">' + (reg ? 'Create a free account to order, track and save your favourites.' : 'Sign in to order your favourites and track every delivery.') + '</p></div>' +
+      '<div class="sa-chip" id="saChip" aria-hidden="true"><div class="ci" id="saCi">' + ic(chip[0][0]) + '</div><div class="tx"><b id="saCt">' + chip[0][1] + '</b><small id="saCs">' + chip[0][2] + '</small></div></div>' +
+    '</div>' +
+    '<div class="sa-sheet"><div class="sa-grab"></div>' +
+      (p.why ? '<div class="sa-why">' + ic('sparkles') + '<span>' + E(p.why) + '</span></div>' : '') +
+      '<div class="sa-seg" role="tablist"><button type="button" role="tab" data-m="in">Sign in</button><button type="button" role="tab" data-m="up">Create account</button></div>' +
+      /* ----- sign in ----- */
+      '<form class="sa-pn" id="saIn" novalidate>' +
+        '<h2 class="sa-h">Welcome back</h2><p class="sa-sub">Sign in with your email or phone number.</p>' +
+        fld('l1', 'user', 'Email or phone number', { ac: 'username', im: 'email', enter: 'next' }) +
+        fld('l4', 'lock', 'Password', { type: 'password', ac: 'current-password', enter: 'go', eye: 1 }) +
+        '<div class="sa-err" id="erIn" role="alert"></div>' +
+        '<button class="sa-go" id="sbIn" type="submit"><span class="t">Sign in</span><span class="arr">' + ic('arrow') + '</span><i class="sp"></i></button>' +
+      '</form>' +
+      /* ----- register ----- */
+      '<form class="sa-pn" id="saUp" novalidate>' +
+        '<h2 class="sa-h">Create your account</h2><p class="sa-sub">Takes less than a minute. No spam, promise.</p>' +
+        fld('r1', 'user', 'Full name', { ac: 'name', cap: 'words', enter: 'next' }) +
+        fld('r2', 'phone', 'Phone number (e.g. 0712 345 678)', { type: 'tel', ac: 'tel', im: 'tel', enter: 'next' }) +
+        fld('r3', 'mail', 'Email (optional)', { type: 'email', ac: 'email', im: 'email', enter: 'next' }) +
+        fld('r4', 'lock', 'Create password', { type: 'password', ac: 'new-password', enter: 'go', eye: 1 }) +
+        '<div class="sa-pw" id="saPw" data-s="0"><div class="bars"><i></i><i></i><i></i><i></i></div><span id="saPwT">At least 6</span></div>' +
+        '<div class="sa-err" id="erUp" role="alert"></div>' +
+        '<button class="sa-go" id="sbUp" type="submit"><span class="t">Create account</span><span class="arr">' + ic('arrow') + '</span><i class="sp"></i></button>' +
+        '<p class="sa-fine">Add a phone number or an email so we can send your order updates.</p>' +
+      '</form>' +
+      '<div id="gwrap" hidden><div class="sa-or">or continue with</div><div id="gbtn" style="display:flex;justify-content:center"></div></div>' +
+      '<div class="sa-trust"><div><span>' + ic('flame') + '</span>Hot &amp; fresh</div><div><span>' + ic('bike') + '</span>Fast delivery</div><div><span>' + ic('shield') + '</span>Secure sign-in</div></div>' +
+      '<p class="sa-pol">Your details are only used for your orders and bookings.</p>' +
+    '</div></div>';
+  var view = $('#view'); view.innerHTML = h; view.className = 'full';
+  var root = $('#sa');
+
+  /* mode switch (in place, so the photo slideshow keeps playing) */
+  var copy = { in: ['Good food,', 'right to your door.', 'Sign in to order your favourites and track every delivery.'], up: ['Hungry? Let’s', 'get you started.', 'Create a free account to order, track and save your favourites.'] };
+  var setMode = function (m) {
+    if (root.dataset.m === m) return; root.dataset.m = m; reg = m === 'up';
+    $('#saT1').textContent = copy[m][0]; $('#saT2').textContent = copy[m][1]; $('#saP').textContent = copy[m][2];
+    $('#erIn').textContent = ''; $('#erUp').textContent = '';
+  };
+  $$('.sa-seg [data-m]', root).forEach(function (b) { b.onclick = function () { setMode(b.dataset.m); }; });
+
+  /* show / hide password */
+  $$('[data-eye]', root).forEach(function (b) {
+    b.onclick = function () {
+      var i = $('#' + b.dataset.eye), on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', String(on));
+      b.setAttribute('aria-label', on ? 'Hide password' : 'Show password'); var s = i.selectionStart, e = i.selectionEnd; i.type = on ? 'text' : 'password'; i.focus(); try { i.setSelectionRange(s, e); } catch (x) { /* ignore */ }
+    };
+  });
+
+  /* password strength */
+  var pw = $('#r4'); pw.oninput = function () {
+    var v = pw.value, sc = 0; if (v.length >= 6) sc++; if (v.length >= 9) sc++; if (/[A-Z]/.test(v) && /[a-z]/.test(v)) sc++; if (/\d/.test(v) && /[^A-Za-z0-9]/.test(v) || v.length >= 12) sc++;
+    if (!v) sc = 0; else if (v.length < 6) sc = 1;
+    $('#saPw').dataset.s = sc; $('#saPwT').textContent = ['At least 6', 'Too short', 'Okay', 'Good', 'Strong'][v ? (v.length < 6 ? 1 : Math.max(sc, 2)) : 0];
+  };
+
+  /* clear red state when typing */
+  $$('.sa-f input', root).forEach(function (i) { i.addEventListener('input', function () { i.parentNode.classList.remove('bad'); }); });
+
+  /* rotating benefit chip */
+  var ci = 0, chipEl = $('#saChip'), tick = setInterval(function () {
+    if (!document.body.contains(chipEl)) return clearInterval(tick);
+    chipEl.classList.add('sw'); setTimeout(function () { ci = (ci + 1) % chip.length; $('#saCi').innerHTML = ic(chip[ci][0]); $('#saCt').textContent = chip[ci][1]; $('#saCs').textContent = chip[ci][2]; chipEl.classList.remove('sw'); }, 320);
+  }, 3600);
+
+  var done = async function (res) { setAcct(res); await loadHist(); toast('Welcome, ' + String(res.account.name).split(' ')[0]); var f = p.after; cur = stack.pop() || { v: 'home', p: {} }; render(); if (f) f(); };
+  var bad = function (id) { var f = $('#f' + id); if (f) { f.classList.remove('bad'); void f.offsetWidth; f.classList.add('bad'); } };
+  var submit = async function (isReg) {
+    var er = $(isReg ? '#erUp' : '#erIn'), btn = $(isReg ? '#sbUp' : '#sbIn'); er.textContent = ''; btn.disabled = true; btn.classList.add('ld');
+    try {
+      if (isReg) {
+        var nm = $('#r1').value.trim(), ph = $('#r2').value.trim(), em = $('#r3').value.trim(), pw1 = $('#r4').value;
+        if (nm.length < 2) { bad('r1'); throw new Error('Enter your name'); }
+        if (!ph && !em) { bad('r2'); throw new Error('Add a phone number or an email'); }
+        if (pw1.length < 6) { bad('r4'); throw new Error('Password must be at least 6 characters'); }
+        var rs = await call('/account/register', 'POST', { name: nm, phone: ph || undefined, email: em || undefined, password: pw1 });
+        btn.classList.remove('ld'); btn.classList.add('ok'); btn.querySelector('.t').textContent = 'Account created'; await done(rs);
+      } else {
+        var id = $('#l1').value.trim(), pw2 = $('#l4').value;
+        if (!id) bad('l1'); if (!pw2) bad('l4');
+        if (!id || !pw2) throw new Error('Enter your email or phone, and password');
+        var rl = await call('/account/login', 'POST', { identifier: id, password: pw2 });
+        btn.classList.remove('ld'); btn.classList.add('ok'); btn.querySelector('.t').textContent = 'Welcome back'; await done(rl);
+      }
+    } catch (e) { er.innerHTML = ic('alert') + '<span>' + E(e.message) + '</span>'; btn.disabled = false; btn.classList.remove('ld', 'ok'); btn.querySelector('.t').textContent = isReg ? 'Create account' : 'Sign in'; }
+  };
+  $('#saIn').onsubmit = function (e) { e.preventDefault(); submit(false); };
+  $('#saUp').onsubmit = function (e) { e.preventDefault(); submit(true); };
+
   var gid = ctx.googleClientId || (window.APP_CONFIG && window.APP_CONFIG.GOOGLE_CLIENT_ID);
-  if (gid) { var go = function () { try { window.google.accounts.id.initialize({ client_id: gid, callback: async function (resp) { try { await done(await call('/account/google', 'POST', { credential: resp.credential })); } catch (e) { toast(e.message, true); } } }); window.google.accounts.id.renderButton($('#gbtn'), { theme: 'outline', size: 'large', shape: 'pill', text: reg ? 'signup_with' : 'continue_with', width: 300 }); $('#gwrap').hidden = false; } catch (e) { /* google unavailable */ } };
+  if (gid) { var go = function () { try { window.google.accounts.id.initialize({ client_id: gid, callback: async function (resp) { try { await done(await call('/account/google', 'POST', { credential: resp.credential })); } catch (e) { toast(e.message, true); } } }); window.google.accounts.id.renderButton($('#gbtn'), { theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with', width: Math.min(340, Math.max(220, (root.clientWidth || 360) - 40)) }); $('#gwrap').hidden = false; } catch (e) { /* google unavailable */ } };
     if (window.google && window.google.accounts) go(); else { var sc = document.createElement('script'); sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true; sc.onload = go; document.head.appendChild(sc); } }
 };
 VIEWS.more = async function () {
