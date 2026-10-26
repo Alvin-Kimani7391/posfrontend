@@ -189,6 +189,10 @@ label.lbl{display:block;font-weight:700;font-size:13px;margin:0 0 6px;color:var(
 /* Dark map: OSM has no dark style, so invert the light tiles */
 .lv-tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9); }
 /* STK push waiting animation (same as q.html) */
-.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 16px;position:relative;animation:ring 1.6s infinite}.phone-anim svg{width:40px;height:40px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-@keyframes ring{0%,100%{transform:rotate(0)}10%,30%{transform:rotate(-8deg)}20%,40%{transform:rotate(8deg)}50%{transform:rotate(0)}}
+.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 20px;position:relative;transform-origin:50% 65%;animation:ring 1.8s ease-in-out infinite;box-shadow:0 8px 24px rgba(31,157,85,.22)}
+.phone-anim svg{width:40px;height:40px;position:relative;z-index:1}
+.phone-anim:before,.phone-anim:after{content:'';position:absolute;inset:0;border-radius:inherit;border:2px solid currentColor;opacity:0;pointer-events:none;animation:ripple 1.8s ease-out infinite}
+.phone-anim:after{animation-delay:.6s}
+@keyframes ring{0%,55%,100%{transform:rotate(0) translateY(0)}6%,18%,30%,42%{transform:rotate(-12deg) translateY(-2px)}12%,24%,36%,48%{transform:rotate(12deg) translateY(-2px)}}
+@keyframes ripple{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.75);opacity:0}}
 .prog{height:5px;background:#e4e8eb;border-radius:9px;overflow:hidden;margin:14px 0 0}.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width 1s linear}
