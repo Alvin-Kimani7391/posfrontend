@@ -11,10 +11,12 @@
     await window.AppShell.whenProfileReady?.();
     const mk = (type, label) => (can('restaurant.orders.create') ? `<button class="btn btn-secondary" data-new="${type}">${label}</button>` : '');
     el.innerHTML = head('Tables & orders', 'Tap a table to take an order, send it to the kitchen, then bill and take payment.',
-      `${can('restaurant.tables.manage') ? '<button class="btn btn-primary" id="add-table">+ Add table</button>' : ''}${mk('TAKEAWAY', 'Takeaway')}${mk('PICKUP', 'New pickup')}${mk('DELIVERY', 'New delivery')}${mk('BAR_TAB', 'Bar tab')}${can('restaurant.bills.view') ? '<a class="btn btn-primary" href="hx-bills.html">Bills &amp; payments</a>' : ''}<span class="hx-live">Live</span>`)
+      `${can('restaurant.tables.manage') ? '<button class="btn btn-primary" id="add-table">+ Add table</button><button class="btn btn-secondary" id="add-area">+ Add location</button>' : ''}${can('restaurant.orders.create') || can('restaurant.tables.manage') ? '<button class="btn btn-secondary" id="clear-tables">Clear tables</button>' : ''}${mk('TAKEAWAY', 'Takeaway')}${mk('PICKUP', 'New pickup')}${mk('DELIVERY', 'New delivery')}${mk('BAR_TAB', 'Bar tab')}${can('restaurant.bills.view') ? '<a class="btn btn-primary" href="hx-bills.html">Bills &amp; payments</a>' : ''}<span class="hx-live">Live</span>`)
       + '<div id="sum" class="hx-sum"></div><div class="hx-floorbar"><div id="areas"></div><div class="hx-legend" id="legend"></div></div><div id="floor" class="hx-floor">' + window.HX.skel('tilesin') + '</div><div id="open-others"></div>';
     el.querySelectorAll('[data-new]').forEach((b) => b.addEventListener('click', () => window.HX.order.start(b.dataset.new, { onChange: load, onClose: load })));
     el.querySelector('#add-table')?.addEventListener('click', addTable);
+    el.querySelector('#add-area')?.addEventListener('click', () => addArea());
+    el.querySelector('#clear-tables')?.addEventListener('click', clearTables);
     el.querySelector('#legend').innerHTML = ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'AWAITING_BILL'].map((k) => `<span class="lg hx-st-${TONE[k]}"><i></i>${LABEL[k]}</span>`).join('');
     if (window.HX.order && window.HX.order.prefetch) window.HX.order.prefetch();
     const [a] = await Promise.all([get('/restaurant/areas', { branchId: window.HX.branchId() }), load()]);
@@ -28,15 +30,61 @@
     const next = (() => { const nums = floor.map((t) => /^(\D*)(\d+)$/.exec(String(t.name || '').trim())).filter(Boolean); if (!nums.length) return { prefix: 'T', n: floor.length + 1 }; const last = nums[nums.length - 1]; return { prefix: last[1], n: Math.max(...nums.map((m) => +m[2])) + 1 }; })();
     formModal({ title: 'Add a table', submitText: 'Add table', maxWidth: '440px', fields: [
       { name: 'name', label: 'Table name or number', required: true, value: next.prefix + next.n, placeholder: 'T12' },
-      { row: [{ name: 'seats', label: 'Seats', type: 'number', value: 4, min: 1, max: 100, required: true }, { name: 'areaId', label: 'Area', type: 'select', options: [['', 'No area'], ...areas.map((a) => [a._id, a.name])], value: areaId }] },
+      { row: [{ name: 'seats', label: 'Seats', type: 'number', value: 4, min: 1, max: 100, required: true }, { name: 'areaId', label: 'Location', type: 'select', options: [['', 'No location'], ...areas.map((a) => [a._id, a.name])], value: areaId }] },
+      { name: 'newArea', label: 'Or add a new location', placeholder: 'e.g. Patio, Rooftop, Garden', hint: 'Type a name here to create a new table location and put this table in it.' },
     ], onSubmit: async (v) => {
-      const r = await send('post', '/restaurant/tables', { branchId: window.HX.branchId(), name: v.name, seats: v.seats || 4, ...(v.areaId ? { areaId: v.areaId } : {}) });
+      let aid = v.areaId;
+      if (v.newArea && v.newArea.trim()) { const a = await createArea(v.newArea.trim()); if (!a) return false; aid = a._id; }
+      const r = await send('post', '/restaurant/tables', { branchId: window.HX.branchId(), name: v.name, seats: v.seats || 4, ...(aid ? { areaId: aid } : {}) });
       if (!r) return false;
       window.UI.toast.success(`Table ${v.name} added`); load(); return true;
     } });
   }
+  /** Create a table location (area) and refresh the filter bar. Returns the new area or null. */
+  async function createArea(name) {
+    const r = await send('post', '/restaurant/areas', { branchId: window.HX.branchId(), name });
+    const a = r && window.HX.unwrap(r, 'area'); if (!a || !a._id) return null;
+    areas.push(a); paintAreas(); window.UI.toast.success(`Location ${name} added`); return a;
+  }
+  function addArea() {
+    formModal({ title: 'Add a table location', submitText: 'Add location', maxWidth: '400px', fields: [{ name: 'name', label: 'Location name', required: true, placeholder: 'e.g. Patio, Rooftop, Garden' }], onSubmit: async (v) => !!(await createArea(v.name.trim())) });
+  }
+  /** Free tables that guests occupied and then left without ordering (or that are stuck). Empty open orders are cancelled first. */
+  async function clearTables() {
+    const d = await get('/restaurant/tables', { branchId: window.HX.branchId() }); const all = list(d, 'tables');
+    const busyT = all.filter((t) => (t.status || 'AVAILABLE') !== 'AVAILABLE');
+    if (!busyT.length) return window.UI.toast.info('All tables are already available');
+    const hasBill = (t) => !!(t.order && Number(t.order.total) > 0);
+    const pick = new Set(busyT.filter((t) => !hasBill(t) && t.status === 'OCCUPIED').map((t) => String(t._id)));
+    window.HX.modal({ title: 'Clear tables', maxWidth: '520px', body: '', footer: '<button class="btn btn-secondary" data-c>Cancel</button><button class="btn btn-primary" id="ct-go">Clear selected</button>', onMount(m, close) {
+      const body = m.querySelector('.modal-body') || m;
+      const paint = () => {
+        body.innerHTML = `<p class="hx-sub" style="margin:0 0 10px">Tick the tables whose guests left. Tables with nothing ordered are ticked for you. Tables with an order that has items need a second look.</p>
+        <div class="hx-card flush">${busyT.map((t) => `<label class="hx-row" style="cursor:pointer"><input type="checkbox" data-t="${E(t._id)}" ${pick.has(String(t._id)) ? 'checked' : ''} style="width:22px;height:22px"><span class="grow"><b>Table ${E(t.name)}</b><small class="hx-sub">${E(LABEL[t.status] || t.status)}${t.occupiedMinutes != null ? ' · ' + t.occupiedMinutes + ' min' : ''}${hasBill(t) ? ' · order ' + M(t.order.total) : ' · nothing ordered'}</small></span>${pill(hasBill(t) ? 'HAS ORDER' : 'EMPTY', hasBill(t) ? 'warn' : 'ok')}</label>`).join('')}</div>`;
+        body.querySelectorAll('input[data-t]').forEach((c) => c.addEventListener('change', () => { c.checked ? pick.add(c.dataset.t) : pick.delete(c.dataset.t); m.querySelector('#ct-go').textContent = `Clear selected (${pick.size})`; }));
+        m.querySelector('#ct-go').textContent = `Clear selected (${pick.size})`;
+      };
+      paint(); m.querySelector('[data-c]').onclick = close;
+      m.querySelector('#ct-go').onclick = async (e) => {
+        const chosen = busyT.filter((t) => pick.has(String(t._id))); if (!chosen.length) return window.UI.toast.info('Tick at least one table');
+        const billed = chosen.filter(hasBill).length;
+        if (billed && !(await window.UI.confirmDialog({ title: `${billed} table${billed > 1 ? 's have' : ' has'} an order with items`, message: 'Clearing cancels those unpaid orders. Only continue if the guests really left without paying.', confirmText: 'Clear anyway' }))) return;
+        const b = e.currentTarget; b.disabled = true; b.textContent = 'Working…';
+        const reason = 'Table cleared by ' + ((window.HX.user() || {}).name || 'staff'); let done = 0; const fails = [];
+        for (const t of chosen) {
+          try {
+            if (t.order && t.order._id) await window.Api.post('/restaurant/orders/' + t.order._id + '/cancel', { reason });
+            await window.Api.post('/restaurant/tables/' + t._id + '/status', { status: 'AVAILABLE', reason }); done++;
+          } catch (err) { fails.push(`Table ${t.name}: ${(err && err.message) || 'failed'}`); }
+        }
+        if (done) window.UI.toast.success(`${done} table${done > 1 ? 's' : ''} cleared`);
+        if (fails.length) window.UI.toast.error(fails.slice(0, 3).join(' · '));
+        close(); load();
+      };
+    } });
+  }
   function paintAreas() {
-    el.querySelector('#areas').innerHTML = areas.length > 1 ? `<div class="hx-cats hx-tabs" style="margin:0"><button class="hx-chip ${areaId ? '' : 'on'}" data-a="">All</button>${areas.map((x) => `<button class="hx-chip ${areaId === x._id ? 'on' : ''}" data-a="${x._id}">${E(x.name)}</button>`).join('')}</div>` : '';
+    el.querySelector('#areas').innerHTML = areas.length ? `<div class="hx-cats hx-tabs" style="margin:0"><button class="hx-chip ${areaId ? '' : 'on'}" data-a="">All</button>${areas.map((x) => `<button class="hx-chip ${areaId === x._id ? 'on' : ''}" data-a="${x._id}">${E(x.name)}</button>`).join('')}</div>` : '';
     el.querySelectorAll('[data-a]').forEach((b) => b.addEventListener('click', () => { areaId = b.dataset.a; paintAreas(); load(); }));
   }
   function paintSummary() {

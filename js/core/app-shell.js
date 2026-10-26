@@ -43,38 +43,40 @@
     // Anti-fraud: scan a receipt's QR to confirm it is a real sale. Open to every signed-in staff member (no permission).
     { key: 'verify', hxHide: true,        label: 'Verify receipt',     icon: 'shield',    href: 'verify.html' },
     // ---- Restaurant & accommodation (shown only when those modules are switched on; see isHospitality()).
-    { key: 'hx-manager',       group: 'Restaurant',    label: 'Manager dashboard',    icon: 'dashboard', href: 'hx-manager.html',     roles: ['OWNER', 'ADMIN', 'MANAGER'], permAny: ['restaurant.reports.view', 'accommodation.reports.view'], feature: ['restaurantOrdering', 'accommodation'] },
-    { key: 'hx-cashier',       group: 'Restaurant',    label: 'Cashier desk',         icon: 'cash',     href: 'hx-cashier.html',      permission: 'cashier.view', roles: ['OWNER', 'MANAGER', 'CASHIER'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-manager',       group: 'Restaurant',    label: 'Manager dashboard',    icon: 'gauge', href: 'hx-manager.html',     roles: ['OWNER', 'ADMIN', 'MANAGER'], permAny: ['restaurant.reports.view', 'accommodation.reports.view'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-cashier',       group: 'Restaurant',    label: 'Cashier desk',         icon: 'terminal',   href: 'hx-cashier.html',      permission: 'cashier.view', roles: ['OWNER', 'MANAGER', 'CASHIER'], feature: ['restaurantOrdering', 'accommodation'] },
     { key: 'hx-floor',        group: 'Restaurant',    label: 'Tables & orders',      icon: 'table',    href: 'hx-floor.html',        permission: 'restaurant.orders.view', feature: ['restaurantOrdering'] },
     { key: 'hx-kitchen',      group: 'Restaurant',    label: 'Kitchen & bar',        icon: 'flame',    href: 'hx-kitchen.html',      permission: 'restaurant.kitchen.view', feature: ['restaurantOrdering'] },
     { key: 'hx-bills',        group: 'Restaurant',    label: 'Bills & payments',     icon: 'receipt',  href: 'hx-bills.html',        permission: 'restaurant.bills.view', feature: ['restaurantOrdering'] },
     { key: 'hx-reservations', group: 'Restaurant',    label: 'Reservations',         icon: 'calendar', href: 'hx-reservations.html', permission: 'restaurant.reservations.view', feature: ['reservations'] },
     { key: 'hx-delivery',     group: 'Restaurant',    label: 'Delivery & pickup',    icon: 'bike',     href: 'hx-delivery.html',     permAny: ['restaurant.delivery.view', 'restaurant.delivery.self'], feature: ['restaurantOrdering'] },
-    { key: 'hx-selfservice',  group: 'Restaurant',    label: 'Self-service kiosk',   icon: 'receipt',  href: 'hx-selfservice.html',  permAny: ['restaurant.bills.view', 'restaurant.settings.manage'], feature: ['restaurantOrdering'] },
-    { key: 'hx-live',         group: 'Restaurant',    label: 'Live tracking',        icon: 'truck',    href: 'hx-live.html',         permAny: ['restaurant.delivery.view', 'restaurant.delivery.cash', 'restaurant.delivery.qr'], feature: ['restaurantOrdering'] },
-    { key: 'hx-storefront',   group: 'Restaurant',    label: 'Online storefront',    icon: 'bike',     href: 'hx-storefront.html',   permission: 'restaurant.guest.qr', feature: ['restaurantOrdering'] },
+    { key: 'hx-selfservice',  group: 'Restaurant',    label: 'Self-service kiosk',   icon: 'kiosk',  href: 'hx-selfservice.html',  permAny: ['restaurant.bills.view', 'restaurant.settings.manage'], feature: ['restaurantOrdering'] },
+    { key: 'hx-live',         group: 'Restaurant',    label: 'Live tracking',        icon: 'pin',    href: 'hx-live.html',         permAny: ['restaurant.delivery.view', 'restaurant.delivery.cash', 'restaurant.delivery.qr'], feature: ['restaurantOrdering'] },
+    { key: 'hx-storefront',   group: 'Restaurant',    label: 'Online storefront',    icon: 'globe',     href: 'hx-storefront.html',   permission: 'restaurant.guest.qr', feature: ['restaurantOrdering'] },
     { key: 'hx-tv',           group: 'Restaurant',    label: 'Live TV menu',         icon: 'tv',       href: 'hx-tv.html',           permission: 'tv.view', feature: ['restaurantOrdering'] },
     { key: 'hx-menu',         group: 'Restaurant',    label: 'Menu',                 icon: 'utensils', href: 'hx-menu.html',         permission: 'restaurant.menu.manage', feature: ['restaurantOrdering'] },
     { key: 'hx-stock',        group: 'Restaurant',    label: 'Ingredients & recipes',icon: 'box',      href: 'hx-stock.html',        permission: 'restaurant.ingredients.view', feature: ['recipeManagement'] },
     { key: 'hx-guest',        group: 'Restaurant',    label: 'Guest requests & QR',  icon: 'qr',       href: 'hx-guest.html',        permAny: ['restaurant.guest.view', 'restaurant.guest.qr'], feature: ['guestQrOrdering'] },
+    { key: 'hx-employees',    page: 'employees', group: 'Restaurant', accGroup: 'Accommodation', label: 'Employees', icon: 'employees', href: 'employees.html', permission: 'employees.view' },
     { key: 'hx-staff',        group: 'Restaurant',    label: 'Shifts & tips',        icon: 'clock',    href: 'hx-staff.html',        permAny: ['restaurant.shifts.self', 'restaurant.shifts.view', 'restaurant.tips.view'], feature: ['restaurantOrdering'] },
     { key: 'hx-desk',         group: 'Accommodation', label: 'Front desk',           icon: 'key',      href: 'hx-desk.html',         permission: 'accommodation.stays.view', feature: ['accommodation'] },
     { key: 'hx-rooms',        group: 'Accommodation', label: 'Room board',           icon: 'bed',      href: 'hx-rooms.html',        permission: 'accommodation.rooms.view', feature: ['accommodation'] },
-    { key: 'hx-stays',        group: 'Accommodation', label: 'Bookings',             icon: 'calendar', href: 'hx-stays.html',        permission: 'accommodation.stays.view', feature: ['accommodation'] },
+    { key: 'hx-stays',        group: 'Accommodation', label: 'Bookings',             icon: 'calendarCheck', href: 'hx-stays.html',        permission: 'accommodation.stays.view', feature: ['accommodation'] },
     { key: 'hx-housekeeping', group: 'Accommodation', label: 'Housekeeping',         icon: 'broom',    href: 'hx-housekeeping.html', permission: 'accommodation.housekeeping.view', feature: ['accommodation'] },
     { key: 'hx-reports',      group: 'Reports & setup', label: 'Reports',         icon: 'reports',  href: 'hx-reports.html',      permAny: ['restaurant.reports.view', 'accommodation.reports.view'], feature: ['restaurantOrdering', 'accommodation'] },
-    { key: 'hx-setup',        group: 'Reports & setup', label: 'Setup guide',     icon: 'rocket',   href: 'hx-setup.html',        permAny: ['restaurant.settings.manage', 'restaurant.tables.manage', 'restaurant.menu.manage', 'accommodation.rooms.manage'], feature: ['restaurantOrdering', 'accommodation'] },
-    { key: 'hx-operations',   group: 'Reports & setup', label: 'Devices & printing', icon: 'sliders', href: 'hx-operations.html', permAny: ['restaurant.settings.view'], feature: ['restaurantOrdering'] },
+    { key: 'hx-expenses',     page: 'expenses',  group: 'Reports & setup', label: 'Expenses', icon: 'wallet', href: 'expenses.html', permission: 'expenses.view' },
+    { key: 'hx-setup',        group: 'Reports & setup', label: 'Setup guide',     icon: 'flag',   href: 'hx-setup.html',        permAny: ['restaurant.settings.manage', 'restaurant.tables.manage', 'restaurant.menu.manage', 'accommodation.rooms.manage'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-operations',   group: 'Reports & setup', label: 'Devices & printing', icon: 'printer', href: 'hx-operations.html', permAny: ['restaurant.settings.view'], feature: ['restaurantOrdering'] },
     { key: 'hx-settings',     group: 'Reports & setup', label: 'Service settings',icon: 'sliders',  href: 'hx-settings.html',     permAny: ['restaurant.settings.view', 'accommodation.settings.view'], feature: ['restaurantOrdering', 'accommodation'] },
-    { key: 'hx-services',     group: 'Reports & setup', label: 'Services & system check', icon: 'sliders', href: 'hx-services.html', permission: 'settings.update' },
-    { key: 'products',      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
-    { key: 'inventory',     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view', wsLabel: 'Wholesale inventory' },
+    { key: 'hx-services',     group: 'Reports & setup', label: 'Services & system check', icon: 'server', href: 'hx-services.html', permission: 'settings.update' },
+    { key: 'products', hxHide: true,      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
+    { key: 'inventory', hxHide: true,     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view', wsLabel: 'Wholesale inventory' },
     // Wholesale is no longer a separate section. For businesses with warehouses (feature multiWarehouse) the normal pages
     // become hybrids: Dashboard (wholesale desk), Wholesale inventory (warehouses + stock), Suppliers (+ payables) and
     // Reports (Wholesale tab). Selling, retail AND wholesale, is the single Sales screen (Retail | Wholesale switch).
     // Specialised screens: shown only when the business has the matching feature switched on
     // (feature = ANY of the listed flags) AND the user holds the permission.
-    { key: 'batches',       label: 'Batches & expiry',   icon: 'layers',    href: 'batches.html',       permission: 'batches.view',   feature: ['batchTracking', 'expiryTracking'] },
+    { key: 'batches', hxHide: true,       label: 'Batches & expiry',   icon: 'layers',    href: 'batches.html',       permission: 'batches.view',   feature: ['batchTracking', 'expiryTracking'] },
     // Pharmacy module: appears when the business has the Dispensing feature (business type Pharmacy switches it on).
     { key: 'pharmacy',      label: 'Pharmacy desk',      icon: 'pulse',     href: 'pharmacy.html',      permission: 'pharmacy.reports', feature: ['pharmacyDispensing'] },
     { key: 'prescriptions', label: 'Prescriptions',      icon: 'clipboard', href: 'prescriptions.html', permission: 'prescriptions.view', feature: ['pharmacyDispensing'] },
@@ -89,18 +91,18 @@
     { key: 'vehicles',      label: 'Vehicles',           icon: 'car',       href: 'vehicles.html',      permission: 'vehicles.view',  feature: ['vehicleManagement'] },
     { key: 'jobcards',      label: 'Job cards',          icon: 'clipboard', href: 'job-cards.html',     permission: 'jobcards.view',  feature: ['jobCards'] },
 
-    { key: 'suppliers',     label: 'Suppliers',          icon: 'truck',     href: 'suppliers.html',     permission: 'suppliers.view' },
-    { key: 'purchases',     label: 'Purchases',          icon: 'bag',       href: 'purchases.html',     permission: 'purchases.view' },
-    { key: 'expenses',      label: 'Expenses',           icon: 'wallet',    href: 'expenses.html',      permission: 'expenses.view' },
+    { key: 'suppliers', hxHide: true,     label: 'Suppliers',          icon: 'truck',     href: 'suppliers.html',     permission: 'suppliers.view' },
+    { key: 'purchases', hxHide: true,     label: 'Purchases',          icon: 'bag',       href: 'purchases.html',     permission: 'purchases.view' },
+    { key: 'expenses', hxHide: true,      label: 'Expenses',           icon: 'wallet',    href: 'expenses.html',      permission: 'expenses.view' },
     { key: 'refunds', hxHide: true,       label: 'Refunds',            icon: 'refund',    href: 'refunds.html',       permission: 'refunds.view' },
 
-    { key: 'reports',       label: 'Reports',            icon: 'reports',   href: 'reports.html',       permission: 'reports.view' },
+    { key: 'reports', hxHide: true,       label: 'Reports',            icon: 'reports',   href: 'reports.html',       permission: 'reports.view' },
     { key: 'audit',         label: 'Audit log',          icon: 'audit',     href: 'audit-logs.html',    permission: 'audit.view' },
     { key: 'cash',          label: 'Registers & Shifts', icon: 'cash',      href: 'cash-register.html', permission: 'registers.view' },
     { key: 'offline', hxHide: true,       label: 'Offline review',     icon: 'wifiOff',     href: 'offline-review.html', permission: 'offline.review' },
 
     { key: 'branches',      label: 'Branches',           icon: 'building',     href: 'branches.html',      permission: 'branches.view' },
-    { key: 'employees',     label: 'Employees',          icon: 'employees', href: 'employees.html',     permission: 'employees.view' },
+    { key: 'employees', hxHide: true,     label: 'Employees',          icon: 'employees', href: 'employees.html',     permission: 'employees.view' },
     { key: 'customers',     label: 'Customers',          icon: 'contact',      href: 'customers.html',     permission: 'customers.view' },
     { key: 'crm',           label: 'CRM',                icon: 'crm', href: 'crm.html',           permission: 'reports.view' },
     { key: 'sms',           label: 'SMS & Alerts',       icon: 'message',    href: 'sms.html',           permission: 'reports.view' },
@@ -361,7 +363,7 @@
       if (item.key === 'dispense-otc') return !history && desk !== 'rx';
       return false;
     }
-    return item.key === activePage;
+    return item.key === activePage || item.page === activePage;
   }
 
   // ---- Restaurant operating plan: once the owner has saved "Devices & printing", pages the restaurant has no device for are hidden.
@@ -438,6 +440,20 @@
     return profile.businessType === 'restaurant' || f.restaurantOrdering === true || f.accommodation === true;
   }
 
+
+  /** Restaurant / accommodation businesses: every shared page (Employees, Expenses, Customers, Branches, Settings ...)
+   *  gets the same black rail, blue accent, rounded cards and type as the hx-* pages. */
+  const SKIN_CSS = ['css/hospitality.css', 'css/hx-redesign.css', 'css/hx-pro.css', 'css/hx-fixes.css'];
+  function applyHxSkin() {
+    const page = document.body.getAttribute('data-page') || '';
+    const on = isHospitality() && !/^hx-/.test(page) && !['login', 'register', 'verify', 'kiosk', 'track', 'rider', 'store', 'offline', 'admin'].includes(page) && !/^admin/.test(page);
+    document.body.classList.toggle('hx-skin', !!on);
+    if (!on) return;
+    SKIN_CSS.forEach((h) => { if (!document.querySelector(`link[data-hx-skin="${h}"]`)) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = h; l.setAttribute('data-hx-skin', h); document.head.appendChild(l); } });
+    if (!document.querySelector('link[data-hx-skin="font"]')) { const f = document.createElement('link'); f.rel = 'stylesheet'; f.href = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'; f.setAttribute('data-hx-skin', 'font'); document.head.appendChild(f); }
+  }
+  window.addEventListener('businessprofilechange', () => applyHxSkin());
+
   function itemAllowed(item, user) {
     if (!itemVisibleForBusiness(item)) return false;
     if (item.ownerOnly && user?.role !== 'OWNER') return false;
@@ -463,7 +479,7 @@
       const disabled = item.disabled;
       let label = '';
       if (hx) {
-        const g = item.key === 'dashboard' ? '' : (item.group || 'Business');
+        const g = item.key === 'dashboard' ? '' : ((item.accGroup && hasFeature('accommodation') && !hasFeature('restaurantOrdering') ? item.accGroup : item.group) || 'Business');
         if (g !== lastGroup) { if (g) label = `<div class="sidebar-section-label" data-group="${g.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}">${g}</div>`; lastGroup = g; }
       }
       return `${label}
@@ -797,6 +813,7 @@
 
     document.title = title ? `${title} · ${APP_NAME}` : APP_NAME;
 
+    applyHxSkin();
     root.innerHTML = shellTemplate(user, title, activePage);
     bindShellEvents();
     window.Permissions.applyPermissionGates(root, user);

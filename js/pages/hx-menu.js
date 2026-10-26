@@ -23,9 +23,9 @@
   }
 
   function paint() {
-    el.innerHTML = head('Menu', 'What you sell, what it costs and which station cooks it.', `<button class="btn btn-secondary" id="ng">New extras group</button><button class="btn btn-primary" id="ni">New dish</button>`) + window.HX.tabs([['dishes', 'Dishes'], ['groups', 'Extras & options']], tab) + '<div id="mb"></div>';
+    el.innerHTML = head('Menu', 'What you sell, what it costs and which station cooks it.', `${can('restaurant.menu.manage') ? '<button class="btn btn-secondary" id="nc">+ Add food category</button>' : ''}<button class="btn btn-secondary" id="ng">New extras group</button><button class="btn btn-primary" id="ni">New dish</button>`) + window.HX.tabs([['dishes', 'Dishes'], ['groups', 'Extras & options']], tab) + '<div id="mb"></div>';
     el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; paint(); }));
-    el.querySelector('#ni').onclick = () => dishForm(); el.querySelector('#ng').onclick = () => groupForm();
+    el.querySelector('#ni').onclick = () => dishForm(); el.querySelector('#nc')?.addEventListener('click', categoryForm); el.querySelector('#ng').onclick = () => groupForm();
     const mb = el.querySelector('#mb');
     if (tab === 'groups') { mb.innerHTML = groups.length ? `<div class="hx-card flush">${groups.map((g) => `<div class="hx-row"><div class="grow"><b>${E(g.name)}</b><small class="hx-sub">${(g.options || []).map((o) => E(o.name) + (o.priceDelta ? ' (+' + M(o.priceDelta) + ')' : '')).join(', ')}</small></div>${g.required ? pill('required', 'warn') : ''}<button class="btn btn-sm btn-secondary" data-g="${g._id}">Edit</button></div>`).join('')}</div>` : window.HX.empty('No extras yet', 'Groups like “Cooking level” or “Add-ons” appear when waiters add a dish.'); mb.querySelectorAll('[data-g]').forEach((b) => b.onclick = () => groupForm(groups.find((x) => x._id === b.dataset.g))); return; }
     mb.innerHTML = `<input class="input" id="sq" placeholder="Search dishes" value="${E(q)}" style="max-width:320px;margin-bottom:var(--space-3)"><div id="dl"></div>`;
@@ -56,6 +56,15 @@
         up.onclick = async () => { const fd = new FormData(); fd.append('image', f.files[0]); window.UI.setButtonLoading(up, true, 'Uploading…'); try { await window.Api.upload(`/restaurant/menu/items/${it._id}/image`, fd); window.UI.toast.success('Photo saved'); close(); load(); } catch (e) { window.UI.setButtonLoading(up, false); window.UI.toast.error((e && e.message) || 'Upload failed'); } };
         const rm = el.querySelector('#pr'); if (rm) rm.onclick = async () => { try { await window.Api.delete(`/restaurant/menu/items/${it._id}/image`); window.UI.toast.success('Photo removed'); close(); load(); } catch (e) { window.UI.toast.error((e && e.message) || 'Could not remove'); } };
       } });
+  }
+
+  /** Add a food category (POST /categories) so it shows up in the dish form's Category list. */
+  function categoryForm() {
+    formModal({ title: 'Add food category', submitText: 'Add category', maxWidth: '400px', fields: [{ name: 'name', label: 'Category name', required: true, placeholder: 'e.g. Starters, Mains, Drinks, Desserts' }], onSubmit: async (v) => {
+      const name = v.name.trim(); if (cats.some((c) => (c.name || '').toLowerCase() === name.toLowerCase())) { window.UI.toast.warning('That category already exists'); return false; }
+      const r = await send('post', '/categories', { name }); if (!r) return false;
+      window.UI.toast.success(`Category ${name} added`); load(); return true;
+    } });
   }
 
   function dishForm(it) {

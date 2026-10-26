@@ -9,6 +9,17 @@
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ${extra}>${path}</svg>`;
 
   const ICONS = {
+    // ---- extra unique glyphs so no two sidebar pages share an icon
+    gauge: stroke('<path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l4-5"/><circle cx="12" cy="16" r="1.4"/><path d="M4 20h16"/>'),
+    terminal: stroke('<rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="4" rx="1"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.5h.01M12 17.5h.01M16 17.5h.01"/>'),
+    kiosk: stroke('<rect x="6" y="2.5" width="12" height="14" rx="2"/><path d="M9 7l2 2 4-4"/><path d="M12 16.5V20"/><path d="M8 21h8"/>'),
+    globe: stroke('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9S14.5 18.4 12 21c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>'),
+    pin: stroke('<path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>'),
+    server: stroke('<rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/><path d="M11 7h6M11 17h6"/>'),
+    calendarCheck: stroke('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M9 15.5l2 2 4-4"/>'),
+    flag: stroke('<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>'),
+    layoutGrid: stroke('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'),
+
     dashboard: stroke('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
     branches: stroke('<path d="M6 3v6c0 2 1.5 3 3.5 3H14"/><circle cx="6" cy="3" r="0"/><circle cx="6" cy="4" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M18 10v6"/>'),
     employees: stroke('<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="7" r="2.6"/><path d="M15.5 14.2c2.6.3 4.5 2.6 4.5 5.3"/>'),
