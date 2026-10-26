@@ -188,8 +188,11 @@
   const TILE_URL = () => CFG().MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
   const TILE_ATTR = () => CFG().MAP_TILE_ATTRIBUTION || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
   const mk = (cls, html) => window.L.divIcon({ className: 'lv-mk-wrap', html: `<div class="lv-mk ${cls}">${html}</div>`, iconSize: [44, 44], iconAnchor: [22, 22] });
+  // Real delivery-motorbike marker (rider + helmet + orange delivery box), side view, flips to face the direction of travel.
+  const BIKE_SVG = `<svg class="lv-bike" viewBox="0 0 64 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><ellipse cx="32" cy="45" rx="23" ry="2.4" fill="#000" opacity=".18"/><path d="M6 32Q14 23 23 30" fill="none" stroke="#334155" stroke-width="3.2" stroke-linecap="round"/><path d="M10 30L24 27H40L44 31L38 36H22Z" fill="#334155"/><path d="M38 27L43 20H46L44 30L40 33Z" fill="#475569"/><path d="M45 18.5L50 36" stroke="#475569" stroke-width="2.8" stroke-linecap="round"/><path d="M44 29Q50 24.5 56 30" fill="none" stroke="#334155" stroke-width="3.2" stroke-linecap="round"/><circle cx="14" cy="36" r="8" fill="#111827"/><circle cx="14" cy="36" r="4.6" fill="#CBD5E1"/><circle cx="14" cy="36" r="1.7" fill="#475569"/><circle cx="50" cy="36" r="8" fill="#111827"/><circle cx="50" cy="36" r="4.6" fill="#CBD5E1"/><circle cx="50" cy="36" r="1.7" fill="#475569"/><rect x="21" y="24.5" width="15" height="4" rx="2" fill="#111827"/><path d="M3 26.2H22" stroke="#111827" stroke-width="1.8" stroke-linecap="round"/><rect x="2" y="9" width="20" height="16" rx="2.6" fill="#F26A21"/><path d="M2 14.5H22" stroke="#C2410C" stroke-width="1.4"/><circle cx="12" cy="20" r="3.1" fill="#fff"/><path d="M12 18.2V21.8M10.2 20H13.8" stroke="#F26A21" stroke-width="1.3" stroke-linecap="round"/><path d="M28 25L37 29L36 35" fill="none" stroke="#1F2937" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M27 25L31 14.5" stroke="#F26A21" stroke-width="7.2" stroke-linecap="round"/><path d="M32 16.5L40 19.5L43.5 18" fill="none" stroke="#F26A21" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="43.8" cy="18" r="2" fill="#111827"/><path d="M43 17.4L48 16.4" stroke="#111827" stroke-width="2.4" stroke-linecap="round"/><circle cx="47.6" cy="21.4" r="2.5" fill="#FDE047" stroke="#fff" stroke-width=".9"/><circle cx="33" cy="8.6" r="5.7" fill="#111827"/><path d="M33.6 6.8Q40 6.4 38.6 11.4L33.6 10.8Z" fill="#7DD3FC"/><path d="M29.4 6.6Q31 3.8 34 3.9" fill="none" stroke="#fff" stroke-width="1" stroke-linecap="round" opacity=".7"/></svg>`;
+  const mkBike = () => window.L.divIcon({ className: 'lv-mk-wrap', html: `<div class="lv-mk rider"><span class="pulse"></span><span class="core">${BIKE_SVG}</span></div>`, iconSize: [64, 52], iconAnchor: [32, 44] });
   const ICONS = {
-    rider: () => mk('rider', `<span class="pulse"></span><span class="core">${ic('bike')}</span>`),
+    rider: () => mkBike(),
     me: () => mk('me', '<span class="pulse"></span><span class="dot"></span>'),
     dest: () => window.L.divIcon({ className: 'lv-mk-wrap', html: '<div class="lv-pin dest"><svg viewBox="0 0 32 40"><path d="M16 39S3 26.5 3 15a13 13 0 0 1 26 0C29 26.5 16 39 16 39z" fill="currentColor"/><circle cx="16" cy="15" r="5.2" fill="#fff"/></svg></div>', iconSize: [32, 40], iconAnchor: [16, 39] }),
     origin: () => window.L.divIcon({ className: 'lv-mk-wrap', html: `<div class="lv-pin origin"><span>${ic('store')}</span></div>`, iconSize: [36, 36], iconAnchor: [18, 18] }),
@@ -209,8 +212,8 @@
         const ll = [pos.lat, pos.lng]; let mm = markers[id];
         if (!mm) { mm = markers[id] = { m: L.marker(ll, { icon: ICONS[kind](), zIndexOffset: kind === 'rider' ? 1000 : kind === 'me' ? 900 : 0, keyboard: false }).addTo(m), kind, cur: ll }; }
         else { animate(mm, ll); }
-        if (label) { mm.m.unbindTooltip(); mm.m.bindTooltip(label, { permanent: kind === 'rider', direction: 'top', offset: [0, -20], className: 'lv-tip' }); }
-        if (kind === 'rider' && heading != null) { const c = mm.m.getElement() && mm.m.getElement().querySelector('.core'); if (c) c.style.setProperty('--rot', '0deg'); }
+        if (label) { mm.m.unbindTooltip(); mm.m.bindTooltip(label, { permanent: kind === 'rider', direction: 'top', offset: [0, kind === 'rider' ? -40 : -20], className: 'lv-tip' }); }
+        if (kind === 'rider' && heading != null && !isNaN(heading)) { flip(mm, Math.sin(heading * Math.PI / 180) < 0 ? -1 : 1); }
         return mm.m;
       },
       drop(id) { if (markers[id]) { m.removeLayer(markers[id].m); delete markers[id]; } },
@@ -231,8 +234,10 @@
       follow() { user = false; }, size() { setTimeout(() => m.invalidateSize(), 60); }, destroy() { try { m.remove(); } catch (e) { /* gone */ } },
       onClick(fn) { m.on('click', (e) => fn({ lat: e.latlng.lat, lng: e.latlng.lng })); },
     };
+    function flip(mm, dir) { mm.dir = dir; const el = mm.m.getElement && mm.m.getElement(); const c = el && el.querySelector('.core'); if (c) c.style.setProperty('--flip', dir); }
     function animate(mm, to) {
-      const from = mm.cur; if (!from || (from[0] === to[0] && from[1] === to[1])) return; const t0 = performance.now(), dur = 1400;
+      const from = mm.cur; if (!from || (from[0] === to[0] && from[1] === to[1])) return;
+      if (mm.kind === 'rider' && Math.abs(to[1] - from[1]) > 1e-6) flip(mm, to[1] < from[1] ? -1 : 1); const t0 = performance.now(), dur = 1400;
       cancelAnimationFrame(mm.raf);
       const step = (t) => { const k = Math.min(1, (t - t0) / dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; mm.m.setLatLng([from[0] + (to[0] - from[0]) * e, from[1] + (to[1] - from[1]) * e]); if (k < 1) mm.raf = requestAnimationFrame(step); else mm.cur = to; };
       mm.cur = to; mm.raf = requestAnimationFrame(step);
