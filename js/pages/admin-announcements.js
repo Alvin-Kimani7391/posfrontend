@@ -19,7 +19,7 @@
     ['hx-bills', 'Restaurant: Bills & payments'], ['hx-reservations', 'Restaurant: Reservations'], ['hx-delivery', 'Restaurant: Delivery & pickup'],
     ['hx-menu', 'Restaurant: Menu'], ['hx-stock', 'Restaurant: Ingredients'], ['hx-guest', 'Restaurant: Guest requests & QR'], ['hx-staff', 'Restaurant: Shifts & tips'],
     ['hx-desk', 'Rooms: Front desk'], ['hx-rooms', 'Rooms: Room board'], ['hx-stays', 'Rooms: Bookings'], ['hx-housekeeping', 'Rooms: Housekeeping'],
-    ['hx-reports', 'Restaurant & rooms: Reports'], ['hx-setup', 'Restaurant & rooms: Setup guide'], ['hx-settings', 'Restaurant & rooms: Settings'], ['hx-services', 'Restaurant & rooms: System check'],
+    ['hx-reports', 'Restaurant & rooms: Reports'], ['hx-setup', 'Restaurant & rooms: Setup guide'], ['hx-restaurant-settings', 'Restaurant & rooms: Restaurant settings'],
   ];
   const PAGE_LABEL = Object.fromEntries(PAGES);
   const ROLES = [

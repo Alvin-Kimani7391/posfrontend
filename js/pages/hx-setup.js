@@ -55,14 +55,14 @@
         step('Add a dining area (indoor, patio, bar)', f.areas.length > 0, 'Add area', 'area', can('restaurant.tables.manage')),
         step('Add tables', f.tables.length > 0, 'Add tables', 'tables', can('restaurant.tables.manage')),
         step('Invite waiters', f.hasWaiter, 'Add staff', 'link:employees.html', true),
-        step('Set service charge and tax', f.chargeSet, 'Open settings', 'link:hx-settings.html', true),
+        step('Set service charge and tax', f.chargeSet, 'Open settings', 'link:hx-restaurant-settings.html#billing', true),
       ]));
     }
     if (feature('accommodation') && manageRooms) {
       cards.push(station('Accommodation station', 'Your rooms, rates and front desk', 'bed', [
         step('Create a room type with its nightly rate', f.roomTypes.length > 0, 'Add room type', 'roomtype', true),
         step('Add your rooms', f.rooms > 0, 'Add rooms', 'rooms', f.roomTypes.length > 0),
-        step('Set check-in and check-out times', f.checkSet, 'Open settings', 'link:hx-settings.html', true),
+        step('Set check-in and check-out times', f.checkSet, 'Open settings', 'link:hx-restaurant-settings.html#rooms', true),
         step('Invite reception and housekeeping staff', f.hasFront, 'Add staff', 'link:employees.html', true),
       ]));
     }
