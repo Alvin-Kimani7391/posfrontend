@@ -188,3 +188,7 @@ label.lbl{display:block;font-weight:700;font-size:13px;margin:0 0 6px;color:var(
 
 /* Dark map: OSM has no dark style, so invert the light tiles */
 .lv-tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9); }
+/* STK push waiting animation (same as q.html) */
+.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 16px;position:relative;animation:ring 1.6s infinite}.phone-anim svg{width:40px;height:40px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+@keyframes ring{0%,100%{transform:rotate(0)}10%,30%{transform:rotate(-8deg)}20%,40%{transform:rotate(8deg)}50%{transform:rotate(0)}}
+.prog{height:5px;background:#e4e8eb;border-radius:9px;overflow:hidden;margin:14px 0 0}.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width 1s linear}

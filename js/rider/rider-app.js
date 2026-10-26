@@ -431,12 +431,13 @@
   }
   async function payWait(id, s, my) {
     const ref = s.collection && s.collection.reference; let n = 0;
-    app.innerHTML = top('Payment', { back: true }) + `<div class="view nonav"><div class="pad center" style="padding-top:60px"><div class="spin"></div><h2>Waiting for the customer</h2><p class="muted" style="margin:8px 0 6px">${money(s.amountDue, s.currency)} requested from <b>${esc(s.customer.mpesaPhone || s.customer.phone || 'the customer')}</b></p><p class="fine">Ask them to check their phone and enter their M-PESA PIN.</p><div class="sp"></div><div id="pw" class="note info" style="text-align:left">${ic('clock')}<div>Checking payment...</div></div></div></div><div class="cta"><button class="btn ghost" id="rf">Check now</button></div>`; bindBack();
+    app.innerHTML = top('Payment', { back: true }) + `<div class="view nonav"><div class="pad center" style="padding-top:60px"><div class="phone-anim"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div><h2>Waiting for the customer</h2><p class="muted" style="margin:8px 0 6px">${money(s.amountDue, s.currency)} requested from <b>${esc(s.customer.mpesaPhone || s.customer.phone || 'the customer')}</b></p><p class="fine">Ask them to check their phone and enter their M-PESA PIN.</p><div class="prog"><i id="pg"></i></div><div class="sp"></div><div id="pw" class="note info" style="text-align:left">${ic('clock')}<div>Checking payment...</div></div></div></div><div class="cta"><button class="btn ghost" id="rf">Check now</button></div>`; bindBack();
     const check = async () => {
       if (S.view !== 'pay' || my !== S.seq) return; n++;
       try { const r = await A.get('/rider/payments/mpesa/' + encodeURIComponent(ref)); if (r.status === 'SUCCESS') { Lv.beep(); return render(); } if (r.status === 'FAILED' || r.status === 'CANCELLED') { Lv.toast(r.message || 'The customer did not complete the payment.', 'error', 5000); return render(); } const el = $('#pw'); if (el) el.lastElementChild.textContent = r.message || 'Waiting for the customer to enter their PIN...'; } catch (e) { /* keep polling */ }
       if (n > 40) { render(); }
     };
+    const pgb = $('#pg'); if (pgb) setTimeout(() => { pgb.style.width = '100%'; pgb.style.transitionDuration = '120s'; }, 50);
     const t = setInterval(check, 3000); S.cleanup.push(() => clearInterval(t)); $('#rf').onclick = check; check();
   }
   async function payDone(id, s) {
