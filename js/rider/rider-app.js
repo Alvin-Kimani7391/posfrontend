@@ -311,7 +311,7 @@
       <div class="card"><div class="sec-h" style="margin:0 0 8px"><h3>Customer</h3></div><div class="row"><div class="rd-av">${esc(first(c.name).charAt(0).toUpperCase())}</div><div class="grow"><div class="b">${esc(c.name || 'Customer')}</div><div class="fine">${esc(c.phone || '')}</div></div>${c.phone ? `<a class="callb" href="${Lv.phoneHref(c.phone)}" aria-label="Call">${ic('phone')}</a>` : ''}</div>
         <div class="kv" style="margin-top:8px"><span>${ic('pin')} Address</span><span style="text-align:right">${esc(c.address || '')}${c.landmark ? '<br><span class="fine">' + esc(c.landmark) + '</span>' : ''}</span></div>
         ${c.instructions ? `<div class="note info">${ic('alert')}<div>${esc(c.instructions)}</div></div>` : ''}${c.sharedLive ? `<div class="fine">${ic('target')} The customer is sharing their live location.</div>` : ''}
-        ${c.mapsUrl ? `<a class="btn line sm" style="margin-top:10px;width:100%" href="${esc(c.mapsUrl)}" target="_blank" rel="noopener">${ic('nav')} Open in Google Maps</a>` : ''}</div>
+        <div class="row" style="gap:8px;margin-top:10px"><button class="btn sm" style="flex:1" data-act="map">${ic('map')} Live map (in app)</button>${c.mapsUrl ? `<a class="btn line sm" style="flex:1" href="${esc(c.mapsUrl)}" target="_blank" rel="noopener">${ic('nav')} Google Maps</a>` : ''}</div></div>
       <div class="sp"></div>
       <div class="card"><div class="sec-h" style="margin:0 0 4px"><h3>Items (${(d.items || []).reduce((s, i) => s + (i.quantity || 0), 0)})</h3></div>${(d.items || []).map((i) => `<div class="itm"><div class="q">${i.quantity}x</div><div class="grow"><div class="b">${esc(i.name)}</div>${i.variant || i.notes ? `<div class="fine">${esc([i.variant, i.notes].filter(Boolean).join(' · '))}</div>` : ''}</div><div class="b">${money(i.total)}</div></div>`).join('')}
         ${d.deliveryFee ? `<div class="kv"><span>Delivery fee</span><span>${money(d.deliveryFee)}</span></div>` : ''}<div class="kv"><span class="b" style="color:var(--ink)">Total</span><span class="b">${money(d.total)}</span></div></div>
@@ -354,37 +354,123 @@
     $('#fs', s.el).onclick = async (e) => { const r = $('#fr', s.el).value.trim(); if (r.length < 3) return Lv.toast('Please give a reason', 'warn'); busy(e.currentTarget, true); try { const o = await A.post(`/rider/deliveries/${id}/fail`, { reason: r }); s.close(); loadDash(true); Lv.toast(o && o.returnedToPool ? 'Order returned to the manager' : 'Delivery marked as failed', 'info'); go('#/home'); } catch (x) { busy(e.currentTarget, false); err(x); } };
   }
 
-  /* ---- live navigation map ---- */
-  const routeCache = { k: '', pts: null, at: 0 };
-  async function osrm(a, b) {
-    const k = [a.lat.toFixed(3), a.lng.toFixed(3), b.lat.toFixed(4), b.lng.toFixed(4)].join(); if (routeCache.k === k && Date.now() - routeCache.at < 90000) return routeCache.pts;
-    const c = new AbortController(); const t = setTimeout(() => c.abort(), 6000);
-    try { const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`, { signal: c.signal }); const j = await r.json(); const pts = j.routes && j.routes[0] ? j.routes[0].geometry.coordinates.map(([lng, lat]) => ({ lat, lng })) : null; routeCache.k = k; routeCache.pts = pts; routeCache.at = Date.now(); return pts; } catch (e) { return null; } finally { clearTimeout(t); }
+  /* ---- live navigation map (in-app, Uber-style) ---- */
+  const rcache = { k: '', r: null, at: 0 };
+  async function osrmRoute(a, b) {
+    const k = [a.lat.toFixed(4), a.lng.toFixed(4), b.lat.toFixed(4), b.lng.toFixed(4)].join();
+    if (rcache.k === k && Date.now() - rcache.at < 30000) return rcache.r;
+    const c = new AbortController(), t = setTimeout(() => c.abort(), 7000);
+    try {
+      const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson&steps=true`, { signal: c.signal });
+      const j = await r.json(); const rt = j.routes && j.routes[0]; if (!rt) return null;
+      const pts = rt.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+      const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Lv.haversine(pts[i - 1], pts[i]));
+      const steps = ((rt.legs && rt.legs[0] && rt.legs[0].steps) || []).map((s) => ({ type: s.maneuver.type, mod: s.maneuver.modifier, exit: s.maneuver.exit, name: s.name || '', loc: { lat: s.maneuver.location[1], lng: s.maneuver.location[0] } }));
+      steps.forEach((s) => { s.along = snapTo(pts, cum, s.loc).along; });
+      const out = { pts, cum, total: cum[cum.length - 1] || rt.distance, dur: rt.duration, steps };
+      rcache.k = k; rcache.r = out; rcache.at = Date.now(); return out;
+    } catch (e) { return null; } finally { clearTimeout(t); }
   }
+  /** nearest point on the route line: {d metres off route, i segment, lat/lng, along metres travelled} */
+  function snapTo(pts, cum, p) {
+    const kx = Math.cos(p.lat * Math.PI / 180) * 111320, ky = 110540;
+    let best = { d: Infinity, i: 0, lat: p.lat, lng: p.lng, along: 0 };
+    for (let i = 0; i < pts.length - 1; i++) {
+      const ax = (pts[i].lng - p.lng) * kx, ay = (pts[i].lat - p.lat) * ky, bx = (pts[i + 1].lng - p.lng) * kx, by = (pts[i + 1].lat - p.lat) * ky;
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy; let t = l2 ? -(ax * dx + ay * dy) / l2 : 0; t = Math.max(0, Math.min(1, t));
+      const px = ax + t * dx, py = ay + t * dy, d = Math.hypot(px, py);
+      if (d < best.d) best = { d, i, lat: p.lat + py / ky, lng: p.lng + px / kx, along: cum[i] + t * (cum[i + 1] - cum[i]) };
+    }
+    return best;
+  }
+  const MROT = { 'sharp left': -135, left: -90, 'slight left': -45, straight: 0, 'slight right': 45, right: 90, 'sharp right': 135, uturn: 180 };
+  const turnIcon = (st) => !st ? '' : st.type === 'arrive' ? ic('pin') : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(${MROT[st.mod] != null ? MROT[st.mod] : 0}deg)"><path d="M12 20V5M12 5l-6 6M12 5l6 6"/></svg>`;
+  function turnText(st) {
+    if (!st) return ''; const md = st.mod || 'straight';
+    if (st.type === 'arrive') return 'Arrive at the customer';
+    if (/roundabout|rotary/.test(st.type)) return 'At the roundabout' + (st.exit ? ', take exit ' + st.exit : '') + (st.name ? ' onto ' + st.name : '');
+    if (md === 'uturn') return 'Make a U-turn';
+    if (st.type === 'depart') return 'Head out' + (st.name ? ' on ' + st.name : '');
+    if (st.type === 'continue' || md === 'straight') return 'Continue' + (st.name ? ' on ' + st.name : ' straight');
+    return 'Turn ' + md.replace('slight ', 'slightly ') + (st.name ? ' onto ' + st.name : '');
+  }
+  const say = (t) => { try { if (window.speechSynthesis) { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.rate = 1.02; speechSynthesis.speak(u); } } catch (e) { /* no voice */ } };
+
   async function vMap(id, my) {
     let d = null; if (id) { app.innerHTML = '<div class="mapscr"><div class="lv-nomap">Loading map...</div></div>'; d = await loadDetail(id); if (my !== S.seq) return; }
     else { const dd = S.dash || await A.get('/rider/dashboard').catch(() => null); if (dd) S.dash = dd; const f = dd && (dd.deliveries || [])[0]; if (f) return go('#/map/' + f.orderId); }
     const dest = () => (d && d.customer && d.customer.lat != null ? { lat: d.customer.lat, lng: d.customer.lng } : null);
+    let follow = !!(d && ['ON_THE_WAY', 'ARRIVED'].includes(d.stage)), voiceOn = kv.get('voice') === '1';
+    const MODES = ['street', 'sat', 'dark'];
     app.innerHTML = `<div class="mapscr"><div class="mapbox"><div id="mp"></div>
-      <div class="hudt"><button class="fab" data-back aria-label="Back">${ic('back')}</button><div class="hud" id="hud"></div></div><div class="gps" id="gpsw"></div>
-      <div class="fabs"><button class="fab" id="rc" aria-label="Recenter">${ic('target')}</button>${dest() ? `<a class="fab o" id="gm" href="${esc(Lv.navUrl(dest().lat, dest().lng))}" target="_blank" rel="noopener" aria-label="Google Maps">${ic('nav')}</a>` : ''}</div></div>
+      <div class="hudt"><button class="fab" data-back aria-label="Back">${ic('back')}</button><div class="hud" id="hud"></div></div><div id="turn"></div><div class="gps" id="gpsw"></div>
+      <div class="fabs">
+        <button class="fab" id="lyr" aria-label="Map style">${ic('map')}</button>
+        <button class="fab" id="vo" aria-label="Voice guidance" style="font-size:19px">${voiceOn ? '&#128266;' : '&#128263;'}</button>
+        <button class="fab" id="ov" aria-label="Show whole route" style="font-size:20px;font-weight:800">&#8596;</button>
+        <button class="fab ${follow ? 'on' : ''}" id="rc" aria-label="Follow me">${ic('target')}</button>
+        ${dest() ? `<a class="fab o" id="gm" href="${esc(Lv.navUrl(dest().lat, dest().lng))}" target="_blank" rel="noopener" aria-label="Open in Google Maps">${ic('nav')}</a>` : ''}</div></div>
       <div class="dock" id="dock"></div></div>`;
-    bindBack(); const m = Lv.map($('#mp'), { theme: 'dark', center: S.pos ? [S.pos.lat, S.pos.lng] : undefined, zoom: 15 });
-    if (!S.online && !onRoad()) { /* still show the rider's own dot */ S.cleanup.push(Lv.geo.watch((p) => { S.pos = p; S.posErr = null; draw(); }, (e) => { S.posErr = e; draw(); })); }
+    bindBack(); const m = Lv.map($('#mp'), { theme: 'light', center: S.pos ? [S.pos.lat, S.pos.lng] : undefined, zoom: 16 });
+    if (m) { m.mode(kv.get('mapmode') || 'street'); m.onUser(() => { follow = false; const r = $('#rc'); if (r) r.classList.remove('on'); }); }
+    if (!S.online && !onRoad()) { S.cleanup.push(Lv.geo.watch((p) => { S.pos = p; S.posErr = null; draw(); }, (e) => { S.posErr = e; draw(); })); }
     if (m) S.cleanup.push(() => m.destroy());
-    let routed = 0;
-    async function draw() {
-      if (!m) return; const dp = dest(), me = S.pos, o = d && d.pickup && d.pickup.lat != null ? { lat: d.pickup.lat, lng: d.pickup.lng } : null;
-      if (me) m.put('me', 'rider', me, { label: 'You' }); if (dp) m.put('dest', 'dest', dp, { label: first(d.customer.name) }); if (o && d.stage !== 'ON_THE_WAY') m.put('origin', 'origin', o);
-      const from = me || o; if (from && dp && Date.now() - routed > 20000) { routed = Date.now(); const pts = await osrm(from, dp); m.route(pts || [from, dp], { dashed: !pts }); }
-      if (!m._fitted && (me || dp)) { m._fitted = true; m.fit([me, dp].filter(Boolean), 80, true); }
-      hud(); gps();
+    S.cleanup.push(() => { try { window.speechSynthesis && speechSynthesis.cancel(); } catch (e) { /* ignore */ } });
+
+    let route = null, routedAt = 0, routing = false, offCount = 0, destAt = null, stepI = 1, said = {}, snap = null, prev = null, heading = null, lastZ = 0, fitted = false;
+    async function ensureRoute() {
+      const me = S.pos, dp = dest(); if (!me || !dp || routing) return; const now = Date.now();
+      let need = !route || now - routedAt > 45000;
+      if (route && snap && snap.d > 55 && (me.accuracy == null || me.accuracy < 80)) { offCount++; if (offCount >= 2 && now - routedAt > 6000) need = true; } else offCount = 0;
+      if (route && destAt && Lv.haversine(destAt, dp) > 40 && now - routedAt > 3000) need = true;
+      if (!need) return;
+      routing = true;
+      try { const r = await osrmRoute(me, dp); routedAt = Date.now(); offCount = 0; destAt = dp; if (r) { route = r; stepI = 1; said = {}; snap = null; } draw(true); } finally { routing = false; }
+    }
+    function draw(noRoute) {
+      if (!m) { hud(); gps(); return; }
+      const dp = dest(), me = S.pos, o = d && d.pickup && d.pickup.lat != null ? { lat: d.pickup.lat, lng: d.pickup.lng } : null;
+      let shown = me; snap = null;
+      if (route && me) { snap = snapTo(route.pts, route.cum, me); if (snap.d < 30 && (me.accuracy == null || me.accuracy < 60)) shown = { lat: snap.lat, lng: snap.lng }; }
+      if (shown) {
+        if (prev && Lv.haversine(prev, shown) > 4) { heading = Lv.bearing(prev, shown); prev = shown; } else if (!prev) prev = shown;
+        m.put('me', 'rider', shown, { label: 'You', heading: me && me.heading != null && me.speed > 1 ? me.heading : heading }); m.acc(me, me && me.accuracy);
+      }
+      if (dp) m.put('dest', 'dest', dp, { label: first(d.customer.name) }); if (o && d.stage !== 'ON_THE_WAY') m.put('origin', 'origin', o);
+      if (route && shown && snap) m.route([shown, ...route.pts.slice(snap.i + 1)], { color: '#1A73E8' });
+      else if (route) m.route(route.pts, { color: '#1A73E8' });
+      else if (me && dp) m.route([me, dp], { dashed: true, color: '#1A73E8' });
+      if (follow && shown) { const sp = me && me.speed != null ? me.speed : 0; const z = sp > 16 ? 15 : sp > 8 ? 16 : 17; lastZ = z; m.cam(shown, z, 0.9, ($('#mp').clientHeight || 400) * 0.16); }
+      else if (!fitted && (me || dp)) { fitted = true; m.fit([me, dp].filter(Boolean), 90, true); }
+      hud(); gps(); if (!noRoute) ensureRoute();
+    }
+    function metrics() {
+      const dp = dest(), me = S.pos; let remM = null, etaS = null;
+      if (route && snap) { remM = Math.max(0, route.total - snap.along); etaS = route.dur * 1.12 * (route.total ? remM / route.total : 1); }
+      else if (me && dp) { remM = Lv.haversine(me, dp); etaS = remM / 1000 / 24 * 3600; }
+      else if (d && d.tracking) { remM = d.tracking.distanceM; etaS = d.tracking.etaMinutes != null ? d.tracking.etaMinutes * 60 : null; }
+      return { remM, etaS };
     }
     function hud() {
-      const dp = dest(); const dm = S.pos && dp ? Lv.haversine(S.pos, dp) : d && d.tracking ? d.tracking.distanceM : null; const eta = d && d.tracking && d.tracking.etaMinutes != null && !(S.pos && dp) ? d.tracking.etaMinutes : dm != null ? Math.max(0, Math.round(dm / 1000 / 20 * 60)) : null;
       const h = $('#hud'); if (!h) return; if (!d) { h.innerHTML = '<small>No active delivery</small><b>Pick a delivery</b>'; return; }
-      h.innerHTML = d.stage === 'ARRIVED' ? '<small>You have arrived</small><b>Collect payment &amp; hand over</b>' : `<small>Arriving in</small><b>${eta == null ? '--' : Lv.eta(eta)} ${dm != null ? `<em>(${Lv.dist(dm)})</em>` : ''}</b>`;
-      if (dm != null && dm < 60 && d.stage === 'ON_THE_WAY' && !S.nearBuzz) { S.nearBuzz = d.orderId; Lv.beep('alert'); Lv.toast('You are at the customer. Tap "Arrived".', 'ok', 4000); }
+      const { remM, etaS } = metrics(); const min = etaS == null ? null : Math.max(0, Math.round(etaS / 60));
+      const arr = etaS == null ? '' : new Date(Date.now() + etaS * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const live = d.customer && d.customer.sharedLive ? '<span class="livebadge">LIVE</span>' : '';
+      h.innerHTML = d.stage === 'ARRIVED' ? '<small>You have arrived</small><b>Collect payment &amp; hand over</b>' : `<small>${live}${arr ? 'Arrive ' + arr : 'Arriving in'}</small><b>${min == null ? '--' : Lv.eta(min)} ${remM != null ? `<em>(${Lv.dist(remM)})</em>` : ''}</b>`;
+      if (remM != null && remM < 60 && d.stage === 'ON_THE_WAY' && S.nearBuzz !== d.orderId) { S.nearBuzz = d.orderId; Lv.beep('alert'); Lv.toast('You are at the customer. Tap "Arrived".', 'ok', 4000); }
+      turn(remM);
+    }
+    function turn(remM) {
+      const tn = $('#turn'); if (!tn) return;
+      if (!route || !snap || !d || d.stage !== 'ON_THE_WAY') { tn.innerHTML = ''; return; }
+      const n = route.steps.length; while (stepI < n - 1 && snap.along >= route.steps[stepI].along - 12) stepI++;
+      const st = route.steps[stepI]; if (!st) { tn.innerHTML = ''; return; }
+      const dd = st.type === 'arrive' ? remM : Math.max(0, st.along - snap.along);
+      tn.innerHTML = `<div class="turn"><div class="tic">${turnIcon(st)}</div><div class="tx"><b>${Lv.dist(dd)}</b><span>${esc(turnText(st))}</span></div></div>`;
+      if (voiceOn && dd != null) {
+        if (dd < 350 && dd > 90 && !said[stepI + 'a']) { said[stepI + 'a'] = 1; say('In ' + Lv.dist(dd).replace(' m', ' metres').replace(' km', ' kilometres') + ', ' + turnText(st)); }
+        else if (dd <= 90 && !said[stepI + 'b']) { said[stepI + 'b'] = 1; say(turnText(st)); }
+      }
     }
     function gps() { const g = $('#gpsw'); if (!g) return; g.innerHTML = S.posErr && S.posErr.code ? `<div class="note bad" style="margin:0">${ic('alert')}<div>${esc(Lv.geo.message(S.posErr))}</div></div>` : !S.pos ? `<div class="note" style="margin:0">${ic('target')}<div>Finding your location...</div></div>` : ''; }
     function dock() {
@@ -394,12 +480,18 @@
       if (can.pay) b.push(['pay', 'Collect payment ' + (d.payment ? money(d.payment.amountDue) : ''), d.stage === 'ARRIVED' ? '' : 'ghost']);
       if (can.complete && ['ON_THE_WAY', 'ARRIVED'].includes(d.stage)) b.push(['complete', 'Complete delivery', can.pay ? 'ghost' : 'green']);
       if (['ASSIGNED', 'PICKED_UP'].includes(d.stage) && can.start) b.unshift(['start', 'Start Navigation', '']);
-      k.innerHTML = `<div class="grab"></div><div class="row"><div class="grow"><div class="b">#${esc(d.orderNumber)} ${tag(d.stage, d.label)}</div><div class="fine">${money(d.total)} · ${esc(d.customer.name || '')}</div></div>${d.customer.phone ? `<a class="callb" href="${Lv.phoneHref(d.customer.phone)}">${ic('phone')}</a>` : ''}<button class="callb" style="background:var(--ol);color:var(--o)" id="dt" aria-label="Details">${ic('list')}</button></div><div class="sp8"></div>${b.map(([a, l, c]) => `<button class="btn ${c}" data-act="${a}" style="margin-top:8px">${l}</button>`).join('')}`;
+      k.innerHTML = `<div class="grab"></div><div class="row"><div class="grow"><div class="b">#${esc(d.orderNumber)} ${tag(d.stage, d.label)}</div><div class="fine">${money(d.total)} · ${esc(d.customer.name || '')}${d.customer.address ? ' · ' + esc(d.customer.address) : ''}</div></div>${d.customer.phone ? `<a class="callb" href="${Lv.phoneHref(d.customer.phone)}">${ic('phone')}</a>` : ''}<button class="callb" style="background:var(--ol);color:var(--o)" id="dt" aria-label="Details">${ic('list')}</button></div><div class="sp8"></div>${b.map(([a, l, c]) => `<button class="btn ${c}" data-act="${a}" style="margin-top:8px">${l}</button>`).join('')}`;
       $$('[data-act]', k).forEach((x) => x.onclick = () => act(id, x.dataset.act, x)); $('#dt').onclick = () => go('#/d/' + id);
     }
-    dock(); draw(); $('#rc').onclick = () => { if (m) { m.follow(); m.fit([S.pos, dest()].filter(Boolean), 80, true); } };
+    dock(); draw();
+    $('#rc').onclick = () => { follow = true; $('#rc').classList.add('on'); if (m) { m.follow(); } draw(true); };
+    $('#ov').onclick = () => { follow = false; $('#rc').classList.remove('on'); if (m) { m.follow(); const me = S.pos, dp = dest(); m.fit([me, dp].filter(Boolean), 110, true); } };
+    $('#lyr').onclick = () => { if (!m) return; const nx = MODES[(MODES.indexOf(m.modeName()) + 1) % MODES.length]; m.mode(nx); kv.set('mapmode', nx); Lv.toast(nx === 'sat' ? 'Satellite view' : nx === 'dark' ? 'Night view' : 'Street view', 'info', 1200); };
+    $('#vo').onclick = () => { voiceOn = !voiceOn; kv.set('voice', voiceOn ? '1' : '0'); $('#vo').innerHTML = voiceOn ? '&#128266;' : '&#128263;'; if (voiceOn) say('Voice guidance on'); else { try { speechSynthesis.cancel(); } catch (e) { /* none */ } } };
     S.onPos = () => draw(); S.onDest = () => draw(); S.onPing = () => { hud(); };
-    const t = setInterval(async () => { try { const n = await loadDetail(id); d = n; dock(); draw(); } catch (e) { /* keep last */ } }, 15000); S.cleanup.push(() => clearInterval(t));
+    // the customer's pin is refreshed instantly by the live stream; this poll keeps everything else fresh (faster while the customer shares live)
+    let alive = true; S.cleanup.push(() => { alive = false; });
+    (async function poll() { while (alive) { await new Promise((r) => setTimeout(r, d && d.customer && d.customer.sharedLive ? 5000 : 15000)); if (!alive) return; try { const n = await loadDetail(id); d = n; dock(); draw(); } catch (e) { /* keep last */ } } })();
   }
 
   /* ---- payment ---- */
@@ -430,17 +522,17 @@
     paint();
   }
   function stkCss() {
-    if (!document.getElementById('stk-anim')) { const st = document.createElement('style'); st.id = 'stk-anim'; st.textContent = `.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 20px;position:relative;transform-origin:50% 65%;animation:ring 1.8s ease-in-out infinite;box-shadow:0 8px 24px rgba(31,157,85,.22)}\n.phone-anim svg{width:40px;height:40px;position:relative;z-index:1}\n.phone-anim:before,.phone-anim:after{content:'';position:absolute;inset:0;border-radius:inherit;border:2px solid currentColor;opacity:0;pointer-events:none;animation:ripple 1.8s ease-out infinite}\n.phone-anim:after{animation-delay:.6s}\n@keyframes ring{0%,55%,100%{transform:rotate(0) translateY(0)}6%,18%,30%,42%{transform:rotate(-12deg) translateY(-2px)}12%,24%,36%,48%{transform:rotate(12deg) translateY(-2px)}}\n@keyframes ripple{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.75);opacity:0}}\n.prog{height:5px;background:#e4e8eb;border-radius:9px;overflow:hidden;margin:14px 0 0}.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width 1s linear}`; document.head.appendChild(st); }
+    if (!document.getElementById('stk-anim')) { const st = document.createElement('style'); st.id = 'stk-anim'; st.textContent = `.wait{text-align:center;padding:10px 0 4px}\n.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 16px;position:relative;animation:ring 1.6s infinite}\n.phone-anim svg{width:40px;height:40px}\n@keyframes ring{0%,100%{transform:rotate(0)}10%,30%{transform:rotate(-8deg)}20%,40%{transform:rotate(8deg)}50%{transform:rotate(0)}}\n.serif{font-family:inherit;font-weight:800;letter-spacing:0}\n.prog{height:5px;background:#e4e8eb;border-radius:9px;overflow:hidden;margin:14px 0 0}.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width 1s linear}\n`; document.head.appendChild(st); }
   }
   /* shown the instant the rider taps "Send M-PESA request", before the server answers */
   function paySending(s, ph) {
     stkCss();
-    app.innerHTML = top('Payment', { back: false }) + `<div class="view nonav"><div class="pad center" style="padding-top:60px"><div class="phone-anim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div><h2>Sending M-PESA request…</h2><p class="muted" style="margin:8px 0 6px">${money(s.amountDue, s.currency)} to <b>${esc(ph)}</b></p><p class="fine">Ask the customer to enter their M-PESA PIN when the prompt appears.</p><div class="prog"><i></i></div></div></div>`;
+    app.innerHTML = top('Payment', { back: false }) + `<div class="view nonav"><div class="pad wait" style="padding-top:60px"><div class="phone-anim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div><h3 class="serif" style="font-size:20px">Sending request to your phone…</h3><div style="margin:18px auto 0" class="spin"></div></div></div>`;
   }
   async function payWait(id, s, my) {
     stkCss();
     const ref = s.collection && s.collection.reference; let n = 0;
-    app.innerHTML = top('Payment', { back: true }) + `<div class="view nonav"><div class="pad center" style="padding-top:60px"><div class="phone-anim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div><h2>Waiting for the customer</h2><p class="muted" style="margin:8px 0 6px">${money(s.amountDue, s.currency)} requested from <b>${esc(s.customer.mpesaPhone || s.customer.phone || 'the customer')}</b></p><p class="fine">Ask them to check their phone and enter their M-PESA PIN.</p><div class="prog"><i id="pg"></i></div><div class="sp"></div><div id="pw" class="note info" style="text-align:left">${ic('clock')}<div>Checking payment...</div></div></div></div><div class="cta"><button class="btn ghost" id="rf">Check now</button></div>`; bindBack();
+    app.innerHTML = top('Payment', { back: true }) + `<div class="view nonav"><div class="pad wait" style="padding-top:60px"><div class="phone-anim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div><h3 class="serif" style="font-size:20px">Check the customer's phone</h3><p style="margin:6px 0 0;color:var(--ink2)">Customer to enter their M-PESA PIN to pay <b>${money(s.amountDue, s.currency)}</b> (${esc(s.customer.mpesaPhone || s.customer.phone || 'the customer')}).</p><div class="prog"><i id="pg"></i></div><p class="fine" style="margin-top:10px">Do not close this page. It takes a few seconds after they enter the PIN.</p><div class="sp"></div><div id="pw" class="note info" style="text-align:left">${ic('clock')}<div>Checking payment...</div></div></div></div><div class="cta"><button class="btn ghost" id="rf">Check now</button></div>`; bindBack();
     const check = async () => {
       if (S.view !== 'pay' || my !== S.seq) return; n++;
       try { const r = await A.get('/rider/payments/mpesa/' + encodeURIComponent(ref)); if (r.status === 'SUCCESS') { Lv.beep(); return render(); } if (r.status === 'FAILED' || r.status === 'CANCELLED') { Lv.toast(r.message || 'The customer did not complete the payment.', 'error', 5000); return render(); } const el = $('#pw'); if (el) el.lastElementChild.textContent = r.message || 'Waiting for the customer to enter their PIN...'; } catch (e) { /* keep polling */ }

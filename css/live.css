@@ -188,11 +188,20 @@ label.lbl{display:block;font-weight:700;font-size:13px;margin:0 0 6px;color:var(
 
 /* Dark map: OSM has no dark style, so invert the light tiles */
 .lv-tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9); }
-/* STK push waiting animation (same as q.html) */
-.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 20px;position:relative;transform-origin:50% 65%;animation:ring 1.8s ease-in-out infinite;box-shadow:0 8px 24px rgba(31,157,85,.22)}
-.phone-anim svg{width:40px;height:40px;position:relative;z-index:1}
-.phone-anim:before,.phone-anim:after{content:'';position:absolute;inset:0;border-radius:inherit;border:2px solid currentColor;opacity:0;pointer-events:none;animation:ripple 1.8s ease-out infinite}
-.phone-anim:after{animation-delay:.6s}
-@keyframes ring{0%,55%,100%{transform:rotate(0) translateY(0)}6%,18%,30%,42%{transform:rotate(-12deg) translateY(-2px)}12%,24%,36%,48%{transform:rotate(12deg) translateY(-2px)}}
-@keyframes ripple{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.75);opacity:0}}
+/* STK push waiting animation (identical to q.html) */
+.wait{text-align:center;padding:10px 0 4px}
+.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 16px;position:relative;animation:ring 1.6s infinite}
+.phone-anim svg{width:40px;height:40px}
+@keyframes ring{0%,100%{transform:rotate(0)}10%,30%{transform:rotate(-8deg)}20%,40%{transform:rotate(8deg)}50%{transform:rotate(0)}}
+.serif{font-family:inherit;font-weight:800;letter-spacing:0}
 .prog{height:5px;background:#e4e8eb;border-radius:9px;overflow:hidden;margin:14px 0 0}.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width 1s linear}
+
+/* in-app live navigation map */
+.mapscr .gps{top:calc(150px + env(safe-area-inset-top))}
+#turn{position:absolute;left:12px;right:12px;top:calc(72px + env(safe-area-inset-top));z-index:500;pointer-events:none}
+.turn{display:flex;align-items:center;gap:12px;background:#0E1114;color:#fff;border-radius:16px;padding:10px 14px;box-shadow:0 8px 22px rgba(0,0,0,.35);animation:turnin .25s ease}
+.turn .tic{width:46px;height:46px;border-radius:12px;background:var(--o);display:grid;place-items:center;flex:none}.turn .tic svg{width:30px;height:30px;transition:transform .3s}
+.turn .tx{min-width:0}.turn .tx b{display:block;font-size:22px;font-weight:800;line-height:1.1}.turn .tx span{display:block;font-size:13.5px;color:#d5dbe0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@keyframes turnin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.fab.on{background:var(--o);color:#fff}
+.livebadge{display:inline-block;background:#1F9D55;color:#fff;font-size:10px;font-weight:800;letter-spacing:.5px;padding:2px 6px;border-radius:6px;margin-right:6px;vertical-align:1px;animation:pl 1.6s infinite}

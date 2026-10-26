@@ -171,11 +171,11 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 .okring{width:96px;height:96px;border-radius:50%;background:var(--o);color:#fff;display:grid;place-items:center;margin:8px auto 16px;animation:pop .45s cubic-bezier(.2,1.4,.4,1);box-shadow:0 12px 30px rgba(242,106,33,.4)}
 .okring svg{width:50px;height:50px;stroke-width:3}
 @keyframes pop{from{transform:scale(.3);opacity:0}}
-.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 20px;position:relative;transform-origin:50% 65%;animation:ring 1.8s ease-in-out infinite;box-shadow:0 8px 24px rgba(31,157,85,.22)}
-.phone-anim svg{width:40px;height:40px;position:relative;z-index:1}
-.phone-anim:before,.phone-anim:after{content:'';position:absolute;inset:0;border-radius:inherit;border:2px solid currentColor;opacity:0;pointer-events:none;animation:ripple 1.8s ease-out infinite}
-.phone-anim:after{animation-delay:.6s}
-@keyframes ripple{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.75);opacity:0}}
+.wait{text-align:center;padding:10px 0 4px}
+.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 16px;position:relative;animation:ring 1.6s infinite}
+.phone-anim svg{width:40px;height:40px}
+.serif{font-family:inherit;font-weight:800;letter-spacing:0}
+.prog{height:5px;background:#e4e8eb;border-radius:9px;overflow:hidden;margin:14px 0 0}.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width 1s linear}
 @keyframes ring{0%,100%{transform:rotate(0)}10%,30%{transform:rotate(-8deg)}20%,40%{transform:rotate(8deg)}50%{transform:rotate(0)}}
 .prog{height:5px;background:#e4e8eb;border-radius:9px;overflow:hidden;margin:14px 0 0}.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width 1s linear}
 .center{text-align:center}
@@ -704,12 +704,12 @@ async function payOrder(o) {
 /* STK push waiting sheet, shared by delivery orders, table bookings and room deposits */
 /* shown the instant the STK push is requested (before the server answers) */
 function sendingSheet(amount) {
-  return sheet('<div class="bd center" style="padding-top:26px"><div class="phone-anim">' + ic('phone') + '</div><h2>Sending request to your phone…</h2>' + (amount ? '<p class="muted" style="margin:6px 0 0">Enter your M-PESA PIN to pay <b>' + money(amount) + '</b> when the prompt appears.</p>' : '') + '<div class="prog"><i></i></div><p class="fine" style="margin-top:10px">Please wait a moment.</p></div>', null, true);
+  return sheet(shd('M-PESA payment') + '<div class="bd wait"><div class="phone-anim">' + ic('phone') + '</div><h3 class="serif" style="font-size:20px">Sending request to your phone…</h3><div style="margin:18px auto 0" class="spin"></div></div>', null, true);
 }
 function waitPay(ref, o) {
   var n = 0, max = 45, done = false;
-  var m = sheet('<div class="bd center" style="padding-top:26px"><div class="phone-anim">' + ic('phone') + '</div><h2>Check your phone</h2><p class="muted" style="margin:6px 0 0">Enter your M-PESA PIN to pay <b>' + money(o.amount) + '</b>.</p><div class="prog"><i id="pg"></i></div><p class="fine" id="wm" style="margin-top:10px">Waiting for payment…</p></div><div class="fx"><button class="btn ghost" id="wc">Close</button></div>', null, true);
-  $('#wc', m).onclick = function () { done = true; clearInterval(t); closeSheet(); if (o.onClose) o.onClose(); };
+  var m = sheet(shd('M-PESA payment') + '<div class="bd wait"><div class="phone-anim">' + ic('phone') + '</div><h3 class="serif" style="font-size:20px">Check your phone</h3><p style="margin:6px 0 0;color:var(--ink2)">Enter your M-PESA PIN on your phone to pay <b>' + money(o.amount) + '</b>.</p><div class="prog"><i id="pg"></i></div><p class="fine" style="margin-top:10px">Do not close this page. It takes a few seconds after you enter your PIN.</p></div>', null, true);
+  $('.x', m).onclick = function () { done = true; clearInterval(t); closeSheet(); if (o.onClose) o.onClose(); };
   var pg0 = $('#pg', m); if (pg0) setTimeout(function () { pg0.style.width = '100%'; pg0.style.transitionDuration = (max * 3.5) + 's'; }, 50);
   var t = setInterval(async function () {
     if (done) return; n++;

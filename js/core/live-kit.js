@@ -200,9 +200,18 @@
   function map(el, { theme = 'light', center = [-1.2921, 36.8219], zoom = 13, controls = false } = {}) {
     if (!window.L) { el.innerHTML = '<div class="lv-nomap">Map could not load. Check your internet connection.</div>'; return null; }
     const L = window.L; const m = L.map(el, { zoomControl: controls, attributionControl: true, tap: true }).setView(center, zoom);
-    L.tileLayer(TILE_URL(), { maxZoom: 19, attribution: TILE_ATTR(), className: theme === 'dark' ? 'lv-tiles-dark' : '' }).addTo(m);
-    const markers = {}; let line = null, trail = null, user = false;
-    m.on('dragstart zoomstart', () => { user = true; });
+    const LAYERS = {
+      street: () => L.tileLayer(TILE_URL(), { maxZoom: 19, attribution: TILE_ATTR() }),
+      dark: () => L.tileLayer(TILE_URL(), { maxZoom: 19, attribution: TILE_ATTR(), className: 'lv-tiles-dark' }),
+      sat: () => L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles &copy; Esri' }),
+    };
+    let base = null, baseName = '';
+    const setMode = (n) => { if (!LAYERS[n]) n = 'street'; if (n === baseName) return baseName; if (base) m.removeLayer(base); base = LAYERS[n]().addTo(m); base.bringToBack(); baseName = n; return n; };
+    setMode(theme === 'dark' ? 'dark' : 'street');
+    const markers = {}; let line = null, trail = null, user = false, casing = null, accC = null, progr = false, userCb = null;
+    const prog = (ms) => { progr = true; setTimeout(() => { progr = false; }, ms); };
+    m.on('dragstart', () => { user = true; userCb && userCb(); });
+    m.on('zoomstart', () => { if (!progr) user = true; });
     setTimeout(() => m.invalidateSize(), 120);
     const api = {
       raw: m,
@@ -219,8 +228,23 @@
       drop(id) { if (markers[id]) { m.removeLayer(markers[id].m); delete markers[id]; } },
       clear(keep = []) { Object.keys(markers).forEach((k) => { if (!keep.includes(k)) api.drop(k); }); },
       route(points, { color = '#F26A21', dashed = false } = {}) {
-        if (line) { m.removeLayer(line); line = null; }
-        if (points && points.length > 1) line = L.polyline(points.map((p) => [p.lat, p.lng]), { color, weight: 5, opacity: 0.9, dashArray: dashed ? '2 10' : null, lineCap: 'round' }).addTo(m);
+        if (!points || points.length < 2) { if (line) { m.removeLayer(line); line = null; } if (casing) { m.removeLayer(casing); casing = null; } return; }
+        const ll = points.map((p) => [p.lat, p.lng]);
+        if (!casing) casing = L.polyline(ll, { color: '#fff', weight: 10, opacity: 0.95, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(m); else casing.setLatLngs(ll);
+        if (!line) line = L.polyline(ll, { color, weight: 6, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(m); else line.setLatLngs(ll);
+        line.setStyle({ color, dashArray: dashed ? '2 10' : null }); casing.setStyle({ opacity: dashed ? 0 : 0.95 });
+      },
+      mode: setMode, modeName: () => baseName,
+      onUser(fn) { userCb = fn; },
+      /** smooth camera follow; offsetY shifts the rider below centre like Uber / Google navigation */
+      cam(pos, zoom, dur = 0.9, offsetY = 0) {
+        if (!pos) return; const z = zoom || m.getZoom(); let c = L.latLng(pos.lat, pos.lng);
+        if (offsetY) { const pt = m.project(c, z); pt.y -= offsetY; c = m.unproject(pt, z); }
+        prog(dur * 1000 + 200); m.setView(c, z, { animate: true, duration: dur, easeLinearity: 0.4, noMoveStart: true });
+      },
+      acc(pos, meters) {
+        if (!pos || !meters || meters > 200) { if (accC) { m.removeLayer(accC); accC = null; } return; }
+        if (!accC) accC = L.circle([pos.lat, pos.lng], { radius: meters, color: '#3B82F6', weight: 1, opacity: 0.35, fillColor: '#3B82F6', fillOpacity: 0.08, interactive: false }).addTo(m); else { accC.setLatLng([pos.lat, pos.lng]); accC.setRadius(meters); }
       },
       trail(points) {
         if (trail) { m.removeLayer(trail); trail = null; }
@@ -228,8 +252,8 @@
       },
       fit(pts, pad = 60, force = false) {
         const v = (pts || []).filter((p) => p && p.lat != null); if (!v.length || (user && !force)) return;
-        if (v.length === 1) return m.setView([v[0].lat, v[0].lng], Math.max(m.getZoom(), 16), { animate: true });
-        m.fitBounds(L.latLngBounds(v.map((p) => [p.lat, p.lng])), { padding: [pad, pad], maxZoom: 17, animate: true });
+        if (v.length === 1) { prog(900); return m.setView([v[0].lat, v[0].lng], Math.max(m.getZoom(), 16), { animate: true }); }
+        prog(900); m.fitBounds(L.latLngBounds(v.map((p) => [p.lat, p.lng])), { padding: [pad, pad], maxZoom: 17, animate: true });
       },
       follow() { user = false; }, size() { setTimeout(() => m.invalidateSize(), 60); }, destroy() { try { m.remove(); } catch (e) { /* gone */ } },
       onClick(fn) { m.on('click', (e) => fn({ lat: e.latlng.lat, lng: e.latlng.lng })); },
@@ -237,7 +261,7 @@
     function flip(mm, dir) { mm.dir = dir; const el = mm.m.getElement && mm.m.getElement(); const c = el && el.querySelector('.core'); if (c) c.style.setProperty('--flip', dir); }
     function animate(mm, to) {
       const from = mm.cur; if (!from || (from[0] === to[0] && from[1] === to[1])) return;
-      if (mm.kind === 'rider' && Math.abs(to[1] - from[1]) > 1e-6) flip(mm, to[1] < from[1] ? -1 : 1); const t0 = performance.now(), dur = 1400;
+      if (mm.kind === 'rider' && Math.abs(to[1] - from[1]) > 1e-6) flip(mm, to[1] < from[1] ? -1 : 1); const t0 = performance.now(), dur = 1100;
       cancelAnimationFrame(mm.raf);
       const step = (t) => { const k = Math.min(1, (t - t0) / dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; mm.m.setLatLng([from[0] + (to[0] - from[0]) * e, from[1] + (to[1] - from[1]) * e]); if (k < 1) mm.raf = requestAnimationFrame(step); else mm.cur = to; };
       mm.cur = to; mm.raf = requestAnimationFrame(step);
