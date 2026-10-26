@@ -697,11 +697,15 @@ VIEWS.payment = function () {
   };
 };
 async function payOrder(o) {
-  var phone = DT.mpesaPhone || DT.phone;
+  var phone = DT.mpesaPhone || DT.phone; sendingSheet(o.pay && o.pay.amountDue);
   try { var p = await call('/delivery/' + o.trackKey + '/pay', 'POST', { payerPhone: phone }); waitPay(p.reference, { amount: p.amount, onOk: function () { stack = []; cur = { v: 'confirmed', p: { key: o.trackKey, paid: true } }; render(); }, onClose: function () { stack = []; cur = { v: 'track', p: { key: o.trackKey } }; render(); } }); }
-  catch (e) { toast(e.message, true); stack = []; cur = { v: 'track', p: { key: o.trackKey } }; render(); }
+  catch (e) { closeSheet(); toast(e.message, true); stack = []; cur = { v: 'track', p: { key: o.trackKey } }; render(); }
 }
 /* STK push waiting sheet, shared by delivery orders, table bookings and room deposits */
+/* shown the instant the STK push is requested (before the server answers) */
+function sendingSheet(amount) {
+  return sheet('<div class="bd center" style="padding-top:26px"><div class="phone-anim">' + ic('phone') + '</div><h2>Sending request to your phone…</h2>' + (amount ? '<p class="muted" style="margin:6px 0 0">Enter your M-PESA PIN to pay <b>' + money(amount) + '</b> when the prompt appears.</p>' : '') + '<div class="prog"><i></i></div><p class="fine" style="margin-top:10px">Please wait a moment.</p></div>', null, true);
+}
 function waitPay(ref, o) {
   var n = 0, max = 45, done = false;
   var m = sheet('<div class="bd center" style="padding-top:26px"><div class="phone-anim">' + ic('phone') + '</div><h2>Check your phone</h2><p class="muted" style="margin:6px 0 0">Enter your M-PESA PIN to pay <b>' + money(o.amount) + '</b>.</p><div class="prog"><i id="pg"></i></div><p class="fine" id="wm" style="margin-top:10px">Waiting for payment…</p></div><div class="fx"><button class="btn ghost" id="wc">Close</button></div>', null, true);
@@ -733,9 +737,9 @@ function payPrompt(title, amount, phone, startFn, o) {
   sheet(shd(title) + '<div class="bd"><div class="card" style="background:var(--ol);border-color:#fbd5bd"><div class="tot" style="padding:0"><span>Amount to pay</span><b style="font-size:20px">' + money(amount) + '</b></div></div><label class="lbl">M-PESA number<div class="phonef"><span>+254</span><input id="pp" type="tel" inputmode="numeric" placeholder="712 345 678" value="' + E(localPhone(phone)) + '"></div></label><div class="fine" style="margin-top:8px">You will get a prompt on your phone to enter your M-PESA PIN.</div><div class="err" id="er"></div></div><div class="fx"><button class="btn ghost" data-close>Cancel</button><button class="btn green" id="go">' + ic('phone') + ' Send M-PESA prompt</button></div>', function (m) {
     $('#go', m).onclick = async function () {
       var b = this, v = localPhone($('#pp', m).value); if (v.length !== 9) return $('#er', m).textContent = 'Enter a valid Safaricom number.';
-      b.disabled = true; b.textContent = 'Sending…';
-      try { var r = await startFn('0' + v); closeSheet(); waitPay(r.reference, { amount: r.amount || amount, onOk: o.onOk, onClose: o.onClose, retry: function () { payPrompt(title, amount, '0' + v, startFn, o); } }); }
-      catch (e) { b.disabled = false; b.innerHTML = ic('phone') + ' Send M-PESA prompt'; $('#er', m).textContent = e.message; }
+      b.disabled = true; sendingSheet(amount);
+      try { var r = await startFn('0' + v); waitPay(r.reference, { amount: r.amount || amount, onOk: o.onOk, onClose: o.onClose, retry: function () { payPrompt(title, amount, '0' + v, startFn, o); } }); }
+      catch (e) { payPrompt(title, amount, '0' + v, startFn, o); var er = $('#er'); if (er) er.textContent = e.message; }
     };
   });
 }

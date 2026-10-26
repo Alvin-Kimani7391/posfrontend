@@ -420,17 +420,25 @@
       bindBack(); $$('[data-m]').forEach((b) => b.onclick = () => { method = b.dataset.m; paint(); });
       const tn = $('#tn'); if (tn) tn.oninput = () => { const v = Number(tn.value || 0), ch = v - s.amountDue; $('#chg').textContent = ch > 0 ? 'Give back change: ' + money(ch, cur) : ch < 0 ? 'Less than the amount due.' : 'Exact amount. No change to give.'; };
       const cf = $('#cf'); if (cf) cf.onclick = async () => {
-        busy(cf, true, 'Please wait...');
+        let sentUi = false; busy(cf, true, 'Please wait...');
         try {
-          if (method === 'MPESA') { const ph = $('#ph').value.trim(); if (ph.length < 9) { busy(cf, false); return Lv.toast('Enter a valid Safaricom number', 'warn'); } await A.post(`/rider/deliveries/${id}/payment/mpesa`, { phone: ph }); Lv.toast('M-PESA request sent', 'ok'); render(); }
+          if (method === 'MPESA') { const ph = $('#ph').value.trim(); if (ph.length < 9) { busy(cf, false); return Lv.toast('Enter a valid Safaricom number', 'warn'); } sentUi = true; paySending(s, ph); await A.post(`/rider/deliveries/${id}/payment/mpesa`, { phone: ph }); Lv.toast('M-PESA request sent', 'ok'); render(); }
           else { const v = Number($('#tn').value); if (!(v >= s.amountDue)) { busy(cf, false); return Lv.toast('The customer gave less than ' + money(s.amountDue, cur), 'warn'); } await A.post(`/rider/deliveries/${id}/payment/cash`, { tendered: v }); Lv.beep(); render(); }
-        } catch (e) { busy(cf, false); err(e); if (['ALREADY_PAID', 'ALREADY_COLLECTED', 'MPESA_IN_PROGRESS'].includes(e.code)) render(); }
+        } catch (e) { busy(cf, false); err(e); if (sentUi || ['ALREADY_PAID', 'ALREADY_COLLECTED', 'MPESA_IN_PROGRESS'].includes(e.code)) render(); }
       };
     };
     paint();
   }
-  async function payWait(id, s, my) {
+  function stkCss() {
     if (!document.getElementById('stk-anim')) { const st = document.createElement('style'); st.id = 'stk-anim'; st.textContent = `.phone-anim{width:84px;height:84px;border-radius:26px;background:var(--okl);color:var(--ok);display:grid;place-items:center;margin:8px auto 20px;position:relative;transform-origin:50% 65%;animation:ring 1.8s ease-in-out infinite;box-shadow:0 8px 24px rgba(31,157,85,.22)}\n.phone-anim svg{width:40px;height:40px;position:relative;z-index:1}\n.phone-anim:before,.phone-anim:after{content:'';position:absolute;inset:0;border-radius:inherit;border:2px solid currentColor;opacity:0;pointer-events:none;animation:ripple 1.8s ease-out infinite}\n.phone-anim:after{animation-delay:.6s}\n@keyframes ring{0%,55%,100%{transform:rotate(0) translateY(0)}6%,18%,30%,42%{transform:rotate(-12deg) translateY(-2px)}12%,24%,36%,48%{transform:rotate(12deg) translateY(-2px)}}\n@keyframes ripple{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.75);opacity:0}}\n.prog{height:5px;background:#e4e8eb;border-radius:9px;overflow:hidden;margin:14px 0 0}.prog i{display:block;height:100%;background:var(--ok);width:0;transition:width 1s linear}`; document.head.appendChild(st); }
+  }
+  /* shown the instant the rider taps "Send M-PESA request", before the server answers */
+  function paySending(s, ph) {
+    stkCss();
+    app.innerHTML = top('Payment', { back: false }) + `<div class="view nonav"><div class="pad center" style="padding-top:60px"><div class="phone-anim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div><h2>Sending M-PESA request…</h2><p class="muted" style="margin:8px 0 6px">${money(s.amountDue, s.currency)} to <b>${esc(ph)}</b></p><p class="fine">Ask the customer to enter their M-PESA PIN when the prompt appears.</p><div class="prog"><i></i></div></div></div>`;
+  }
+  async function payWait(id, s, my) {
+    stkCss();
     const ref = s.collection && s.collection.reference; let n = 0;
     app.innerHTML = top('Payment', { back: true }) + `<div class="view nonav"><div class="pad center" style="padding-top:60px"><div class="phone-anim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div><h2>Waiting for the customer</h2><p class="muted" style="margin:8px 0 6px">${money(s.amountDue, s.currency)} requested from <b>${esc(s.customer.mpesaPhone || s.customer.phone || 'the customer')}</b></p><p class="fine">Ask them to check their phone and enter their M-PESA PIN.</p><div class="prog"><i id="pg"></i></div><div class="sp"></div><div id="pw" class="note info" style="text-align:left">${ic('clock')}<div>Checking payment...</div></div></div></div><div class="cta"><button class="btn ghost" id="rf">Check now</button></div>`; bindBack();
     const check = async () => {
