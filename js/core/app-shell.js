@@ -66,7 +66,9 @@
     { key: 'hx-reports',      group: 'Reports & setup', label: 'Reports',         icon: 'reports',  href: 'hx-reports.html',      permAny: ['restaurant.reports.view', 'accommodation.reports.view'], feature: ['restaurantOrdering', 'accommodation'] },
     { key: 'hx-expenses',     page: 'expenses',  group: 'Reports & setup', label: 'Expenses', icon: 'wallet', href: 'expenses.html', permission: 'expenses.view' },
     { key: 'hx-setup',        group: 'Reports & setup', label: 'Setup guide',     icon: 'flag',   href: 'hx-setup.html',        permAny: ['restaurant.settings.manage', 'restaurant.tables.manage', 'restaurant.menu.manage', 'accommodation.rooms.manage'], feature: ['restaurantOrdering', 'accommodation'] },
-    { key: 'hx-restaurant-settings', group: 'Reports & setup', label: 'Restaurant settings', icon: 'sliders', href: 'hx-restaurant-settings.html', permAny: ['restaurant.settings.view', 'accommodation.settings.view', 'settings.update'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-operations',   group: 'Reports & setup', label: 'Devices & printing', icon: 'printer', href: 'hx-operations.html', permAny: ['restaurant.settings.view'], feature: ['restaurantOrdering'] },
+    { key: 'hx-settings',     group: 'Reports & setup', label: 'Service settings',icon: 'sliders',  href: 'hx-settings.html',     permAny: ['restaurant.settings.view', 'accommodation.settings.view'], feature: ['restaurantOrdering', 'accommodation'] },
+    { key: 'hx-services',     group: 'Reports & setup', label: 'Services & system check', icon: 'server', href: 'hx-services.html', permission: 'settings.update' },
     { key: 'products', hxHide: true,      label: 'Products',           icon: 'tag',       href: 'products.html',      permission: 'products.view' },
     { key: 'inventory', hxHide: true,     label: 'Inventory',          icon: 'inventory', href: 'inventory.html',     permission: 'inventory.view', wsLabel: 'Wholesale inventory' },
     // Wholesale is no longer a separate section. For businesses with warehouses (feature multiWarehouse) the normal pages
@@ -97,7 +99,7 @@
     { key: 'reports', hxHide: true,       label: 'Reports',            icon: 'reports',   href: 'reports.html',       permission: 'reports.view' },
     { key: 'audit',         label: 'Audit log',          icon: 'audit',     href: 'audit-logs.html',    permission: 'audit.view' },
     { key: 'cash',          label: 'Registers & Shifts', icon: 'cash',      href: 'cash-register.html', permission: 'registers.view' },
-    { key: 'offline', hxHide: true,       label: 'Offline review',     icon: 'wifiOff',     href: 'offline-review.html', permission: 'offline.review' },
+    { key: 'offline',                label: 'Offline review',     icon: 'wifiOff',     href: 'offline-review.html', permission: 'offline.review' },
 
     { key: 'branches',      label: 'Branches',           icon: 'building',     href: 'branches.html',      permission: 'branches.view' },
     { key: 'employees', hxHide: true,     label: 'Employees',          icon: 'employees', href: 'employees.html',     permission: 'employees.view' },

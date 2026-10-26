@@ -3,10 +3,12 @@
   const esc = window.UI.escapeHtml;
   const fm = (n) => window.UI.formatMoney(n);
   const $ = (id) => document.getElementById(id);
-  const TABS = [['mpesa', 'M-PESA payments'], ['sales', 'Sales to review'], ['quarantine', 'Held sales'], ['shifts', 'Shifts']];
-  const COUNT = { mpesa: 'pendingMpesa', sales: 'pendingSales', quarantine: 'heldItems', shifts: 'pendingShifts' };
-  const URLS = { mpesa: '/offline/review/mpesa', sales: '/offline/review/sales', quarantine: '/offline/review/quarantine', shifts: '/offline/review/shifts' };
-  const state = { tab: 'mpesa', page: 1 };
+  const HX = () => { try { return !!window.AppShell.isHospitality(); } catch (e) { return false; } };
+  const RTAB = ['restaurant', 'Restaurant & rooms'];
+  const tabs = () => (HX() ? [RTAB, ['mpesa', 'M-PESA payments'], ['sales', 'Sales to review'], ['quarantine', 'Held sales'], ['shifts', 'Shifts']] : [['mpesa', 'M-PESA payments'], ['sales', 'Sales to review'], ['quarantine', 'Held sales'], ['shifts', 'Shifts']]);
+  const COUNT = { restaurant: 'restaurantOps', mpesa: 'pendingMpesa', sales: 'pendingSales', quarantine: 'heldItems', shifts: 'pendingShifts' };
+  const URLS = { restaurant: '/restaurant/offline/ops', mpesa: '/offline/review/mpesa', sales: '/offline/review/sales', quarantine: '/offline/review/quarantine', shifts: '/offline/review/shifts' };
+  const state = { tab: HX() ? 'restaurant' : 'mpesa', page: 1, rf: 'REVIEW' };
   let el; let summary = {};
 
   document.addEventListener('DOMContentLoaded', init);
@@ -22,8 +24,9 @@
 
   async function refresh() {
     try { summary = (await window.Api.get('/offline/review/summary')).data; } catch { summary = {}; }
+    if (HX()) { try { summary.restaurantOps = (await window.Api.get('/restaurant/offline/ops', { status: 'CONFLICT', reviewed: 'false', limit: 1 })).data.total; } catch { summary.restaurantOps = 0; } }
     $('or-alert').innerHTML = summary.staleTills ? `<div class="form-alert form-alert-error" style="margin-bottom:var(--space-3)">${summary.staleTills} till(s) hold unsynced sales and have not contacted the server for 6+ hours. Check they are online, or block a lost till under Settings.</div>` : '';
-    $('or-tabs').innerHTML = TABS.map(([k, l]) => `<button class="tab-btn ${k === state.tab ? 'active' : ''}" data-t="${k}">${l}${summary[COUNT[k]] ? ` <span class="badge badge-danger">${summary[COUNT[k]]}</span>` : ''}</button>`).join('');
+    $('or-tabs').innerHTML = tabs().map(([k, l]) => `<button class="tab-btn ${k === state.tab ? 'active' : ''}" data-t="${k}">${l}${summary[COUNT[k]] ? ` <span class="badge badge-danger">${summary[COUNT[k]]}</span>` : ''}</button>`).join('');
     $('or-tabs').querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => { state.tab = b.dataset.t; state.page = 1; refresh(); }));
     load();
   }
@@ -53,7 +56,20 @@
     try { await window.Api.post(url, body); window.UI.toast.success(ok); refresh(); } catch (e) { window.UI.toast.error(e.message); }
   }
 
+  const TYPE = { openShift: 'Open cash shift', createOrder: 'Open order', addItems: 'Add items', sendOrder: 'Send to kitchen', itemStatus: 'Kitchen status', handoff: 'Handed to waiter', serve: 'Serve', cancelItem: 'Cancel item', cancelOrder: 'Cancel order', generateBill: 'Make bill', pay: 'Payment', addTip: 'Tip', receiveStock: 'Receive stock', waste: 'Waste', adjustStock: 'Stock adjustment' };
+  const ST = { APPLIED: ['badge-success', 'Applied'], CONFLICT: ['badge-danger', 'Needs a decision'], PENDING: ['badge-warning', 'Waiting'] };
   const COLS = {
+    restaurant: {
+      head: ['Happened', 'Step', 'By', 'Status', 'What went wrong', ''],
+      row: (o) => `<td class="text-sm">${o.occurredAt ? window.UI.formatDateTime(o.occurredAt) : '-'}</td><td class="cell-primary">${esc(TYPE[o.type] || o.type)}</td><td class="text-sm">${esc(o.userId?.name || '')}</td>
+        <td><span class="badge ${(ST[o.status] || ST.PENDING)[0]}">${(ST[o.status] || ST.PENDING)[1]}</span>${o.reviewed ? ' <span class="badge badge-neutral">Reviewed</span>' : ''}</td><td class="text-sm" style="white-space:normal;max-width:340px">${esc(o.message || '')}${o.code ? `<br><span class="text-muted">${esc(o.code)}</span>` : ''}</td>
+        <td class="actions"><button class="btn btn-secondary btn-sm" data-a="view">Details</button>${o.status === 'CONFLICT' ? '<button class="btn btn-secondary btn-sm" data-a="retry">Try again</button>' : ''}${o.status === 'CONFLICT' && !o.reviewed ? '<button class="btn btn-primary btn-sm" data-a="review">Mark reviewed</button>' : ''}</td>`,
+      act: async (a, o) => {
+        if (a === 'view') { const m = window.UI.openModal({ title: TYPE[o.type] || o.type, maxWidth: '640px', bodyHtml: `<p class="text-sm">${esc(o.message || 'Applied normally.')}</p><pre style="white-space:pre-wrap;font-size:12px;max-height:60vh;overflow:auto">${esc(JSON.stringify({ result: o.result, step: o.payload }, null, 2))}</pre>`, footerHtml: '<button class="btn btn-secondary" data-c>Close</button>' }); m.querySelector('[data-c]').addEventListener('click', window.UI.closeModal); }
+        if (a === 'review') post(`/restaurant/offline/ops/${o._id}/review`, {}, 'Marked reviewed');
+        if (a === 'retry') { try { const { data } = await window.Api.post(`/restaurant/offline/ops/${o._id}/retry`, {}); const r = (data.results || [])[0] || {}; window.UI.toast[r.ok ? 'success' : 'error'](r.ok ? 'Step applied' : (r.message || 'Still could not be applied')); refresh(); } catch (e) { window.UI.toast.error(e.message); } }
+      },
+    },
     mpesa: {
       head: ['Code', 'Amount', 'Customer', 'Sale', 'Cashier', 'Why it needs you', 'Recorded', ''],
       row: (c) => `<td class="cell-primary pz-mono">${esc(c.mpesaCode)}</td><td>${fm(c.amountCents / 100)}</td><td class="text-sm">${esc(c.payerPhone || '')}<br>${esc(c.payerName || '')}</td>
@@ -101,9 +117,12 @@
 
   async function load() {
     const body = $('or-body'); const cfg = COLS[state.tab];
-    body.innerHTML = `<div class="card"><div class="table-wrap"><table class="table" style="min-width:900px"><thead><tr>${cfg.head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody id="or-tb">${window.UI.skeletonRows(cfg.head.length, 4)}</tbody></table></div><div class="pagination" id="or-pg"></div></div>`;
+    const filt = state.tab === 'restaurant' ? `<div style="margin-bottom:var(--space-3)"><select class="select" id="or-rf" style="max-width:260px"><option value="REVIEW" ${state.rf === 'REVIEW' ? 'selected' : ''}>Needs a decision</option><option value="ALL" ${state.rf === 'ALL' ? 'selected' : ''}>All offline steps</option></select></div>` : '';
+    body.innerHTML = `${filt}<div class="card"><div class="table-wrap"><table class="table" style="min-width:900px"><thead><tr>${cfg.head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody id="or-tb">${window.UI.skeletonRows(cfg.head.length, 4)}</tbody></table></div><div class="pagination" id="or-pg"></div></div>`;
+    if ($('or-rf')) $('or-rf').addEventListener('change', (e) => { state.rf = e.target.value; state.page = 1; load(); });
     try {
-      const { data } = await window.Api.get(URLS[state.tab], { page: state.page, limit: 20, branchId: window.AppShell.getActiveBranchId() || undefined });
+      const extra = state.tab === 'restaurant' && state.rf === 'REVIEW' ? { status: 'CONFLICT', reviewed: 'false' } : {};
+      const { data } = await window.Api.get(URLS[state.tab], { page: state.page, limit: 20, branchId: window.AppShell.getActiveBranchId() || undefined, ...extra });
       const tb = $('or-tb');
       tb.innerHTML = data.items.length ? data.items.map((x, i) => `<tr data-i="${i}">${cfg.row(x)}</tr>`).join('')
         : `<tr><td colspan="${cfg.head.length}">${window.UI.emptyStateHtml({ icon: 'check', title: 'Nothing waiting', message: 'All caught up.' })}</td></tr>`;
