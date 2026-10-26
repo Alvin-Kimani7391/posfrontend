@@ -64,9 +64,19 @@
   async function refreshSnapshot(force) {
     const b = branch(); if (!b || !online()) return;
     if (!force && pending) return;                                     // never wipe local work that has not synced
-    try { const { data } = await NATIVE.get('/restaurant/offline/snapshot', { branchId: b }, { background: true }); fromSnapshot(data); emit('snapshot'); } catch (e) { /* keep the old one */ }
+    try { const { data } = await NATIVE.get('/restaurant/offline/snapshot', { branchId: b }, { background: true }); fromSnapshot(data); cacheImages(data); warm(); emit('snapshot'); } catch (e) { /* keep the old one */ }
   }
 
+  // Re-fetch the screens used recently (cashier desk, manager dashboard...) so their saved copy is fresh before an outage.
+  let warming = false;
+  async function warm() {
+    if (warming || !online()) return; warming = true;
+    try { const rows = await tx('cache', 'readonly', (st) => rq(st.getAll()));       for (const r of rows.filter((x) => Date.now() - x.at < 7 * 864e5 && Date.now() - x.at > 120000).sort((a, b) => b.at - a.at).slice(0, 25)) {
+        if (!online()) break; const [path, qs] = r.k.split('?'); const q = {}; (qs || '').split('&').filter(Boolean).forEach((kv) => { const i = kv.indexOf('='); q[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); });
+        try { const res = await NATIVE.get.call(Api, path, q, { background: true }); cacheSet(r.k, res.data); } catch (e) { /* keep old copy */ }
+      }
+    } catch (e) { /* ignore */ } finally { warming = false; }
+  }
   const emit = (t, d) => { try { window.dispatchEvent(new CustomEvent('hxoffline:' + t, { detail: d })); } catch (e) { /* ignore */ } paint(); };
   const menuItem = (id) => { for (const m of Object.values(S?.snap?.menus || {})) for (const c of m.categories || []) for (const i of c.items || []) if (String(i._id) === String(id)) return i; return null; };
   const svcPct = (type) => { const sc = S.snap.settings?.serviceCharge || {}; return sc.enabled && (sc.orderTypes || []).includes(type) ? Number(sc.percent || 0) : 0; };
@@ -94,7 +104,7 @@
     syncSoon();
     return out;
   }
-  const oref = (id, ops) => (L(id) ? { opId: ops.get(id) } : { orderId: id });
+  const oref = (id) => (L(id) ? { opId: S.orders[id] && S.orders[id].clientOpId } : { orderId: id });   // persisted on the order itself, so it survives page changes
   const opOfLocal = {};                                             // local id -> clientOpId that created it
 
   // ------------------------------------------------------------ offline writes
@@ -131,6 +141,13 @@
     }],
     ['PUT', /^\/restaurant\/kitchen\/orders\/([^/]+)\/items\/([^/]+)$/, (m, b) => setStatus(m[1], [m[2]], b.status)],
     ['POST', /^\/restaurant\/kitchen\/tickets\/([^/]+)\/bump$/, (m, b) => { const t = S.tickets.find((x) => String(x._id) === m[1]); if (!t) throw fail('Ticket not found', 'TICKET_NOT_FOUND', 404); const st = b.status || 'READY'; const ids = (t.items || []).filter((i) => !i.cancelled).map((i) => i.orderItemId); const r = setStatus(t.orderId, ids, st, true); return r.then(() => ok({ ticket: t })); }],
+    ['POST', /^\/restaurant\/kitchen\/tickets\/([^/]+)\/expo$/, (m) => {
+      const t = S.tickets.find((x) => String(x._id) === m[1]); if (!t) throw fail('Ticket not found on this till', 'TICKET_NOT_FOUND', 404);
+      const o = S.orders[t.orderId]; const live = (t.items || []).filter((i) => !i.cancelled);
+      if (live.some((i) => !['READY', 'SERVED'].includes(i.status))) throw fail(`${live.filter((i) => !['READY', 'SERVED'].includes(i.status)).length} item(s) are not ready yet`, 'ITEMS_NOT_READY', 409);
+      t.expoConfirmedAt = new Date().toISOString();
+      return enqueue('handoff', { orderRef: oref(t.orderId), itemRefs: o ? refsOf(o, live.map((i) => i.orderItemId)) : live.map((i) => ({ itemId: i.orderItemId })) }, () => ok({ ticket: t }, 'Handed to the waiter'));
+    }],
     ['POST', /^\/restaurant\/orders\/([^/]+)\/ready$/, (m, b) => { const o = S.orders[m[1]]; const ids = (b.itemIds && b.itemIds.length ? b.itemIds : (o?.items || []).filter((i) => ['PENDING', 'ACCEPTED', 'PREPARING'].includes(i.status)).map((i) => i._id)); return setStatus(m[1], ids, 'READY').then(() => ok({ order: S.orders[m[1]] })); }],
     ['POST', /^\/restaurant\/orders\/([^/]+)\/serve$/, (m, b) => {
       const o = S.orders[m[1]]; if (!o) throw fail('Order not found on this till', 'ORDER_NOT_FOUND', 404);
@@ -153,7 +170,7 @@
       const existing = Object.values(S.bills).find((x) => x.orderId === o._id && !['VOID', 'PAID'].includes(x.status)); if (existing) return ok({ bill: existing });
       const lines = o.items.filter((i) => i.status !== 'CANCELLED').map((i) => ({ orderItemId: i._id, name: i.name, quantity: i.quantity, unitPrice: i.unitPrice, total: i.unitPrice * i.quantity }));
       const bill = billOf(o, lines, { label: b.label }); S.bills[bill._id] = bill; o.billStatus = 'OPEN'; syncTable(o); const t = o.tableId && tableOf(o.tableId); if (t) t.status = 'AWAITING_BILL';
-      return enqueue('generateBill', { orderRef: oref(o._id, opOfLocal2()), payload: { label: b.label, customerId: b.customerId } }, (op) => { opOfLocal[bill._id] = op.clientOpId; return ok({ bill }, 'Bill ready (offline)'); });
+      return enqueue('generateBill', { orderRef: oref(o._id, opOfLocal2()), payload: { label: b.label, customerId: b.customerId } }, (op) => { bill.clientOpId = op.clientOpId; return ok({ bill }, 'Bill ready (offline)'); });
     }],
     ['POST', /^\/restaurant\/bills\/([^/]+)\/pay$/, (m, b) => {
       const bill = S.bills[m[1]]; if (!bill) throw fail('Bill not found on this till', 'BILL_NOT_FOUND', 404);
@@ -163,10 +180,10 @@
       bill.status = bill.balance <= 0 ? 'PAID' : 'PARTIAL';
       const o = S.orders[bill.orderId]; let receipt = null;
       if (bill.status === 'PAID') { receipt = { receiptNumber: bill.billNumber, offline: true }; bill.receiptNumber = receipt.receiptNumber; if (o) { o.billStatus = 'PAID'; if (!Object.values(S.bills).some((x) => x.orderId === o._id && !['PAID', 'VOID'].includes(x.status)) && o.items.every((i) => ['SERVED', 'CANCELLED'].includes(i.status))) { o.status = 'CLOSED'; const t = o.tableId && tableOf(o.tableId); if (t) Object.assign(t, { status: 'CLEANING', currentOrderId: null, order: null }); } } }
-      return enqueue('pay', { billRef: L(bill._id) ? { opId: opOfLocal[bill._id] } : { billId: bill._id }, payload: { customerId: b.customerId, payments: pays.map((p) => ({ method: p.method, amountCents: cents(p.amount), tenderedCents: p.tendered != null ? cents(p.tendered) : undefined, reference: p.reference, network: p.network, payerPhone: p.payerPhone, stayId: p.stayId })) } },
+      return enqueue('pay', { billRef: L(bill._id) ? { opId: bill.clientOpId } : { billId: bill._id }, payload: { customerId: b.customerId, payments: pays.map((p) => ({ method: p.method, amountCents: cents(p.amount), tenderedCents: p.tendered != null ? cents(p.tendered) : undefined, reference: p.reference, network: p.network, payerPhone: p.payerPhone, stayId: p.stayId })) } },
         () => { emit('receipt', { bill: clone(bill), order: o ? clone(o) : null, provisional: true }); return ok({ bill, sale: { receiptNumber: bill.receiptNumber, offline: true }, receipt, change }, 'Payment saved offline. A provisional receipt can be printed; the official one is issued when sync completes.'); });
     }],
-    ['POST', /^\/restaurant\/bills\/([^/]+)\/tips$/, (m, b) => enqueue('addTip', { billRef: L(m[1]) ? { opId: opOfLocal[m[1]] } : { billId: m[1] }, payload: { amountCents: cents(b.amount), method: b.method, reference: b.reference, waiterId: b.waiterId } }, () => ok({ tip: { amount: b.amount } }))],
+    ['POST', /^\/restaurant\/bills\/([^/]+)\/tips$/, (m, b) => enqueue('addTip', { billRef: L(m[1]) ? { opId: S.bills[m[1]] && S.bills[m[1]].clientOpId } : { billId: m[1] }, payload: { amountCents: cents(b.amount), method: b.method, reference: b.reference, waiterId: b.waiterId } }, () => ok({ tip: { amount: b.amount } }))],
     ['POST', /^\/restaurant\/ingredients\/receive$/, (m, b) => {
       (b.lines || []).forEach((l) => bump(b.branchId || branch(), l.ingredientId, Number(l.quantity)));
       return enqueue('receiveStock', { payload: { branchId: b.branchId || branch(), supplierId: b.supplierId, invoiceNumber: b.invoiceNumber, amountPaidCents: b.amountPaid != null ? cents(b.amountPaid) : undefined, notes: b.notes, lines: (b.lines || []).map((l) => ({ ingredientId: l.ingredientId, quantity: l.quantity, unit: l.unit, unitCostCents: cents(l.unitCostCents ?? l.unitCost), batchNumber: l.batchNumber, expiryDate: l.expiryDate, location: l.location })) } }, () => ok({ purchase: { invoiceNumber: b.invoiceNumber, offline: true } }, 'Stock received (offline)'));
@@ -224,11 +241,33 @@
   }
 
   // ------------------------------------------------------------ Api wrapper
+  // Other screens (cashier desk, manager dashboard, shifts, reports...): remember the last answer and show it when the connection is gone.
+  const SKIP = /^\/(auth|sync|health|devices|delivery-live|public)\b|\/stream|\/offline\//;
+  const IMG = /https?:\/\/[^"\s\\]+?\.(?:png|jpe?g|webp|gif|avif|svg)(?:\?[^"\s\\]*)?/gi;
+  async function cacheImages(data) {
+    if (!window.caches) return; try {
+      const urls = [...new Set((JSON.stringify(data) || '').match(IMG) || [])].slice(0, 300); if (!urls.length) return;
+      const cache = await caches.open('tv-media-v1'); const have = new Set((await cache.keys()).map((r) => r.url));
+      for (const u of urls) { if (have.has(u)) continue; try { const res = await fetch(new Request(u, { mode: 'no-cors' })); if (res && (res.ok || res.type === 'opaque')) await cache.put(u, res); } catch (e) { /* later */ } }
+      const keys = await cache.keys(); if (keys.length > 800) for (const k of keys.slice(0, keys.length - 800)) await cache.delete(k);
+    } catch (e) { /* storage full */ }
+  }
+  const staleNote = (at) => { try { let b = document.getElementById('hxo-stale'); if (!b) { b = document.createElement('div'); b.id = 'hxo-stale'; b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:8px;z-index:1400;background:#7c2d12;color:#fff;padding:6px 14px;border-radius:99px;font:600 13px system-ui;box-shadow:0 2px 8px rgba(0,0,0,.3)'; document.body.appendChild(b); } b.textContent = `Offline: showing data saved at ${new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`; clearTimeout(b._t); b._t = setTimeout(() => b.remove(), 6000); } catch (e) { /* no DOM */ } };
+  async function staleGet(path, query) {
+    try { const row = await tx('cache', 'readonly', (st) => rq(st.get(key(path, query)))); if (row) { staleNote(row.at); return { success: true, data: row.v, offline: true, stale: true }; } } catch (e) { /* none */ }
+    throw fail('This screen has not been opened on this device while online, so there is nothing saved to show yet.', 'NOT_CACHED');
+  }
   Api.get = async function (path, query, opts) {
-    if (!R.test(path) || /\/offline\//.test(path)) return NATIVE.get.call(Api, path, query, opts);
+    if (!R.test(path)) {
+      if (SKIP.test(path) || (opts && opts.background)) return NATIVE.get.call(Api, path, query, opts);
+      if (!online()) return staleGet(path, query);
+      try { const r = await NATIVE.get.call(Api, path, query, opts); cacheSet(key(path, query), r.data); cacheImages(r.data); return r; }
+      catch (e) { if (e && e.code === 'NETWORK_ERROR') return staleGet(path, query); throw e; }
+    }
+    if (/\/offline\//.test(path)) return NATIVE.get.call(Api, path, query, opts);
     await loadState();
     if (!online() || (pending && S && GETS.some(([re]) => re.test(path)))) return offlineGet(path, query);   // unsynced work exists only on this till: show it
-    try { const r = await NATIVE.get.call(Api, path, query, opts); cacheSet(key(path, query), r.data); return r; }
+    try { const r = await NATIVE.get.call(Api, path, query, opts); cacheSet(key(path, query), r.data); cacheImages(r.data); return r; }
     catch (e) { if (e && e.code === 'NETWORK_ERROR') return offlineGet(path, query); throw e; }
   };
   const mutate = (method) => async function (path, body, opts) {
@@ -268,14 +307,7 @@
   }
 
   // ------------------------------------------------------------ status chip + provisional print
-  function paint() {
-    let el = document.getElementById('hxo-chip');
-    const issues = window.__hxoIssues || 0;
-    const show = !online() || pending || syncing || issues; if (!el && !show) return;
-    if (!el) { el = document.createElement('button'); el.id = 'hxo-chip'; el.type = 'button'; el.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:1300;border:0;border-radius:999px;padding:8px 14px;font:600 13px system-ui;color:#fff;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25)'; el.onclick = panel; document.body.appendChild(el); }
-    el.hidden = !show; el.style.background = !online() ? '#7c2d12' : issues ? '#b91c1c' : '#1d4ed8';
-    el.textContent = !online() ? `Offline${pending ? ` · ${pending} waiting` : ''}` : syncing ? 'Syncing…' : issues ? `${issues} need attention` : `${pending} waiting to sync`;
-  }
+  function paint() { try { paintBtn(); } catch (e) { /* DOM not ready */ } }
   async function panel() {
     const iss = await issuesAll(); const box = document.createElement('div');
     box.style.cssText = 'position:fixed;inset:0;z-index:2600;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center;padding:16px';
@@ -301,6 +333,116 @@
     setInterval(tick, 5 * 60 * 1000); setTimeout(() => { if (online() && !pending) refreshSnapshot(true); else if (online()) sync(); paint(); }, 2500);
   })();
 
+
+  // ------------------------------------------------------------ SETUP GUIDE (top-bar button + checklist wizard)
+  const PAGES = ['hx-floor.html', 'hx-cashier.html', 'hx-kitchen.html', 'hx-bills.html', 'hx-menu.html', 'hx-stock.html', 'hx-reservations.html', 'hx-delivery.html', 'hx-desk.html', 'hx-rooms.html', 'hx-stays.html', 'hx-housekeeping.html', 'hx-dashboard.html', 'hx-tv.html', 'login.html'];
+  const esc2 = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  async function pagesCached() { if (!window.caches) return { have: 0, total: PAGES.length }; let have = 0; for (const p of PAGES) { try { if (await caches.match(new URL(p, location.href).toString(), { ignoreSearch: true })) have += 1; } catch (e) { /* skip */ } } return { have, total: PAGES.length }; }
+  async function downloadPages(onProgress) { let n = 0; for (const p of PAGES) { try { await fetch(new URL(p, location.href).toString(), { cache: 'reload' }); } catch (e) { /* offline */ } n += 1; onProgress && onProgress(n, PAGES.length); } }
+  async function checks() {
+    const sw = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+    const pg = await pagesCached(); const snap = S && S.snap; const age = snap ? Math.round((Date.now() - S.takenAt) / 60000) : null;
+    let persisted = false; try { persisted = !!(await navigator.storage?.persisted?.()); } catch (e) { /* unsupported */ }
+    let pin = null; try { if (window.Offline && Offline.isReady && Offline.isReady()) { const st = Offline.status(); pin = !!st.enrolled; } } catch (e) { pin = null; }
+    return [
+      { id: 'sw', ok: sw, title: 'This device can open the app with no internet', ok_t: 'Installed. The app opens even when the internet is off.', bad_t: 'Not active yet. Reload this page once while online (and use Chrome/Edge/Safari, not a private window).', action: sw ? null : ['Reload now', () => location.reload()] },
+      { id: 'pages', ok: pg.have >= pg.total - 1, title: 'All restaurant screens are saved on this device', ok_t: `${pg.have} of ${pg.total} screens saved.`, bad_t: `${pg.have} of ${pg.total} saved. Tap download and wait until it finishes.`, action: ['Download screens', async (btn) => { btn.disabled = true; await downloadPages((n, t) => { btn.textContent = `Downloading ${n}/${t}…`; }); }] },
+      { id: 'data', ok: !!snap && age < 24 * 60, title: 'Menu, prices, tables, stock and staff are saved', ok_t: `Saved ${age < 1 ? 'just now' : age + ' min ago'}: ${Object.values(snap?.menus || {})[0]?.categories?.reduce((a, c) => a + c.items.length, 0) || 0} menu items, ${(snap?.floor || []).length} tables, ${(snap?.ingredients || []).length} ingredients, ${(snap?.staff || []).length} staff.`, bad_t: snap ? 'The saved copy is more than a day old. Refresh it.' : 'Nothing saved yet. Tap download (needs internet, takes a few seconds).', action: ['Download now', async (btn) => { btn.disabled = true; btn.textContent = 'Downloading…'; await refreshSnapshot(true); if (!S?.snap) toast('error', 'Could not download. Check the connection and try again.'); }] },
+      { id: 'store', ok: persisted, title: 'Browser will not delete the saved data', ok_t: 'Protected storage is on.', bad_t: 'Ask the browser to keep the data (recommended).', action: ['Protect storage', async () => { try { const g = await navigator.storage.persist(); toast(g ? 'success' : 'warning', g ? 'Storage protected' : 'The browser did not allow it. Installing the app to the home screen usually fixes this.'); } catch (e) { /* unsupported */ } }] },
+      { id: 'pin', ok: pin === true, soft: pin === null, title: 'Staff can sign in with no internet (offline PIN)', ok_t: 'This till is enrolled for offline sign-in.', bad_t: pin === null ? 'Open the Offline button next to this one to set up the offline PIN for this till.' : 'Not enrolled. Open the till offline centre, set up this till and create the offline PIN.', action: ['Set up offline PIN', () => { document.getElementById('hxo-guide')?.remove(); document.getElementById('ofl-top-btn')?.click(); }] },
+    ];
+  }
+  const TIPS = [
+    ['Every device is prepared separately', 'Waiter phones, the kitchen tablet, the cashier and the manager each need this checklist done once while online. Offline, devices cannot see each other: an order taken on a waiter phone shows on the kitchen screen only after that phone reconnects. For a busy kitchen with no internet, take orders on the same tablet the kitchen uses, or on the cashier till.'],
+    ['What keeps working offline', 'Taking orders, sending to the kitchen, kitchen status and bumping, serving, bills, cash / card / M-PESA-code payments, tips, receiving stock, waste, stock adjustments, room-service orders for guests already checked in, and provisional receipts printed from the browser.'],
+    ['What needs internet', 'M-PESA STK prompts, customer credit, deposits, reports, settings, uploading photos, and checking in new guests. The screen tells you when something needs internet.'],
+    ['M-PESA offline', 'Ask the customer for the M-PESA message code and type it as the reference. It is saved as unverified and checked automatically after sync.'],
+    ['Printing', 'The kitchen/receipt server printer needs internet. Offline, the app prints a PROVISIONAL receipt through the browser (set the receipt printer as the default printer). The official receipt is created when sync completes.'],
+    ['Live TV menu', 'Pair each TV once while online. It then keeps showing the menu (pictures included) and switches breakfast/lunch/happy hour by its own clock. Price changes made during an outage reach the TV when the internet returns.'],
+    ['When the internet comes back', 'Do nothing. The orange count turns into "Syncing…", then the green dot. If something could not be applied (for example an item that ran out of stock), it appears under "Needs attention" for a manager to review.'],
+    ['Test before you rely on it', 'When all checks are green: switch the device to airplane mode, open Floor, take a test order, send it, pay it. Then turn the internet back on and watch it sync. Do this once per device.'],
+  ];
+  let allOk = false;
+  async function openGuide() {
+    document.getElementById('hxo-guide')?.remove();
+    const box = document.createElement('div'); box.id = 'hxo-guide';
+    box.style.cssText = 'position:fixed;inset:0;z-index:2700;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center;padding:12px';
+    document.body.appendChild(box);
+    const draw = async () => {
+      const cs = await checks(); const done = cs.filter((c) => c.ok || c.soft).length; allOk = cs.every((c) => c.ok || c.soft); if (allOk) kvSet('guideDone', Date.now());
+      box.innerHTML = `<div style="background:#fff;color:#0f172a;border-radius:16px;max-width:640px;width:100%;max-height:92vh;overflow:auto;font:14px/1.45 system-ui;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><div><h2 style="margin:0 0 4px;font-size:19px">Set up offline mode</h2><p style="margin:0;color:#475569">${online() ? 'You are online: this is the right time to prepare this device.' : 'You are offline now. Steps that need internet are disabled until it returns.'}</p></div><button id="hxo-close" style="border:0;background:#e2e8f0;border-radius:8px;padding:6px 10px;cursor:pointer">Close</button></div>
+        <div style="margin:14px 0;background:#e2e8f0;border-radius:99px;height:8px"><div style="width:${Math.round(done / cs.length * 100)}%;height:8px;border-radius:99px;background:${allOk ? '#0d7a4f' : '#1d4ed8'}"></div></div>
+        <p style="margin:0 0 10px"><b>${allOk ? 'This device is ready to work offline.' : `${done} of ${cs.length} steps done`}</b>${pending ? ` · ${pending} step(s) waiting to sync` : ''}</p>
+        ${cs.map((c, i) => `<div style="display:flex;gap:10px;padding:10px 0;border-top:1px solid #e2e8f0"><div style="flex:none;width:24px;height:24px;border-radius:50%;background:${c.ok ? '#0d7a4f' : c.soft ? '#94a3b8' : '#1d4ed8'};color:#fff;text-align:center;line-height:24px;font-weight:700">${c.ok ? '✓' : i + 1}</div><div style="flex:1"><b>${esc2(c.title)}</b><div style="color:#475569">${esc2(c.ok ? c.ok_t : c.bad_t)}</div>${c.action && (!c.ok || c.id === 'pages' || c.id === 'data') ? `<button data-a="${c.id}" style="margin-top:6px;border:0;border-radius:8px;padding:7px 12px;background:#1d4ed8;color:#fff;cursor:pointer">${esc2(c.ok ? 'Refresh' : c.action[0])}</button>` : ''}</div></div>`).join('')}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><button id="hxo-print" style="border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:7px 12px;cursor:pointer">Print test slip</button><button id="hxo-sync" style="border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:7px 12px;cursor:pointer">Sync now</button></div>
+        <h3 style="margin:14px 0 6px;font-size:15px">How offline mode works</h3>
+        ${TIPS.map(([h, t]) => `<details style="border-top:1px solid #e2e8f0;padding:8px 0"><summary style="cursor:pointer;font-weight:600">${esc2(h)}</summary><div style="color:#475569;margin-top:4px">${esc2(t)}</div></details>`).join('')}</div>`;
+      box.querySelector('#hxo-close').onclick = () => { box.remove(); paintBtn(); };
+      box.querySelector('#hxo-sync').onclick = () => { sync(); toast('info', 'Syncing…'); };
+      box.querySelector('#hxo-print').onclick = () => { const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;width:0;height:0;border:0'; document.body.appendChild(f); f.contentDocument.write('<html><body style="font:13px monospace;width:280px"><h3 style="text-align:center">PRINTER TEST</h3><p style="text-align:center">Provisional receipts will print here when offline.</p><hr>Item x1 <span style="float:right">0.00</span></body></html>'); f.contentDocument.close(); setTimeout(() => { try { f.contentWindow.print(); } catch (e) { /* blocked */ } setTimeout(() => f.remove(), 2000); }, 300); };
+      cs.forEach((c) => { const b = box.querySelector(`[data-a="${c.id}"]`); if (b && c.action) b.onclick = async () => { await c.action[1](b); await draw(); paintBtn(); }; });
+    };
+    box.addEventListener('click', (e) => { if (e.target === box) box.remove(); });
+    await draw();
+  }
+
+  // ------------------------------------------------------------ ONE offline button -> hub with everything
+  function hubCss() {
+    if (document.getElementById('hxo-css')) return; const st = document.createElement('style'); st.id = 'hxo-css';
+    st.textContent = '#ofl-top-btn,.ofl-chip,#hxo-chip{display:none!important}#hxo-hub{position:fixed;inset:0;z-index:2750;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center;padding:10px;font:14px/1.45 system-ui,sans-serif}#hxo-hub .hc{background:#fff;color:#0f172a;border-radius:16px;max-width:560px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px}#hxo-hub h3{margin:14px 0 6px;font-size:15px}#hxo-hub .g{display:grid;grid-template-columns:1fr 1fr;gap:8px}#hxo-hub button.hb{border:1px solid #cbd5e1;background:#f8fafc;border-radius:10px;padding:10px;text-align:left;cursor:pointer;font:inherit;display:flex;gap:8px;align-items:center}#hxo-hub button.hb:hover{background:#eef2ff}#hxo-hub .ok{color:#0d7a4f}#hxo-hub .no{color:#b45309}@media(max-width:520px){#hxo-hub .g{grid-template-columns:1fr}}';
+    document.head.appendChild(st);
+  }
+  const SV = (d) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:none">${d}</svg>`;
+  const HI = { tour: SV('<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>'), sync: SV('<path d="M20 11a8 8 0 0 0-14-4M4 4v4h4M4 13a8 8 0 0 0 14 4M20 20v-4h-4"/>'), dl: SV('<path d="M12 3v12M7 11l5 5 5-5M4 20h16"/>'), key: SV('<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>'), print: SV('<path d="M7 9V3h10v6M7 17H4v-7h16v7h-3M7 14h10v7H7z"/>'), review: SV('<path d="M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/>'), ok: SV('<path d="M5 12l5 5 9-10"/>'), x: SV('<path d="M6 6l12 12M18 6L6 18"/>') };
+  async function openHub() {
+    hubCss(); document.getElementById('hxo-hub')?.remove(); const box = document.createElement('div'); box.id = 'hxo-hub'; document.body.appendChild(box);
+    const draw = async () => {
+      const cs = await checks(); const iss = await issuesAll(); window.__hxoIssues = iss.length; const snap = S && S.snap;
+      const age = snap ? Math.round((Date.now() - S.takenAt) / 60000) : null; const ready = cs.every((c) => c.ok || c.soft);
+      const state = iss.length ? ['#b91c1c', `${iss.length} step(s) need attention`] : !online() ? ['#ea580c', 'No internet: working offline'] : pending || syncing ? ['#ea580c', syncing ? 'Syncing…' : `${pending} step(s) waiting to sync`] : ready ? ['#0d7a4f', 'Ready to work offline'] : ['#1d4ed8', 'This device still needs setting up'];
+      box.innerHTML = `<div class="hc"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><h2 style="margin:0;font-size:19px">Offline mode</h2><button id="hx-x" class="hb" style="padding:6px 12px">Close</button></div>
+        <div style="display:flex;align-items:center;gap:10px;margin:10px 0;padding:12px;border-radius:12px;background:${state[0]}14"><span style="width:12px;height:12px;border-radius:50%;background:${state[0]};box-shadow:0 0 0 4px ${state[0]}33"></span><div><b>${esc2(state[1])}</b><div style="color:#475569">${online() ? 'Connected to the server.' : 'Everything you do is saved on this device and sent when the internet returns.'}${snap ? ` Menu and data saved ${age < 1 ? 'just now' : age + ' min ago'}.` : ' No data saved yet.'}</div></div></div>
+        <div class="g"><button class="hb" data-h="tour">${HI.tour}<span><b>Setup tour</b><br><small>Step-by-step guide</small></span></button><button class="hb" data-h="sync">${HI.sync}<span><b>Sync now</b><br><small>${pending} waiting</small></span></button><button class="hb" data-h="data">${HI.dl}<span><b>Download latest data</b><br><small>Menu, prices, stock, staff</small></span></button><button class="hb" data-h="pin">${HI.key}<span><b>Offline sign-in PIN</b><br><small>Till offline centre</small></span></button><button class="hb" data-h="print">${HI.print}<span><b>Test print</b><br><small>Provisional receipt</small></span></button><button class="hb" data-h="review">${HI.review}<span><b>Offline review</b><br><small>For managers</small></span></button></div>
+        <h3>Setup checklist</h3>${cs.map((c) => `<div style="display:flex;gap:8px;padding:4px 0"><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? HI.ok : HI.x}</span><span><b>${esc2(c.title)}</b><br><small style="color:#64748b">${esc2(c.ok ? c.ok_t : c.bad_t)}</small></span></div>`).join('')}
+        ${iss.length ? `<h3>Needs attention</h3><p style="color:#475569;margin:0 0 6px">These steps could not be applied by the server. Nothing was deleted. A manager can check them under Offline review.</p>${iss.map((i) => `<div style="padding:8px 0;border-top:1px solid #e2e8f0"><b>${esc2(i.type)}</b>: ${esc2(i.message)} <button class="hb" data-d="${esc2(i.clientOpId)}" style="float:right;padding:4px 10px">Dismiss</button></div>`).join('')}` : ''}
+        <h3>What works offline</h3><div class="g" style="gap:2px 12px"><div><span class="ok">${HI.ok}</span> Orders and kitchen<br><span class="ok">${HI.ok}</span> Bills, cash, card, M-PESA code<br><span class="ok">${HI.ok}</span> Receive stock, waste, adjust<br><span class="ok">${HI.ok}</span> Room-service orders<br><span class="ok">${HI.ok}</span> Live TV menu</div><div><span class="no">${HI.x}</span> M-PESA STK prompt<br><span class="no">${HI.x}</span> Customer credit, deposits<br><span class="no">${HI.x}</span> Menu, price and setup changes<br><span class="no">${HI.x}</span> Check-in / check-out<br><span class="no">${HI.x}</span> Refunds, uploads</div></div></div>`;
+      const on = (sel, fn) => box.querySelectorAll(sel).forEach((b) => { b.onclick = () => fn(b); });
+      box.querySelector('#hx-x').onclick = () => { box.remove(); paintBtn(); };
+      on('[data-h="tour"]', () => { box.remove(); window.HXOfflineGuide.open(); });
+      on('[data-h="sync"]', () => { if (!online()) return toast('warning', 'No internet yet. It will sync by itself when it returns.'); sync(); toast('info', 'Syncing…'); setTimeout(draw, 1500); });
+      on('[data-h="data"]', async (b) => { if (!online()) return toast('warning', 'You need internet to download.'); b.disabled = true; await refreshSnapshot(true); toast('success', 'Saved the latest data'); draw(); });
+      on('[data-h="pin"]', () => { box.remove(); const t = document.getElementById('ofl-top-btn'); if (t) t.click(); else toast('info', 'The offline PIN screen is not available on this page. Open the Dashboard and try again.'); });
+      on('[data-h="print"]', () => { const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;width:0;height:0;border:0'; document.body.appendChild(f); f.contentDocument.write('<html><body style="font:13px monospace;width:280px"><h3 style="text-align:center">PRINTER TEST</h3><p style="text-align:center">Provisional receipts print here when offline.</p></body></html>'); f.contentDocument.close(); setTimeout(() => { try { f.contentWindow.print(); } catch (e) { /* blocked */ } setTimeout(() => f.remove(), 2000); }, 300); });
+      on('[data-h="review"]', () => { location.href = 'offline-review.html'; });
+      on('[data-d]', async (b) => { await issueDel(b.dataset.d); draw(); paintBtn(); });
+    };
+    box.addEventListener('click', (e) => { if (e.target === box) box.remove(); });
+    await draw();
+  }
+  // Top-bar button with a status dot: BLUE = set up needed, GREEN = ready, ORANGE = offline / waiting, RED = needs attention.
+  function paintBtn() {
+    hubCss();
+    const bar = document.querySelector('.topbar-right'); if (!bar || !/^(hx-|tv)/.test((location.pathname.split('/').pop() || ''))) { if (!bar) return; }
+    let b = document.getElementById('hxo-top-btn');
+    if (!b) { b = document.createElement('button'); b.id = 'hxo-top-btn'; b.type = 'button'; b.className = 'btn btn-ghost btn-sm'; b.title = 'Restaurant offline mode: setup guide and status'; b.style.cssText = 'display:inline-flex;align-items:center;gap:6px'; b.onclick = openHub; const first = document.getElementById('ofl-top-btn'); bar.insertBefore(b, first || bar.firstChild); }
+    const issues = window.__hxoIssues || 0; const ready = !!(S && S.snap) && (S.takenAt && Date.now() - S.takenAt < 864e5);
+    const [col, txt] = issues ? ['#b91c1c', 'Needs attention'] : !online() ? ['#ea580c', pending ? `Offline · ${pending}` : 'Offline'] : pending || syncing ? ['#ea580c', syncing ? 'Syncing…' : `${pending} to sync`] : ready && guideDone ? ['#0d7a4f', 'Offline ready'] : ['#1d4ed8', 'Set up offline'];
+    b.innerHTML = `<span style="width:9px;height:9px;border-radius:50%;background:${col};display:inline-block;box-shadow:0 0 0 3px ${col}33"></span><span>${esc2(txt)}</span>`;
+  }
+  let guideDone = false;
+  (async function guideInit() {
+    guideDone = !!(await kvGet('guideDone'));
+    const t = setInterval(paintBtn, 3000); paintBtn();
+    window.addEventListener('hxoffline:snapshot', async () => { guideDone = guideDone || !!(await kvGet('guideDone')); paintBtn(); });
+    ['hxoffline:queued', 'hxoffline:synced', 'connectivitychange'].forEach((ev) => window.addEventListener(ev, paintBtn));
+    // First visit: point the person to the guide once (never nags again).
+    setTimeout(async () => { if (!(await kvGet('guideSeen')) && online() && !guideDone && /(^|\/)hx-(floor|cashier|kitchen|dashboard)/.test(location.pathname)) { await kvSet('guideSeen', 1); try { window.HXOfflineGuide.open(); } catch (e) { toast('info', 'Tip: tap "Set up offline" at the top to prepare this device.'); } } }, 6000);
+    void t;
+  })();
+  window.HXOfflineGuide = window.HXOfflineGuide || { open: openGuide }; window.HXOfflineGuide.fallback = openGuide;
+
   Api.__hxOffline = true;
-  window.HXOffline = { sync, refresh: () => refreshSnapshot(true), pending: () => pending, isOnline: online, issues: issuesAll };
+  window.HXOfflineHub = { open: openHub };
+  window.HXOffline = { sync, refresh: () => refreshSnapshot(true), pending: () => pending, isOnline: online, issues: issuesAll, checks, downloadPages, state: () => S, kvGet, kvSet, toast };
 })(window);
