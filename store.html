@@ -305,7 +305,7 @@ function amIcon(t) { t = String(t || '').toLowerCase(); return /wi-?fi|internet/
 /* ---------- state ---------- */
 var CK = 'sx.cart.' + TOKEN.slice(0, 40), TK = 'sx.orders.' + TOKEN.slice(0, 40);
 var ctx = null, menu = null, cart = sg(CK, sessionStorage) || [], acct = sg('q.acct'), branchId = '', cur = { v: 'home', p: {} }, stack = [], hist = null, tmr = null, mapObj = null, marker = null;
-var DT = { name: '', phone: '', address: '', landmark: '', ins: '', pin: null, quote: null, ref: null, method: '' };
+var DT = { name: '', phone: '', address: '', landmark: '', ins: '', pin: null, quote: null, ref: null, method: '', lm: '', county: '', town: '' };   // lm: how the customer gives their location - 'ZONE' (county + town from the owner's list) or 'PIN' (map pin)
 var MAIN = ['home', 'menu', 'orders', 'rooms', 'more'];
 var THEME = '#F26A21';
 
@@ -574,6 +574,13 @@ function dishCard(i) {
   var out = i.available === false, closed = deliveryClosed(), p = fromPrice(i);
   return '<div class="dish' + (out ? ' out' : '') + '" data-i="' + E(i.id) + '"><div class="im">' + dishPic(i) + '</div><div class="tx"><h3>' + E(i.name) + '</h3>' + (i.description ? '<p>' + E(i.description) + '</p>' : '') + '<div class="ft"><span class="price">' + (p ? (p.from ? 'From ' : '') + money(p.v) : 'Choose size') + '</span>' + (i.promoLabel ? '<span class="tag or">' + E(i.promoLabel) + '</span>' : '') + '<span class="tag" style="background:#f0f2f4;color:var(--mut)">' + ic('clock') + ' ' + (i.prepMinutes || 10) + ' min</span>' + (out ? '<span class="tag rd">' + (i.unavailableReason === 'OUT_OF_STOCK' ? 'Sold out' : 'Unavailable') + '</span>' : '') + '</div></div>' + (out || closed ? '' : '<button class="add" aria-label="Add">' + ic('plus') + '</button>') + '</div>';
 }
+/* How the owner charges delivery, in words (cart and menu). The exact fee is always confirmed by the server at checkout. */
+function feeHint() {
+  var d = ctx.delivery, m = d.feeMode || 'DISTANCE', z = (d.zones || []).filter(function (x) { return x.fee != null; });
+  if (m === 'FIXED') return { from: d.fixedFee || 0, text: (d.fixedFee ? 'Delivery fee ' + money(d.fixedFee) + '.' : 'Free delivery.'), cart: (d.fixedFee ? 'A flat delivery fee of ' + money(d.fixedFee) + ' applies to every order.' : 'Delivery is free.') };
+  if (m === 'ZONE' && z.length) { var lo = Math.min.apply(null, z.map(function (x) { return x.fee; })); return { from: lo, text: 'Delivery from ' + money(lo) + ', depending on your town.', cart: 'Your delivery fee depends on your county and town. You will see the exact fee at checkout.' }; }
+  return { from: d.baseFee, text: d.baseFee != null ? 'Delivery from ' + money(d.baseFee) + '.' : '', cart: 'The exact delivery fee is worked out from your pin location at checkout.' };
+}
 VIEWS.menu = async function () {
   var v = $('#view'); var d = ctx.delivery;
   v.innerHTML = top('Food Menu', { noBack: true, right: '<button class="ib" id="cartTop" aria-label="Cart">' + ic('cart') + (cartCount() ? '<span class="dot">' + cartCount() + '</span>' : '') + '</button>' }) + '<div class="pad">' + '<div class="sk" style="height:56px;margin-top:14px"></div></div>';
@@ -585,7 +592,7 @@ VIEWS.menu = async function () {
   h += '<div class="search">' + ic('search') + '<input id="srch" placeholder="Search the menu" value="' + E(MC.q) + '"></div>';
   if (ctx.branches.length > 1) h += '<div class="pad">' + branchSel() + '</div>';
   if (note) h += '<div class="pad"><div class="note">' + ic('alert') + '<div><b>Delivery unavailable.</b> ' + E(note) + (ctx.tables.enabled ? ' You can still book a table.' : '') + '</div></div></div>';
-  else h += '<div class="pad fine" style="margin-top:10px">' + (d.minOrder ? 'Minimum order ' + money(d.minOrder) + '. ' : '') + (d.baseFee != null ? 'Delivery from ' + money(d.baseFee) + '.' : '') + '</div>';
+  else h += '<div class="pad fine" style="margin-top:10px">' + (d.minOrder ? 'Minimum order ' + money(d.minOrder) + '. ' : '') + feeHint().text + '</div>';
   h += '<div class="chips" id="chips"><button class="chip ' + (MC.cat === 'all' ? 'on' : '') + '" data-c="all">All</button>' + (menu.offers.length ? '<button class="chip ' + (MC.cat === 'offers' ? 'on' : '') + '" data-c="offers">Offers</button>' : '') + menu.categories.map(function (c) { return '<button class="chip ' + (MC.cat === String(c.id) ? 'on' : '') + '" data-c="' + E(c.id) + '">' + E(c.name) + '</button>'; }).join('') + '</div><div id="list"></div>';
   v.innerHTML = h; $('#cartTop').onclick = function () { nav('cart'); }; bindBranch(VIEWS.menu);
   $$('.chip').forEach(function (c) { c.onclick = function () { MC.cat = c.dataset.c; VIEWS.menu(); }; });
@@ -622,11 +629,11 @@ function addItem(it) {
 
 /* ---------- cart ---------- */
 VIEWS.cart = function () {
-  var d = ctx.delivery, fee = d.baseFee, tot = cartTotal();
+  var d = ctx.delivery, fee = feeHint().from, tot = cartTotal();
   var h = top('Your Cart', { right: cart.length ? '<button class="ib" id="clr" aria-label="Clear" style="color:var(--bad)">' + ic('x') + '</button>' : '' }) + '<div class="pad">';
   if (!cart.length) { $('#view').innerHTML = h + empty('cart', 'Your cart is empty', 'Add something tasty from the menu.', '<div style="margin-top:16px"><button class="btn sm" id="gm">Browse menu</button></div>') + '</div>'; $('#gm').onclick = function () { tab('menu'); }; return; }
   h += '<div class="card" style="margin-top:14px;padding:6px 14px">' + cart.map(function (c, k) { return '<div class="line"><div class="im">' + (c.image ? '<img alt="" src="' + E(c.image) + '">' : '') + '</div><div class="t"><b>' + E(c.name) + '</b><small>' + E(c.mods.map(function (x) { return x.name; }).join(', ')) + (c.notes ? ' · ' + E(c.notes) : '') + '</small><b style="color:var(--o)">' + money(c.unit) + '</b></div><div class="qty"><button data-k="' + k + '" data-d="-1">' + ic('minus') + '</button><b>' + c.qty + '</b><button data-k="' + k + '" data-d="1">' + ic('plus') + '</button></div></div>'; }).join('') + '</div>';
-  h += '<div class="card"><div class="tot"><span>Subtotal</span><b>' + money(tot) + '</b></div><div class="tot"><span>Delivery / service fee</span><b>' + (fee ? 'from ' + money(fee) : 'at checkout') + '</b></div><div class="fine">The exact delivery fee is worked out from your pin location at checkout.</div></div>';
+  h += '<div class="card"><div class="tot"><span>Subtotal</span><b>' + money(tot) + '</b></div><div class="tot"><span>Delivery / service fee</span><b>' + (d.feeMode === 'FIXED' ? (fee ? money(fee) : 'Free') : fee ? 'from ' + money(fee) : 'at checkout') + '</b></div><div class="fine">' + E(feeHint().cart) + '</div></div>';
   if (d.minOrder && tot < d.minOrder) h += '<div class="note">' + ic('alert') + '<div>Minimum delivery order is ' + money(d.minOrder) + '. Add ' + money(d.minOrder - tot) + ' more.</div></div>';
   h += '<label class="lbl">Special instructions (optional)<textarea class="field" id="ins" rows="2" placeholder="e.g. less salt, extra sauce...">' + E(DT.ins) + '</textarea></label><div class="sp"></div><button class="btn" id="go"' + (d.minOrder && tot < d.minOrder ? ' disabled' : '') + '>Proceed to Checkout</button></div>';
   $('#view').innerHTML = h;
@@ -639,27 +646,72 @@ VIEWS.cart = function () {
 /* ---------- checkout (delivery details) ---------- */
 VIEWS.checkout = function () {
   if (!cart.length) return nav('cart', {}, { replace: true });
+  var d = ctx.delivery, zl = d.feeMode === 'ZONE' ? (d.zones || []) : [], zoneOn = zl.length > 0, pinOn = d.feeMode !== 'ZONE' || d.zoneAllowPin !== false || !zoneOn;
+  if (!zoneOn) DT.lm = 'PIN'; else if (!pinOn) DT.lm = 'ZONE'; else if (DT.lm !== 'ZONE' && DT.lm !== 'PIN') DT.lm = 'ZONE';
+  var counties = []; zl.forEach(function (z) { if (counties.indexOf(z.county) < 0) counties.push(z.county); }); counties.sort();
+  function townsOf(c) { return zl.filter(function (z) { return z.county === c; }).sort(function (a, b) { return a.town.localeCompare(b.town); }); }
+  if (DT.county && counties.indexOf(DT.county) < 0) { DT.county = ''; DT.town = ''; }
+  if (DT.town && !townsOf(DT.county).some(function (z) { return z.town === DT.town; })) DT.town = '';
+  var zonePanel = '<div id="zp"><label class="lbl">County<select class="field" id="zc"><option value="">Choose your county</option>' + counties.map(function (c) { return '<option value="' + E(c) + '"' + (c === DT.county ? ' selected' : '') + '>' + E(c) + '</option>'; }).join('') + '</select></label>' +
+    '<label class="lbl">Town / area<select class="field" id="zt"></select></label><div class="fine" id="zfee" style="margin-top:8px"></div></div>';
+  var pinPanel = '<div id="pp2"><div class="row" style="margin-top:6px"><button class="btn sm line" id="gps">' + ic('pin') + ' Use my location</button><span class="fine" id="pinTxt">' + (DT.pin ? 'Pin set ✓' : 'or tap the map to drop the pin') + '</span></div><div id="map"></div></div>';
   var h = top('Delivery details') + '<div class="pad"><div class="card" style="margin-top:14px"><label class="lbl" style="margin-top:0">Your name<input class="field" id="nm" value="' + E(DT.name) + '" autocomplete="name"></label>' +
     '<label class="lbl">Phone number<input class="field" id="ph" type="tel" value="' + E(DT.phone) + '" placeholder="0712 345 678" autocomplete="tel"></label>' + branchSel() +
-    '<label class="lbl">Delivery location</label><div class="row" style="margin-top:6px"><button class="btn sm line" id="gps">' + ic('pin') + ' Use my location</button><span class="fine" id="pinTxt">' + (DT.pin ? 'Pin set ✓' : 'or tap the map to drop the pin') + '</span></div><div id="map"></div>' +
-    '<label class="lbl">Address / building / house number<input class="field" id="ad" value="' + E(DT.address) + '" placeholder="e.g. Apartment 4B, Ngong Road"></label>' +
+    '<label class="lbl">Delivery location</label>' + (zoneOn && pinOn ? '<div class="seg" style="margin-top:6px"><button type="button" data-lm="ZONE">Choose county &amp; town</button><button type="button" data-lm="PIN">Use map pin</button></div>' : '') +
+    (zoneOn ? zonePanel : '') + pinPanel +
+    '<label class="lbl">Address / building / house number <span style="color:var(--bad)">*</span><input class="field" id="ad" value="' + E(DT.address) + '" placeholder="e.g. Apartment 4B, Ngong Road, House No. 12" autocomplete="street-address"></label><div class="fine" style="margin-top:6px">The rider and the restaurant will see this address with your order.</div>' +
     '<label class="lbl">Landmark (optional)<input class="field" id="lm" value="' + E(DT.landmark) + '" placeholder="Near the green gate"></label></div>' +
     '<div class="card" id="sum"></div><div class="err" id="er"></div><button class="btn" id="nx">Continue to payment</button></div>';
   $('#view').innerHTML = h; bindBranch(VIEWS.checkout);
-  function sum() { var s = cartTotal(), q = DT.quote, f = q && q.ok ? q.fee : null; $('#sum').innerHTML = '<div class="tot"><span>Food</span><b>' + money(s) + '</b></div><div class="tot"><span>Delivery' + (q && q.distanceKm ? ' (' + q.distanceKm + ' km)' : '') + '</span><b>' + (f == null ? 'pin your location' : money(f)) + '</b></div>' + (f != null ? '<div class="tot big"><b>Total</b><b>' + money(s + f) + '</b></div><div class="fine">⏱ About ' + eta() + ' minutes</div>' : ''); }
+  var seq = 0, zone = DT.lm === 'ZONE';
+  function sum() {
+    var s = cartTotal(), q = DT.quote, f = q && q.ok ? q.fee : null, label = 'Delivery' + (q && q.ok && q.method === 'ZONE' ? ' (' + E(q.town) + ', ' + E(q.county) + ')' : q && q.distanceKm && d.feeMode !== 'FIXED' ? ' (' + q.distanceKm + ' km)' : '');
+    $('#sum').innerHTML = '<div class="tot"><span>Food</span><b>' + money(s) + '</b></div><div class="tot"><span>' + label + '</span><b>' + (f == null ? (zone ? 'choose your town' : 'pin your location') : f === 0 ? 'Free' : money(f)) + '</b></div>' + (f != null ? '<div class="tot big"><b>Total</b><b>' + money(s + f) + '</b></div><div class="fine">⏱ About ' + eta() + ' minutes</div>' : '');
+  }
   function eta() { var mp = Math.max.apply(null, [0].concat(cart.map(function (c) { return c.prep || 10; }))); return Math.round(mp + (DT.quote ? DT.quote.etaMinutes : 10)); }
-  async function requote() { if (!DT.pin) return; $('#er').textContent = ''; try { DT.quote = await call('/delivery/quote?' + new URLSearchParams({ branchId: branchId || '', lat: DT.pin.lat, lng: DT.pin.lng, subtotal: cartTotal() })); if (!DT.quote.ok) $('#er').textContent = DT.quote.reason; } catch (e) { DT.quote = null; $('#er').textContent = e.message; } sum(); }
+  async function requote() {
+    var my = ++seq; $('#er').textContent = ''; DT.quote = null;
+    var qs = { branchId: branchId || '', subtotal: cartTotal() };
+    if (zone) { if (!DT.county || !DT.town) { sum(); return; } qs.method = 'ZONE'; qs.county = DT.county; qs.town = DT.town; }
+    else { if (!DT.pin) { sum(); return; } qs.method = 'PIN'; qs.lat = DT.pin.lat; qs.lng = DT.pin.lng; }
+    sum();
+    try { var q = await call('/delivery/quote?' + new URLSearchParams(qs)); if (my !== seq) return; DT.quote = q; if (!q.ok) $('#er').textContent = q.reason; } catch (e) { if (my !== seq) return; DT.quote = null; $('#er').textContent = e.message; }
+    sum();
+  }
+  function zfee() { var z = townsOf(DT.county).filter(function (x) { return x.town === DT.town; })[0]; $('#zfee').innerHTML = z ? 'Delivery to <b>' + E(z.town) + '</b>: <b>' + (z.fee ? money(z.fee) : 'Free') + '</b>' : (DT.county ? 'Choose your town to see the delivery fee.' : ''); }
+  function paintTowns() { var t = $('#zt'); if (!t) return; t.innerHTML = DT.county ? '<option value="">Choose your town</option>' + townsOf(DT.county).map(function (z) { return '<option value="' + E(z.town) + '"' + (z.town === DT.town ? ' selected' : '') + '>' + E(z.town) + ' - ' + (z.fee ? money(z.fee) : 'Free') + '</option>'; }).join('') : '<option value="">Choose your county first</option>'; zfee(); }
+  function setMode(m) {
+    zone = m === 'ZONE'; DT.lm = zone ? 'ZONE' : 'PIN';
+    var zp = $('#zp'); if (zp) zp.style.display = zone ? '' : 'none'; $('#pp2').style.display = zone ? 'none' : '';
+    $$('[data-lm]').forEach(function (b) { b.classList.toggle('on', b.dataset.lm === DT.lm); });
+    if (!zone) { initMap(); setTimeout(function () { if (mapObj) mapObj.invalidateSize(); }, 150); }
+    requote();
+  }
   function setPin(lat, lng) { DT.pin = { lat: lat, lng: lng }; $('#pinTxt').textContent = 'Pin set ✓'; if (marker) marker.setLatLng([lat, lng]); else marker = L.marker([lat, lng], { draggable: true }).addTo(mapObj).on('dragend', function () { var p = marker.getLatLng(); setPin(p.lat, p.lng); }); requote(); }
-  var br = ctx.branches.filter(function (b) { return b.id === branchId; })[0], c0 = DT.pin ? [DT.pin.lat, DT.pin.lng] : br && br.location ? [br.location.lat, br.location.lng] : [-1.2921, 36.8219];
-  if (mapObj) { try { mapObj.remove(); } catch (e) { /* gone */ } } marker = null;
-  if (window.L) { mapObj = L.map($('#map')).setView(c0, 14); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapObj); mapObj.on('click', function (e) { setPin(e.latlng.lat, e.latlng.lng); }); setTimeout(function () { mapObj.invalidateSize(); }, 250); if (DT.pin) { var p0 = DT.pin; DT.pin = null; setPin(p0.lat, p0.lng); } }
-  $('#gps').onclick = function () { if (!navigator.geolocation) return toast('Location is not available on this device', true); navigator.geolocation.getCurrentPosition(function (p) { mapObj.setView([p.coords.latitude, p.coords.longitude], 17); setPin(p.coords.latitude, p.coords.longitude); }, function () { toast('Allow location access, or tap the map', true); }, { enableHighAccuracy: true, timeout: 15000 }); };
-  sum();
+  function initMap() {
+    if (mapObj && $('#map') && mapObj.getContainer() === $('#map')) return;
+    var br = ctx.branches.filter(function (b) { return b.id === branchId; })[0], c0 = DT.pin ? [DT.pin.lat, DT.pin.lng] : br && br.location ? [br.location.lat, br.location.lng] : [-1.2921, 36.8219];
+    if (mapObj) { try { mapObj.remove(); } catch (e) { /* gone */ } } mapObj = null; marker = null;
+    if (!window.L) return;
+    mapObj = L.map($('#map')).setView(c0, 14); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapObj); mapObj.on('click', function (e) { setPin(e.latlng.lat, e.latlng.lng); }); setTimeout(function () { mapObj.invalidateSize(); }, 250);
+    if (DT.pin) { var p0 = DT.pin; DT.pin = null; setPin(p0.lat, p0.lng); }
+  }
+  $('#gps').onclick = function () { if (!navigator.geolocation) return toast('Location is not available on this device', true); if (!mapObj) initMap(); navigator.geolocation.getCurrentPosition(function (p) { if (mapObj) mapObj.setView([p.coords.latitude, p.coords.longitude], 17); setPin(p.coords.latitude, p.coords.longitude); }, function () { toast('Allow location access, or tap the map', true); }, { enableHighAccuracy: true, timeout: 15000 }); };
+  if (zoneOn) {
+    paintTowns();
+    $('#zc').onchange = function () { DT.county = this.value; DT.town = ''; paintTowns(); requote(); };
+    $('#zt').onchange = function () { DT.town = this.value; zfee(); requote(); };
+  }
+  $$('[data-lm]').forEach(function (b) { b.onclick = function () { setMode(b.dataset.lm); }; });
+  if (mapObj) { try { mapObj.remove(); } catch (e) { /* gone */ } } mapObj = null; marker = null;
+  setMode(DT.lm);
   $('#nx').onclick = function () {
     var er = $('#er'); er.textContent = ''; DT.name = $('#nm').value.trim(); DT.phone = $('#ph').value.trim(); DT.address = $('#ad').value.trim(); DT.landmark = $('#lm').value.trim();
     if (DT.name.length < 2) return er.textContent = 'Enter your name.'; if (DT.phone.replace(/\D/g, '').length < 9) return er.textContent = 'Enter a valid phone number.';
-    if (!DT.pin) return er.textContent = 'Pin your location on the map.'; if (DT.address.length < 3) return er.textContent = 'Add your address or building.';
-    if (!DT.quote) return er.textContent = 'We are still checking delivery to your pin. Please wait a moment.'; if (!DT.quote.ok) return er.textContent = DT.quote.reason;
+    if (zone) { if (!DT.county) return er.textContent = 'Choose your county.'; if (!DT.town) return er.textContent = 'Choose your town.'; }
+    else if (!DT.pin) return er.textContent = 'Pin your location on the map.';
+    if (DT.address.length < 3) return er.textContent = 'Enter your address, building or house number so the rider can find you.';
+    if (!DT.quote) return er.textContent = 'We are still working out your delivery fee. Please wait a moment.'; if (!DT.quote.ok) return er.textContent = DT.quote.reason;
     nav('payment');
   };
 };
@@ -687,7 +739,7 @@ VIEWS.payment = function () {
     btn.disabled = true; btn.textContent = 'Placing your order…'; if (!DT.ref) DT.ref = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     var o;
     try {
-      o = await call('/delivery', 'POST', { branchId: branchId || undefined, name: DT.name, phone: DT.phone, address: DT.address, landmark: DT.landmark || undefined, instructions: DT.ins || undefined, lat: DT.pin.lat, lng: DT.pin.lng, clientRef: DT.ref, payMethod: DT.method,
+      o = await call('/delivery', 'POST', { branchId: branchId || undefined, name: DT.name, phone: DT.phone, address: DT.address, landmark: DT.landmark || undefined, instructions: DT.ins || undefined, locationMethod: DT.quote.method === 'ZONE' ? 'ZONE' : 'PIN', county: DT.quote.method === 'ZONE' ? DT.quote.county : undefined, town: DT.quote.method === 'ZONE' ? DT.quote.town : undefined, lat: DT.quote.method === 'ZONE' ? undefined : DT.pin.lat, lng: DT.quote.method === 'ZONE' ? undefined : DT.pin.lng, clientRef: DT.ref, payMethod: DT.method,
         items: cart.map(function (c) { return { menuItemId: c.id, quantity: c.qty, variantId: c.vid || undefined, notes: c.notes || undefined, modifiers: c.mods.length ? c.mods.map(function (x) { return { groupId: x.groupId, optionId: x.optionId }; }) : undefined }; }) });
     } catch (e) { btn.disabled = false; paint(); er.textContent = e.message; if (e.code === 'GUEST_AUTH_REQUIRED') nav('auth', { why: 'Please sign in to continue.' }); if (e.code !== 'RATE_LIMITED') DT.ref = null; return; }
     DT.ref = null; rememberOrder({ key: o.trackKey, n: o.orderNumber, at: Date.now() }); cart = []; saveCart(); DT.quote = null; DT.pin = null; DT.ins = '';
