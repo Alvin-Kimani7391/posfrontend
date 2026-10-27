@@ -274,7 +274,7 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 .lvc{margin-top:14px;border-radius:18px;overflow:hidden;background:#fff;border:1px solid var(--line);box-shadow:0 8px 22px rgba(20,23,26,.07)}
 .lvh{padding:12px 14px;display:flex;align-items:center;gap:10px}.lvh .big{font-weight:800;font-size:18px;letter-spacing:-.2px}.lvh .big em{font-style:normal;color:var(--o)}.lvh .big small{color:var(--mut);font-weight:600;font-size:13px}
 .lvs{font-size:11px;font-weight:800;padding:4px 10px;border-radius:99px;background:var(--warnl);color:var(--warn);flex:none}.lvs.on{background:var(--okl);color:var(--ok)}.lvs.on:before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:6px;animation:pl 1.6s infinite}
-.lvmap{height:320px;position:relative;background:#e8eaed}
+.lvmap{height:320px;position:relative;background:#e8eaed}.lvn{position:absolute;left:10px;right:10px;top:10px;z-index:500;background:rgba(20,23,26,.88);color:#fff;border-radius:12px;padding:8px 12px;font-size:12.5px;font-weight:600;text-align:center;pointer-events:none}
 .lvf{padding:12px 14px;display:flex;align-items:center;gap:10px;border-top:1px solid var(--line)}
 .lvav{width:40px;height:40px;border-radius:50%;background:var(--ol);color:var(--od);display:grid;place-items:center;font-weight:800;flex:none}
 .lvcall{width:40px;height:40px;border-radius:50%;background:var(--okl);color:var(--ok);display:grid;place-items:center;flex:none}
@@ -862,6 +862,9 @@ VIEWS.confirmed = async function (p) {
 /* ---------- live rider tracking inside the order page (map + realtime stream, same engine as the rider app) ---------- */
 var LT = null;
 function stopLive() { if (LT) { try { LT.stop(); } catch (e) { /* gone */ } LT = null; } }
+/* the delivery motorbike (same artwork as the rider app) - built into this page so it always shows */
+var BIKE_HTML = '<div class="lv-mk rider"><span class="pulse"></span><span class="core">' + "<svg class=\"lv-bike\" viewBox=\"0 0 64 48\" xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\"><ellipse cx=\"32\" cy=\"45\" rx=\"23\" ry=\"2.4\" fill=\"#000\" opacity=\".18\"/><path d=\"M6 32Q14 23 23 30\" fill=\"none\" stroke=\"#334155\" stroke-width=\"3.2\" stroke-linecap=\"round\"/><path d=\"M10 30L24 27H40L44 31L38 36H22Z\" fill=\"#334155\"/><path d=\"M38 27L43 20H46L44 30L40 33Z\" fill=\"#475569\"/><path d=\"M45 18.5L50 36\" stroke=\"#475569\" stroke-width=\"2.8\" stroke-linecap=\"round\"/><path d=\"M44 29Q50 24.5 56 30\" fill=\"none\" stroke=\"#334155\" stroke-width=\"3.2\" stroke-linecap=\"round\"/><circle cx=\"14\" cy=\"36\" r=\"8\" fill=\"#111827\"/><circle cx=\"14\" cy=\"36\" r=\"4.6\" fill=\"#CBD5E1\"/><circle cx=\"14\" cy=\"36\" r=\"1.7\" fill=\"#475569\"/><circle cx=\"50\" cy=\"36\" r=\"8\" fill=\"#111827\"/><circle cx=\"50\" cy=\"36\" r=\"4.6\" fill=\"#CBD5E1\"/><circle cx=\"50\" cy=\"36\" r=\"1.7\" fill=\"#475569\"/><rect x=\"21\" y=\"24.5\" width=\"15\" height=\"4\" rx=\"2\" fill=\"#111827\"/><path d=\"M3 26.2H22\" stroke=\"#111827\" stroke-width=\"1.8\" stroke-linecap=\"round\"/><rect x=\"2\" y=\"9\" width=\"20\" height=\"16\" rx=\"2.6\" fill=\"#F26A21\"/><path d=\"M2 14.5H22\" stroke=\"#C2410C\" stroke-width=\"1.4\"/><circle cx=\"12\" cy=\"20\" r=\"3.1\" fill=\"#fff\"/><path d=\"M12 18.2V21.8M10.2 20H13.8\" stroke=\"#F26A21\" stroke-width=\"1.3\" stroke-linecap=\"round\"/><path d=\"M28 25L37 29L36 35\" fill=\"none\" stroke=\"#1F2937\" stroke-width=\"4.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M27 25L31 14.5\" stroke=\"#F26A21\" stroke-width=\"7.2\" stroke-linecap=\"round\"/><path d=\"M32 16.5L40 19.5L43.5 18\" fill=\"none\" stroke=\"#F26A21\" stroke-width=\"3.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"43.8\" cy=\"18\" r=\"2\" fill=\"#111827\"/><path d=\"M43 17.4L48 16.4\" stroke=\"#111827\" stroke-width=\"2.4\" stroke-linecap=\"round\"/><circle cx=\"47.6\" cy=\"21.4\" r=\"2.5\" fill=\"#FDE047\" stroke=\"#fff\" stroke-width=\".9\"/><circle cx=\"33\" cy=\"8.6\" r=\"5.7\" fill=\"#111827\"/><path d=\"M33.6 6.8Q40 6.4 38.6 11.4L33.6 10.8Z\" fill=\"#7DD3FC\"/><path d=\"M29.4 6.6Q31 3.8 34 3.9\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1\" stroke-linecap=\"round\" opacity=\".7\"/></svg>" + '</span></div>';
+function bikeIcon() { return L.divIcon({ className: 'lv-mk-wrap', html: BIKE_HTML, iconSize: [64, 52], iconAnchor: [32, 44] }); }
 function liveStart(key, onChange) {
   stopLive();
   var Lv = window.Live, box = $('#lt'); if (!Lv || !window.L || !box) return;
@@ -887,12 +890,24 @@ function liveStart(key, onChange) {
     var m = $('#lvm'); if (m) m.textContent = l.message || '';
   }
   function state() { var e = $('#lvs'); if (!e) return; e.className = 'lvs' + (S.state === 'live' ? ' on' : ''); e.textContent = S.state === 'live' ? 'Live' : 'Reconnecting'; }
+  /* tap the bike -> the rider's name pops up above it; tap your own pin -> "You" */
+  function tip(mk, text, off) {
+    if (!mk || !text) return;
+    if (!mk._tip) { mk.bindTooltip(text, { direction: 'top', offset: off, className: 'lv-tip', permanent: false }); mk.on('click', function () { mk.openTooltip(); }); mk._tip = text; }
+    else if (mk._tip !== text) { mk.setTooltipContent(text); mk._tip = text; }
+  }
   function markers() {
     var l = S.live, m = S.map; if (!l || !m) return;
-    var dp = l.destination, rl = l.live ? l.riderLocation : null, org = l.origin;
-    if (dp) m.put('dest', 'dest', dp, { label: 'You' });
-    if (org && !rl) m.put('origin', 'origin', org, { label: 'Restaurant' }); else m.drop('origin');
-    if (rl) m.put('rider', 'rider', rl, { label: fst(l.rider && l.rider.name) || 'Rider', heading: rl.heading }); else m.drop('rider');
+    var dp = l.destination, rl = l.riderLocation && l.riderLocation.lat != null && (l.live || l.riderLocation.stale) ? l.riderLocation : null, org = l.origin, rd = l.rider;
+    if (dp) tip(m.put('dest', 'dest', dp), 'You', [0, -38]);
+    if (org && !rl) tip(m.put('origin', 'origin', org), 'Restaurant', [0, -20]); else m.drop('origin');
+    if (rl) {
+      var bk = m.put('rider', 'rider', rl, { heading: rl.heading });
+      if (bk && !bk._bike) { bk.setIcon(bikeIcon()); bk._bike = true; }
+      tip(bk, rd ? (rd.fullName || rd.name || 'Your rider') : 'Your rider', [0, -44]);
+      if (bk && !S.hinted) { S.hinted = true; setTimeout(function () { try { bk.openTooltip(); setTimeout(function () { bk.closeTooltip(); }, 4500); } catch (e) { /* gone */ } }, 600); }
+    } else m.drop('rider');
+    var nt = $('#lvn'); if (nt) { var msg = rl ? '' : l.stage === 'ON_THE_WAY' ? 'Waiting for your rider\u2019s live location\u2026' : l.stage === 'ARRIVED' ? '' : 'Your rider appears on the map as soon as they set off.'; nt.textContent = msg; nt.style.display = msg ? '' : 'none'; }
     m.trail(l.trail || []);
     if (rl && dp) {
       if (S.route && S.route.length > 1) { var bi = 0, bd = 1e9; for (var i = 0; i < S.route.length; i++) { var dx = S.route[i].lat - rl.lat, dy = S.route[i].lng - rl.lng, dd = dx * dx + dy * dy; if (dd < bd) { bd = dd; bi = i; } } m.route([rl].concat(S.route.slice(bi + 1)), { color: '#1A73E8' }); }
@@ -912,7 +927,7 @@ function liveStart(key, onChange) {
     var l = S.live; if (dead || !l || cur.v !== 'track') return;
     if (ACTIVE.indexOf(l.stage) < 0) { if (S.built) { if (S.map) S.map.destroy(); S.map = null; box.innerHTML = ''; S.built = false; S.fit = ''; } return; }
     if (!S.built) {
-      box.innerHTML = '<div class="lvc"><div class="lvh"><div class="grow"><div class="big" id="lvb"></div><div class="fine" id="lvm"></div></div><span class="lvs" id="lvs"></span></div><div class="lvmap" id="tm"></div><div class="lvf" id="lvf"></div></div>';
+      box.innerHTML = '<div class="lvc"><div class="lvh"><div class="grow"><div class="big" id="lvb"></div><div class="fine" id="lvm"></div></div><span class="lvs" id="lvs"></span></div><div class="lvmap"><div id="tm" style="position:absolute;inset:0"></div><div class="lvn" id="lvn" style="display:none"></div></div><div class="lvf" id="lvf"></div></div>';
       S.map = Lv.map($('#tm'), { theme: 'light', center: l.destination ? [l.destination.lat, l.destination.lng] : undefined, zoom: 15 }); S.built = true; S.fit = ''; state(); card();
     }
     head(); markers();
