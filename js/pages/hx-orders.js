@@ -29,12 +29,13 @@
     const cnt = (k) => rows.filter((o) => kind(o) === k).length, total = rows.length;
     const kp = [['Open', cnt('OPEN'), '#f6a73a'], ['In progress', cnt('COOKING'), '#1a73e8'], ['Ready', cnt('READY'), '#16a34a'], ['Completed', cnt('DONE'), '#7c5cff'], ['Cancelled', cnt('CANCELLED'), '#ef3b36']];
     const shown = rows.filter((o) => (tab === 'ALL' || kind(o) === tab) && (!q || (where(o) + ' ' + (o.orderNumber || '') + ' ' + (o.customerName || '')).toLowerCase().includes(q)));
-    el.innerHTML = `<div class="dr-title"><h1>Orders</h1><span class="dr-spacer"></span><input class="dr-search" id="q" placeholder="Search order, table or customer" value="${E(q)}">${can('restaurant.orders.create') ? '<button class="btn btn-primary" id="new">+ New order</button>' : ''}</div>
+    el.innerHTML = `<div class="dr-title"><h1>Orders</h1><span class="dr-spacer"></span><button class="btn btn-secondary" id="all">All orders &amp; history</button><input class="dr-search" id="q" placeholder="Search order, table or customer" value="${E(q)}">${can('restaurant.orders.create') ? '<button class="btn btn-primary" id="new">+ New order</button>' : ''}</div>
       <div class="dr-kpis">${kp.map(([l, n, c]) => `<div class="dr-kpi solid" style="--c:${c}"><div><small>${l}</small><b>${n}</b></div><i>${n}</i></div>`).join('')}</div>
       <div class="dr-tabs">${TABS.map(([k, l]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''}">${l} (${k === 'ALL' ? total : cnt(k)})</button>`).join('')}</div>
       <div class="dr-orders">${shown.map(card).join('') || '<div style="grid-column:1/-1">' + window.HX.empty('No orders', 'Orders you take at the POS appear here.') + '</div>'}</div>`;
     el.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.t; paint(); }));
     const s = el.querySelector('#q'); s.addEventListener('input', window.UI.debounce((e) => { q = e.target.value.toLowerCase(); paint(); const n = el.querySelector('#q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250));
+    el.querySelector('#all')?.addEventListener('click', () => window.HX.showHistory('orders'));
     el.querySelector('#new')?.addEventListener('click', () => { location.href = 'hx-floor.html'; });
     el.querySelectorAll('[data-o]').forEach((c) => c.addEventListener('click', () => window.HX.order.open(c.dataset.o, { onChange: load, onClose: load })));
   }

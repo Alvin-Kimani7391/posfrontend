@@ -12,8 +12,10 @@
   }
   async function paint() {
     const tabs = [['requests', 'Orders to confirm'], ['calls', 'Calls']]; if (can('restaurant.guest.qr')) tabs.push(['qr', 'QR codes']);
-    el.innerHTML = head('Guest requests & QR', 'Orders and calls from guests who scanned a table or room code.', '<span class="hx-live">Live</span>') + window.HX.tabs(tabs, tab) + '<div id="gb"><div class="hx-card"><p class="hx-sub">Loading…</p></div></div>';
+    el.innerHTML = head('Guest requests & QR', 'Orders and calls from guests who scanned a table or room code.', '<button class="btn btn-secondary" id="gh">Request history</button><button class="btn btn-secondary" id="gqh">All QR orders</button><span class="hx-live">Live</span>') + window.HX.tabs(tabs, tab) + '<div id="gb"><div class="hx-card"><p class="hx-sub">Loading…</p></div></div>';
     el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; paint(); }));
+    el.querySelector('#gh')?.addEventListener('click', () => window.HX.showHistory('guest', { defaultTab: tab === 'calls' ? 'calls' : 'requests' }));
+    el.querySelector('#gqh')?.addEventListener('click', () => window.HX.showHistory('qr'));
     const gb = el.querySelector('#gb');
     if (tab === 'requests') return requests(gb); if (tab === 'calls') return calls(gb); return qr(gb);
   }

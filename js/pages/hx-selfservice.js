@@ -22,8 +22,9 @@
 
   async function show(quiet) {
     const tabs = []; if (canDesk()) tabs.push(['CASH', 'Waiting for payment'], ['PAID', 'Paid today']); if (canTables()) tabs.push(['TABLES', 'Free tables']); if (canSetup()) tabs.push(['SETUP', 'Kiosk setup']);
-    el.innerHTML = head('Self-service kiosk', 'Customers order and pay at the kiosk. Confirm cash here.') + window.HX.tabs(tabs, tab) + '<div id="ss"></div>';
+    el.innerHTML = head('Self-service kiosk', 'Customers order and pay at the kiosk. Confirm cash here.', canDesk() ? '<button class="btn btn-secondary" id="kh">Order history</button>' : '') + window.HX.tabs(tabs, tab) + '<div id="ss"></div>';
     el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; show(); }));
+    el.querySelector('#kh')?.addEventListener('click', () => window.HX.showHistory('kiosk'));
     const box = el.querySelector('#ss'); if (!quiet) box.innerHTML = window.HX.skel('rows');
     return tab === 'SETUP' ? setup(box) : tab === 'TABLES' ? tables(box) : desk(box);
   }

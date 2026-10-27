@@ -19,6 +19,7 @@
     ['sum', 'Sales summary', '/restaurant/reports/summary', 'restaurant.reports.view', 'restaurantOrdering', false, 'Restaurant'],
     ['pnl', 'Profit & loss', '/restaurant/reports/profit-loss', 'restaurant.reports.view', 'restaurantOrdering', false, 'Restaurant'],
     ['sales', 'Sales breakdown', '/restaurant/reports/sales', 'restaurant.reports.view', 'restaurantOrdering', true, 'Restaurant'],
+    ['ord', 'All orders', '/restaurant/reports/orders', 'restaurant.reports.view', 'restaurantOrdering', false, 'Restaurant'],
     ['food', 'Food cost', '/restaurant/reports/food-cost', 'restaurant.reports.view', 'restaurantOrdering', false, 'Restaurant'],
     ['staff', 'Staff performance', '/restaurant/reports/staff', 'restaurant.reports.staff', 'restaurantOrdering', false, 'Restaurant'],
     ['waste', 'Waste', '/restaurant/reports/waste', 'restaurant.reports.view', 'restaurantOrdering', false, 'Restaurant'],
@@ -92,11 +93,20 @@
   async function load() {
     const cur = R.find((r) => r[0] === S.key), token = ++S.token, q = query(), btn = el.querySelector('#export-btn');
     const extra = cur[5] ? { groupBy: S.groupBy } : {};
+    if (S.hist && cur[0] !== 'ord') { S.hist.destroy(); S.hist = null; }
     // group-by switch for the sales breakdown
     const sub = el.querySelector('#rp-sub'); sub.innerHTML = '';
     if (cur[5]) { sub.innerHTML = '<div class="rp-groupby"><span class="text-xs text-muted">Group by</span><div id="gb-seg"></div></div>'; RT.segmented(sub.querySelector('#gb-seg'), GROUPS.map((g) => ({ key: g, label: nice(g) })), S.groupBy, (g) => { S.groupBy = g; load(); }); }
     el.querySelector('#report-meta').innerHTML = `<span><strong>${esc(cur[1])}</strong> · ${esc(S.bar.describe({ dates: true, branch: true, cashier: false }))}</span>`;
     btn.disabled = true; S.exp = null;
+    if (cur[0] === 'ord') {            // All orders: searchable list of every order (js/core/hx-history.js)
+      body.innerHTML = skeleton();
+      try { await window.HX.loadHistory(); } catch (e) { if (token === S.token) body.innerHTML = empty('Could not load', 'Check your connection and try again.'); return; }
+      if (token !== S.token) return;
+      if (S.hist) S.hist.destroy(); body.innerHTML = '';
+      S.hist = window.HX.history.mount(body, 'orders', { report: true, external: () => { const st = S.bar.getState(), q = query(); return { branchId: q.branchId, from: new Date(st.from).toISOString(), to: new Date(st.to).toISOString() }; } });
+      btn.disabled = false; return;
+    }
     const ck = `${cur[0]}|${JSON.stringify(q)}|${S.groupBy}`;
     let d = S.cache[ck];
     if (!d) { body.innerHTML = skeleton(); d = await get(cur[2], { ...q, ...extra }); if (d) S.cache[ck] = d; }
@@ -107,7 +117,7 @@
     S.exp = (cur[0] === 'pnl' ? renderPnl(body, root) : renderGeneric(body, root, cur)) || null;
     btn.disabled = !S.exp;
   }
-  function exportNow() { const ex = typeof S.exp === 'function' ? S.exp() : S.exp; if (!ex) return; RT.downloadCSV(`${ex.name}-${RT.stamp()}.csv`, ex.sections); window.UI.toast.success('Report exported'); }
+  function exportNow() { if (S.key === 'ord' && S.hist) return S.hist.exportCsv(); const ex = typeof S.exp === 'function' ? S.exp() : S.exp; if (!ex) return; RT.downloadCSV(`${ex.name}-${RT.stamp()}.csv`, ex.sections); window.UI.toast.success('Report exported'); }
 
   /* ---------- reusable pieces ---------- */
   /** Sortable, searchable table card. cols: [{k,label,kind,render?}] rows: objects. */

@@ -226,3 +226,14 @@
     return { el: ref, close };
   };
 })(window);
+/* ---- history screens (js/core/hx-history.js) are loaded the first time someone opens one ---- */
+(function (window) {
+  const HX = window.HX;
+  HX.loadHistory = () => (HX.history ? Promise.resolve(HX.history) : new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = 'js/core/hx-history.js';
+    s.onload = () => (HX.history ? res(HX.history) : rej(new Error('history'))); s.onerror = () => rej(new Error('history'));
+    document.head.appendChild(s);
+  }));
+  /** HX.showHistory('deliveries' | 'orders' | 'qr' | 'kiosk' | 'guest') opens the history window. */
+  HX.showHistory = (view, opts) => HX.loadHistory().then((h) => h.open(view, opts)).catch(() => window.UI.toast.error('Could not open history. Check your connection and try again.'));
+})(window);
