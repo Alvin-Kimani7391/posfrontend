@@ -82,6 +82,8 @@
     { key: 'patients',      label: 'Patients',           icon: 'patient',   href: 'patients.html',      permission: 'patients.view',  feature: ['pharmacyDispensing'] },
     { key: 'pharmacy-compliance', label: 'Recalls & registers', icon: 'shield', href: 'pharmacy-compliance.html', permission: 'pharmacy.reports', feature: ['pharmacyDispensing'] },
     { key: 'pharmacy-settings', label: 'Pharmacy settings', icon: 'sliders', href: 'pharmacy-settings.html', permission: 'pharmacy.settings', feature: ['pharmacyDispensing'] },
+    { key: 'liquor', hxHide: true,      label: 'Wines & spirits',    icon: 'shield',    href: 'liquor.html',        permAny: ['liquor.reports', 'liquor.settings', 'liquor.products', 'liquor.empties', 'liquor.tots'], feature: ['liquorCompliance', 'ageVerification', 'emptiesTracking', 'totSales'] },
+    { key: 'shop', hxHide: true,        label: 'Shop tools',         icon: 'sliders',   href: 'shop.html',          permAny: ['shop.import', 'shop.prices.manage', 'shop.barcodes.manage', 'shop.promotions.manage', 'shop.reports.view', 'shop.onboarding.manage', 'shop.held.manage'] },
     { key: 'stocktakes', hxHide: true,    label: 'Stocktake',          icon: 'clipboard', href: 'stocktakes.html',    permission: 'stocktake.view' },
     { key: 'serials',       label: 'Serial numbers',     icon: 'hash',      href: 'serials.html',       permission: 'serials.view',   feature: ['serialNumberTracking'] },
     { key: 'warranty',      label: 'Warranty claims',    icon: 'shield',    href: 'warranty.html',      permission: 'warranty.view',  feature: ['warrantyManagement'] },

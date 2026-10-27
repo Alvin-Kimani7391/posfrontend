@@ -457,6 +457,20 @@
     DEFAULT_ROLE_PERMISSIONS[role] = Array.from(new Set([...(DEFAULT_ROLE_PERMISSIONS[role] || []), ...TV_GRANTS[role]]));
   });
 
+  // General shop tools (import, held sales, promotions, bulk prices, barcodes, shop reports). Mirrors backend shopPermissions.js.
+  const SHOP_ALL = ['shop.import', 'shop.prices.manage', 'shop.barcodes.manage', 'shop.held.use', 'shop.held.manage', 'shop.promotions.view', 'shop.promotions.manage', 'shop.reports.view', 'shop.onboarding.manage'];
+  const SHOP_GRANTS = { MANAGER: SHOP_ALL, CASHIER: ['shop.held.use', 'shop.promotions.view'], STOREKEEPER: ['shop.import', 'shop.barcodes.manage'], ACCOUNTANT: ['shop.reports.view'] };
+  Object.keys(SHOP_GRANTS).forEach((role) => {
+    DEFAULT_ROLE_PERMISSIONS[role] = Array.from(new Set([...(DEFAULT_ROLE_PERMISSIONS[role] || []), ...SHOP_GRANTS[role]]));
+  });
+
+  // Wines & spirits. Mirrors backend liquorPermissions.js.
+  const LIQUOR_ALL = ['liquor.settings', 'liquor.products', 'liquor.override', 'liquor.empties', 'liquor.tots', 'liquor.reports'];
+  const LIQUOR_GRANTS = { MANAGER: LIQUOR_ALL, STOREKEEPER: ['liquor.products', 'liquor.empties'], ACCOUNTANT: ['liquor.reports'] };
+  Object.keys(LIQUOR_GRANTS).forEach((role) => {
+    DEFAULT_ROLE_PERMISSIONS[role] = Array.from(new Set([...(DEFAULT_ROLE_PERMISSIONS[role] || []), ...LIQUOR_GRANTS[role]]));
+  });
+
   function can(user, permission) {
     if (!user) return false;
     if (user.role === ROLES.OWNER) return true;

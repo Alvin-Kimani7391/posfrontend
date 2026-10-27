@@ -2503,7 +2503,7 @@
         data = await saveOffline(ctid);
       } else {
         try {
-          ({ data } = await window.Api.post('/sales', payload, { idempotencyKey: checkoutKey }));
+          ({ data } = await (window.LiquorTill && window.LiquorTill.active() ? window.LiquorTill.post('/sales', payload, { idempotencyKey: checkoutKey }) : window.Api.post('/sales', payload, { idempotencyKey: checkoutKey })));
         } catch (err) {
           const cashOnly = state.payments.length === 1 && state.payments[0].method === 'CASH' && !state.pendingMpesa;
           if (err.code === 'NETWORK_ERROR' && canOffline && cashOnly) {

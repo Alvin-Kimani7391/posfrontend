@@ -17,6 +17,7 @@
     electronics:  { label: 'Electronics',        icon: 'hash',      blurb: 'Serial numbers / IMEI, warranty and repairs.' },
     clothing:     { label: 'Clothing & fashion', icon: 'tag',       blurb: 'Sizes and colours as product variants.' },
     hardware:     { label: 'Hardware',           icon: 'wrench',    blurb: 'Units like bags and metres, quotations, deliveries.' },
+    wines_spirits:{ label: 'Wines & spirits',   icon: 'store',     blurb: 'Licence and trading hours, age checks, returnable bottles, tots and compliance reports.' },
     cosmetics:    { label: 'Cosmetics & beauty', icon: 'layers',    blurb: 'Shades, batches with expiry, recalls.' },
     restaurant:   { label: 'Restaurant, café & rooms', icon: 'utensils', blurb: 'Tables, kitchen screen, recipes, reservations and optional rooms & stays.' },
     general_shop: { label: 'General shop',       icon: 'bag',       blurb: 'Simple selling and stock. The standard setup.' },
@@ -53,27 +54,34 @@
     pharmacyDispensing:    { label: 'Dispensing',               group: 'Pharmacy',   ready: true,  desc: 'Medicine records, patients, prescriptions, the dispensing register, labels and the pharmacy desk. Switching this on opens the whole pharmacy module.' },
     prescriptionManagement:{ label: 'Prescriptions',            group: 'Pharmacy',   ready: true,  desc: 'Record prescriptions, have a pharmacist review them, and dispense against them at the till.' },
     restrictedProductControl:{ label: 'Restricted products',    group: 'Pharmacy',   ready: true,  desc: 'Control who may sell prescription-only and controlled medicines (credentials, countersign, Poisons Book).' },
+    liquorCompliance:      { label: 'Licence, hours & dry days', group: 'Wines & spirits', ready: true, desc: 'Licence on file, trading hours, closed days and a per-sale limit, enforced at the till.' },
+    ageVerification:       { label: 'Age checks',                group: 'Wines & spirits', ready: true, desc: 'An age check on every alcohol sale, logged. Under-age refusals are logged too.' },
+    emptiesTracking:       { label: 'Returnable bottles & crates', group: 'Wines & spirits', ready: true, desc: 'Deposits and empties: what is with customers, in the shop and owed to suppliers.' },
+    totSales:              { label: 'Tots from open bottles',    group: 'Wines & spirits', ready: true, desc: 'Sell by the tot from an open bottle, with dip counts, waste and variance.' },
+    heldSales:             { label: 'Held sales',               group: 'Shop tools', ready: true,  desc: 'Park a customer\'s cart at the till and serve the next one; recall it later.' },
+    promotions:            { label: 'Promotions',               group: 'Shop tools', ready: true,  desc: 'Dated offers: % off, amount off, fixed price or buy-more-pay-less.' },
     recallManagement:      { label: 'Recalls',                  group: 'Quality',    ready: true,  desc: 'Recall a batch and find where it went.' },
     quarantineManagement:  { label: 'Quarantine',               group: 'Quality',    ready: true,  desc: 'Hold suspect stock so it cannot be sold.' },
   };
 
-  const GROUP_ORDER = ['Stock', 'After-sales', 'Garage', 'Selling', 'Restaurant', 'Accommodation', 'Pharmacy', 'Quality'];
+  const GROUP_ORDER = ['Stock', 'After-sales', 'Garage', 'Selling', 'Restaurant', 'Accommodation', 'Pharmacy', 'Wines & spirits', 'Shop tools', 'Quality'];
 
   // Mirrors backend BUSINESS_FEATURE_DEFAULTS / LOCKED_ON.
   const DEFAULTS = {
-    supermarket: ['expiryTracking', 'batchTracking', 'unitConversions', 'loyaltyProgram'],
-    electronics: ['serialNumberTracking', 'warrantyManagement', 'repairManagement'],
-    clothing: ['productVariants', 'loyaltyProgram'],
-    hardware: ['unitConversions', 'quotationManagement', 'deliveryManagement'],
-    cosmetics: ['expiryTracking', 'batchTracking', 'productVariants', 'loyaltyProgram', 'quarantineManagement', 'recallManagement'],
+    supermarket: ['expiryTracking', 'batchTracking', 'unitConversions', 'loyaltyProgram', 'heldSales', 'promotions'],
+    electronics: ['serialNumberTracking', 'warrantyManagement', 'repairManagement', 'heldSales', 'promotions'],
+    clothing: ['productVariants', 'loyaltyProgram', 'heldSales', 'promotions'],
+    hardware: ['unitConversions', 'quotationManagement', 'deliveryManagement', 'heldSales', 'promotions'],
+    cosmetics: ['expiryTracking', 'batchTracking', 'productVariants', 'loyaltyProgram', 'quarantineManagement', 'recallManagement', 'heldSales', 'promotions'],
     restaurant: ['restaurantOrdering', 'tableManagement', 'kitchenDisplay', 'recipeManagement', 'reservations', 'guestQrOrdering', 'batchTracking'],
-    general_shop: [],
+    general_shop: ['heldSales', 'promotions'],
+    wines_spirits: ['liquorCompliance', 'ageVerification', 'emptiesTracking', 'totSales', 'unitConversions', 'batchTracking', 'loyaltyProgram', 'heldSales', 'promotions', 'wholesalePricing'],
     wholesale: ['wholesalePricing', 'unitConversions', 'quotationManagement', 'deliveryManagement', 'multiWarehouse', 'customerCredit'],
     garage: ['vehicleManagement', 'jobCards', 'quotationManagement'],
     pharmacy: ['expiryTracking', 'batchTracking', 'pharmacyDispensing', 'prescriptionManagement', 'restrictedProductControl', 'recallManagement', 'quarantineManagement'],
     other: [],
   };
-  const LOCKED = { pharmacy: ['expiryTracking', 'batchTracking', 'quarantineManagement', 'recallManagement'] };
+  const LOCKED = { pharmacy: ['expiryTracking', 'batchTracking', 'quarantineManagement', 'recallManagement'], wines_spirits: ['liquorCompliance', 'ageVerification'] };
 
   const featureKeys = () => Object.keys(FEATURES);
   const typeKeys = () => Object.keys(TYPES);
