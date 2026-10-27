@@ -214,6 +214,8 @@
 
     document.getElementById('add-product-btn').addEventListener('click', () => {
       // Pharmacies add medicines through their own form (drug details + opening batch); other goods use the normal form.
+      // Wines & spirits add drinks through their own form (category, ABV, size, photo, packs, empties, opening stock).
+      if (window.LiquorProductForm && window.LiquorProductForm.applies()) { window.LiquorProductForm.open({ onDone: () => fetchAndRender() }); return; }
       if (window.PharmacyProductForm && window.AppShell.hasFeature && window.AppShell.hasFeature('pharmacyDispensing') && window.Permissions.can(window.AppShell.getUser(), 'medicines.manage')) {
         window.PharmacyProductForm.chooser({ onDone: () => fetchAndRender(), onOther: () => openProductModal() });
       } else openProductModal();
@@ -242,6 +244,7 @@
     tbody.innerHTML = window.UI.skeletonRows(7, 4);
 
     try {
+      if (window.LiquorTill && window.LiquorTill.active()) await window.LiquorTill.refresh(); // category / ABV / size beside each drink
       const { data } = await window.Api.get('/products', {
         page: state.page, limit: state.limit, search: state.search, categoryId: state.categoryId,
       });
@@ -264,6 +267,16 @@
             : '<div class="text-xs text-muted">Wholesale only</div>'}`;
   }
 
+  /** Wines & spirits: photo (or a coloured initial), category chip, ABV and bottle size beside the name. Cashier-safe: reads the cached till rules. */
+  function liquorCell(p) {
+    const LT = window.LiquorTill; if (!LT || !LT.active()) return '';
+    const e = window.UI.escapeHtml; const d = LT.info(p._id);
+    const thumb = p.image ? `<img class="lq-thumb" src="${e(p.image)}" alt="" loading="lazy" />` : `<span class="lq-thumb-ph lq-c-${d ? e(d.category) : 'OTHER'}">${e((p.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+    const size = d && d.volumeMl ? (d.volumeMl >= 1000 ? `${d.volumeMl / 1000} L` : `${d.volumeMl} ml`) : '';
+    const meta = d ? `<span class="lq-chip lq-c-${e(d.category)}">${e(String(d.category).replace(/_/g, ' ').toLowerCase())}</span>${d.abv != null ? ` <span class="lq-abv">${e(d.abv)}%</span>` : ''}${size ? ` <span class="text-xs text-muted">${size}</span>` : ''}` : '<span class="text-xs text-muted">No drink details yet</span>';
+    return `<div class="lq-pcell">${thumb}<div><div class="cell-primary">${e(p.name)}</div><small>${meta}</small></div></div>`;
+  }
+
   function renderRows(items) {
     const tbody = document.getElementById('products-tbody');
 
@@ -282,7 +295,7 @@
       <tr data-id="${p._id}">
         <td class="bl-sel-col"><input type="checkbox" data-select="${p._id}" ${selected.has(p._id) ? 'checked' : ''} /></td>
         <td>
-          <div class="cell-primary">${window.UI.escapeHtml(p.name)}</div>
+          ${liquorCell(p) || `<div class="cell-primary">${window.UI.escapeHtml(p.name)}</div>`}
           ${p.hasVariants ? `<div class="text-xs text-muted">${p.variants.length} variant${p.variants.length === 1 ? '' : 's'}</div>` : ''}
         </td>
         <td>
@@ -323,6 +336,7 @@
       btn.addEventListener('click', async () => {
         const id = btn.closest('tr').dataset.id;
         const { data } = await window.Api.get(`/products/${id}`);
+        if (window.LiquorProductForm && window.LiquorProductForm.applies()) { window.LiquorProductForm.open({ product: data.product, onDone: () => fetchAndRender() }); return; }
         openProductModal(data.product);
       });
     });

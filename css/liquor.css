@@ -1,0 +1,117 @@
+/* ==========================================================================
+   WINES & SPIRITS THEME  ("Cellar")
+   Loaded only for wines_spirits businesses (app-shell.js sets <html data-biz="wines_spirits">).
+   Claret + brass on warm paper, charcoal sidebar. Overrides the design tokens, so every page follows.
+   ========================================================================== */
+:root[data-biz="wines_spirits"] {
+  --color-primary: #7a1f36;
+  --color-primary-dark: #5d1528;
+  --color-primary-light: #f6e8ec;
+  --color-primary-50: #fbf3f5;
+  --color-accent: #b08d57;
+  --color-accent-dark: #8e6f3f;
+  --color-accent-light: #f3ebdc;
+
+  --color-bg: #f6f2ec;
+  --color-surface: #fffdfa;
+  --color-border: #e6ddd0;
+  --color-border-strong: #d4c7b4;
+  --color-text: #231c1f;
+  --color-text-secondary: #5d5358;
+  --color-text-muted: #8c8186;
+
+  --color-success: #2f7d5b;  --color-success-bg: #eaf5ef;
+  --color-warning: #b7791f;  --color-warning-bg: #fbf3e2;
+  --color-danger: #b42335;   --color-danger-bg: #fbecee;
+  --color-info: #3b6a8f;     --color-info-bg: #eaf1f7;
+
+  --shadow-sm: 0 1px 2px rgba(35, 28, 31, .07), 0 1px 1px rgba(35, 28, 31, .04);
+  --shadow-md: 0 6px 16px rgba(35, 28, 31, .09);
+  --shadow-lg: 0 16px 32px rgba(35, 28, 31, .16);
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* category palette (chips, product tiles, report bars) */
+  --lq-wine: #7b1e3a;      --lq-sparkling: #b8942c;  --lq-whisky: #a8601b;   --lq-vodka: #45729c;
+  --lq-gin: #2f8478;       --lq-rum: #7d4529;        --lq-brandy: #96502c;   --lq-tequila: #6f8f2a;
+  --lq-liqueur: #85407d;   --lq-beer: #c98e1d;       --lq-cider: #7c9a31;    --lq-rtd: #d0553f;
+  --lq-traditional: #566236; --lq-other_spirit: #59606d; --lq-soft_drink: #2f7fc4; --lq-mixer: #3f8c99;
+  --lq-snack: #9a7048;     --lq-other: #6b7280;
+}
+
+[data-biz="wines_spirits"] body { background: var(--color-bg); }
+[data-biz="wines_spirits"] h1, [data-biz="wines_spirits"] .page-header h1 { letter-spacing: -0.01em; }
+[data-biz="wines_spirits"] .page-header h1::after { content: ''; display: block; width: 36px; height: 3px; margin-top: 8px; border-radius: 2px; background: var(--color-accent); }
+
+/* sidebar: charcoal with a brass active marker */
+[data-biz="wines_spirits"] .sidebar { background: #231c1f; border-right: 1px solid #120e10; color: #d9cfc8; }
+[data-biz="wines_spirits"] .sidebar-brand { border-bottom: 1px solid rgba(255, 255, 255, .08); color: #fff; }
+[data-biz="wines_spirits"] .sidebar-brand .logo-mark { background: linear-gradient(145deg, var(--color-primary), #4a1020); color: #f3ebdc; box-shadow: inset 0 0 0 1px rgba(176, 141, 87, .6); }
+[data-biz="wines_spirits"] .sidebar-section-label { color: #9d8f86; letter-spacing: .08em; }
+[data-biz="wines_spirits"] .sidebar-link { color: #d9cfc8; }
+[data-biz="wines_spirits"] .sidebar-link:hover { background: rgba(255, 255, 255, .06); color: #fff; }
+[data-biz="wines_spirits"] .sidebar-link.active { background: rgba(176, 141, 87, .16); color: #f3d9a4; box-shadow: inset 3px 0 0 var(--color-accent); }
+
+/* buttons, tabs, focus */
+[data-biz="wines_spirits"] .btn-primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+[data-biz="wines_spirits"] .btn-primary:hover:not(:disabled) { background: var(--color-primary-dark); border-color: var(--color-primary-dark); }
+[data-biz="wines_spirits"] .tab-btn.active, [data-biz="wines_spirits"] .tabs .active { color: var(--color-primary); border-color: var(--color-accent); }
+[data-biz="wines_spirits"] .input:focus, [data-biz="wines_spirits"] .select:focus, [data-biz="wines_spirits"] textarea:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(122, 31, 54, .14); outline: none; }
+[data-biz="wines_spirits"] .card, [data-biz="wines_spirits"] .stat-card { border-color: var(--color-border); }
+[data-biz="wines_spirits"] .stat-card { border-top: 3px solid var(--color-accent); }
+[data-biz="wines_spirits"] .table thead th { background: #f1ebe2; color: #4b4045; }
+[data-biz="wines_spirits"] .login-card, [data-biz="wines_spirits"] .auth-card { border-top: 4px solid var(--color-accent); }
+
+/* ---------- category chips ---------- */
+.lq-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.6; color: var(--c, #59606d); background: color-mix(in srgb, var(--c, #59606d) 12%, #fff); border: 1px solid color-mix(in srgb, var(--c, #59606d) 30%, #fff); white-space: nowrap; }
+.lq-chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--c, #59606d); }
+.lq-c-WINE { --c: var(--lq-wine, #7b1e3a); } .lq-c-SPARKLING { --c: var(--lq-sparkling, #b8942c); } .lq-c-WHISKY { --c: var(--lq-whisky, #a8601b); }
+.lq-c-VODKA { --c: var(--lq-vodka, #45729c); } .lq-c-GIN { --c: var(--lq-gin, #2f8478); } .lq-c-RUM { --c: var(--lq-rum, #7d4529); }
+.lq-c-BRANDY { --c: var(--lq-brandy, #96502c); } .lq-c-TEQUILA { --c: var(--lq-tequila, #6f8f2a); } .lq-c-LIQUEUR { --c: var(--lq-liqueur, #85407d); }
+.lq-c-BEER { --c: var(--lq-beer, #c98e1d); } .lq-c-CIDER { --c: var(--lq-cider, #7c9a31); } .lq-c-RTD { --c: var(--lq-rtd, #d0553f); }
+.lq-c-TRADITIONAL { --c: var(--lq-traditional, #566236); } .lq-c-OTHER_SPIRIT { --c: var(--lq-other_spirit, #59606d); }
+.lq-c-SOFT_DRINK { --c: var(--lq-soft_drink, #2f7fc4); } .lq-c-MIXER { --c: var(--lq-mixer, #3f8c99); } .lq-c-SNACK { --c: var(--lq-snack, #9a7048); } .lq-c-OTHER { --c: var(--lq-other, #6b7280); }
+.lq-abv { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11.5px; font-weight: 700; letter-spacing: .02em; color: #fff; background: #231c1f; }
+.lq-age { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 20px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 800; color: #fff; background: var(--color-primary, #7a1f36); }
+
+/* ---------- product thumbnail (image upload) ---------- */
+.lq-thumb { width: 44px; height: 56px; border-radius: 6px; object-fit: contain; background: #f1ebe2; border: 1px solid var(--color-border, #e6ddd0); flex: none; }
+.lq-thumb-ph { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 56px; border-radius: 6px; flex: none; font-weight: 800; font-size: 15px; color: #fff; background: var(--c, #59606d); letter-spacing: .02em; }
+.lq-pcell { display: flex; align-items: center; gap: 12px; }
+.lq-pcell small { display: block; color: var(--color-text-muted, #8c8186); font-size: 12px; margin-top: 2px; }
+
+/* ---------- product / purchase form ---------- */
+.lq-form { display: grid; gap: 18px; }
+.lq-fsec { border: 1px solid var(--color-border, #e6ddd0); border-radius: 10px; padding: 16px; background: var(--color-surface, #fffdfa); }
+.lq-fsec > h4 { margin: 0 0 12px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-accent-dark, #8e6f3f); display: flex; align-items: center; gap: 8px; }
+.lq-fsec > h4::after { content: ''; flex: 1; height: 1px; background: var(--color-border, #e6ddd0); }
+.lq-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.lq-grid .span2 { grid-column: span 2; }
+.lq-cats { display: flex; flex-wrap: wrap; gap: 8px; }
+.lq-cat { cursor: pointer; border: 1.5px solid var(--color-border, #e6ddd0); background: #fff; border-radius: 10px; padding: 8px 12px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; color: var(--color-text, #231c1f); transition: all .12s ease; }
+.lq-cat::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--c, #59606d); }
+.lq-cat:hover { border-color: var(--c, #59606d); }
+.lq-cat[aria-pressed="true"] { border-color: var(--c, #59606d); background: color-mix(in srgb, var(--c, #59606d) 10%, #fff); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c, #59606d) 25%, transparent); }
+.lq-photo { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.lq-photo-box { width: 96px; height: 120px; border: 1.5px dashed var(--color-border-strong, #d4c7b4); border-radius: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #f6f2ec; color: var(--color-text-muted, #8c8186); font-size: 12px; text-align: center; padding: 6px; }
+.lq-photo-box img { width: 100%; height: 100%; object-fit: contain; }
+.lq-hint { font-size: 12px; color: var(--color-text-muted, #8c8186); margin-top: 4px; }
+.lq-pack { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.lq-pack button { border: 1px solid var(--color-border-strong, #d4c7b4); background: #fff; border-radius: 6px; padding: 3px 9px; font-size: 12px; cursor: pointer; }
+.lq-pack button:hover { border-color: var(--color-primary, #7a1f36); color: var(--color-primary, #7a1f36); }
+.lq-calc { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.lq-calc > div { background: var(--color-accent-light, #f3ebdc); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: #5b4a2c; }
+.lq-calc strong { display: block; font-size: 15px; color: #3d2f17; }
+
+/* ---------- till: age gate + banners ---------- */
+.lq-gate { text-align: center; padding: 4px 0 8px; }
+.lq-gate .lq-badge18 { width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; color: #f3ebdc; background: radial-gradient(circle at 30% 30%, #9a2a47, #5d1528); box-shadow: 0 0 0 4px #fff, 0 0 0 6px var(--color-accent, #b08d57); }
+.lq-gate h3 { margin: 0 0 4px; }
+.lq-gate p { margin: 0 0 10px; }
+.lq-offline-note { display: flex; gap: 8px; align-items: flex-start; text-align: left; background: var(--color-accent-light, #f3ebdc); border: 1px solid #e3d4b5; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; color: #5b4a2c; margin-bottom: 10px; }
+.lq-trade { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: 1px solid; }
+.lq-trade.open { color: #1f6b4a; background: #eaf5ef; border-color: #b9dcca; }
+.lq-trade.closed { color: #9b1c2c; background: #fbecee; border-color: #efc2c8; }
+.lq-trade::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.lq-till-flag { position: absolute; top: 6px; left: 6px; }
+@media (max-width: 640px) { .lq-grid .span2 { grid-column: span 1; } .lq-fsec { padding: 12px; } }

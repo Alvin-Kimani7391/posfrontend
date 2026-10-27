@@ -33,6 +33,7 @@ BILLING_LOCKED: { label: 'Account locked', icon: 'alert', severity: 'critical' }
 BILLING_RESTORED: { label: 'Account restored', icon: 'check', severity: 'info' },
 BILLING_TRIAL: { label: 'Free trial', icon: 'bell', severity: 'warning' },
 BILLING_NOTICE: { label: 'Billing notice', icon: 'bell', severity: 'warning' },
+  BILLING_ADDON: { label: 'Premium feature', icon: 'bell', severity: 'info' },
 
 FAKE_RECEIPT: { label: 'Fake receipt', icon: 'alert', severity: 'critical' },
 OFFLINE_REVIEW: { label: 'Offline review', icon: 'alert', severity: 'warning' },

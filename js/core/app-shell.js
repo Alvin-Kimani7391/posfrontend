@@ -303,6 +303,26 @@
   let profile = readCachedProfile();
   let profilePromise = null;
 
+  /* Wines & spirits get their own look (css/liquor.css: claret, brass and charcoal). Applied from the cached profile on first
+     paint (works offline) and again whenever a fresh profile arrives. Other business types are left exactly as they were. */
+  function applyBizTheme() {
+    try {
+      const liquor = !!profile && profile.businessType === 'wines_spirits';
+      const root = document.documentElement;
+      if (liquor) {
+        root.setAttribute('data-biz', 'wines_spirits');
+        if (!document.getElementById('liquor-theme-css')) {
+          const l = document.createElement('link'); l.id = 'liquor-theme-css'; l.rel = 'stylesheet'; l.href = 'css/liquor.css';
+          document.head.appendChild(l);
+        }
+      } else if (root.getAttribute('data-biz') === 'wines_spirits') {
+        root.removeAttribute('data-biz');
+        const l = document.getElementById('liquor-theme-css'); if (l) l.remove();
+      }
+    } catch { /* theming must never break a page */ }
+  }
+  applyBizTheme();
+
   function readCachedProfile() {
     try {
       const p = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null');
@@ -326,6 +346,7 @@
         const next = { ...data.profile, userId: u && (u._id || u.id) };
         const changed = JSON.stringify(profile && { ...profile, fetchedAt: 0 }) !== JSON.stringify({ ...next, fetchedAt: 0 });
         profile = next;
+        applyBizTheme();
         try { localStorage.setItem(PROFILE_KEY, JSON.stringify(next)); } catch { /* storage blocked */ }
         setTimeout(loadOpsPlan, 0);
         if (changed) { rebuildSidebarNav(); window.dispatchEvent(new CustomEvent('businessprofilechange', { detail: next })); }

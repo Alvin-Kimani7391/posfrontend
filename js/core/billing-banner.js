@@ -77,6 +77,9 @@
     setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
   }
 
+  // premium add-on crowns / lock panels (js/core/premium.js) load on every tenant page, even where the banner stays quiet
+  try { if (!window.Premium && !document.getElementById('premium-script')) { const p = document.createElement('script'); p.id = 'premium-script'; p.src = 'js/core/premium.js'; p.async = true; document.head.appendChild(p); } } catch { /* never block the page */ }
+
   window.BillingBanner = { start, refresh };
   if (window.AppShell) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

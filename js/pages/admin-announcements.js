@@ -17,7 +17,7 @@
     ['settings', 'Settings'], ['audit', 'Audit log'],
     ['hx-dashboard', 'Hotel/Restaurant: Dashboard'], ['hx-floor', 'Restaurant: Tables & orders'], ['hx-kitchen', 'Restaurant: Kitchen & bar'],
     ['hx-bills', 'Restaurant: Bills & payments'], ['hx-reservations', 'Restaurant: Reservations'], ['hx-delivery', 'Restaurant: Delivery & pickup'],
-    ['hx-menu', 'Restaurant: Menu'], ['hx-stock', 'Restaurant: Ingredients'], ['hx-guest', 'Restaurant: Guest requests & QR'], ['hx-staff', 'Restaurant: Shifts & tips'],
+    ['hx-menu', 'Restaurant: Menu'], ['hx-stock', 'Restaurant: Ingredients'], ['hx-guest', 'Restaurant: Guest requests & QR'], ['hx-selfservice', 'Restaurant: Self-service kiosk'], ['hx-storefront', 'Restaurant: Online storefront'], ['hx-live', 'Restaurant: Live tracking'], ['hx-tv', 'Restaurant: Live TV menu'], ['billing', 'Billing'], ['hx-staff', 'Restaurant: Shifts & tips'],
     ['hx-desk', 'Rooms: Front desk'], ['hx-rooms', 'Rooms: Room board'], ['hx-stays', 'Rooms: Bookings'], ['hx-housekeeping', 'Rooms: Housekeeping'],
     ['hx-reports', 'Restaurant & rooms: Reports'], ['hx-setup', 'Restaurant & rooms: Setup guide'], ['hx-restaurant-settings', 'Restaurant & rooms: Restaurant settings'],
   ];

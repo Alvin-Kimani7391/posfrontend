@@ -622,7 +622,9 @@
     const picker = createInvoicePicker(modal.querySelector('#invoice-picker'));
 
     /** Real cost per unit (incl. VAT) - the same number the backend stores as the product cost. */
-    const realCost = (it) => splitPrice(it.price, vat.mode, vat.rate).inclVat;
+    const liquor = !!(window.LiquorTill && window.LiquorTill.active());
+    const packOf = (it) => Math.max(1, Math.floor(Number(it.pack) || 1)); // bottles / cans in one pack (wines & spirits buy by the case)
+    const realCost = (it) => splitPrice(it.price, vat.mode, vat.rate).inclVat / packOf(it);
 
     /** Summary / button under an item for the optional price update. */
     function priceBoxHtml(it, i) {
@@ -714,16 +716,34 @@
       sellEl.focus(); sellEl.select();
     }
 
-    function priceLabel() {
-      if (vat.mode === 'INCLUSIVE') return 'Unit cost incl. VAT (KES)';
-      if (vat.mode === 'EXCLUSIVE') return 'Unit cost excl. VAT (KES)';
-      return 'Unit cost (KES)';
+    function priceLabel(it) {
+      const u = it && packOf(it) > 1 ? 'Cost per pack' : 'Unit cost';
+      if (vat.mode === 'INCLUSIVE') return `${u} incl. VAT (KES)`;
+      if (vat.mode === 'EXCLUSIVE') return `${u} excl. VAT (KES)`;
+      return `${u} (KES)`;
+    }
+
+    /* Wines & spirits: buy by the case / crate / tray, stock is kept per bottle. */
+    function liquorChip(it) {
+      const d = window.LiquorTill.info(it.product._id);
+      return d ? ` <span class="lq-chip lq-c-${esc(d.category)}" style="margin-left:6px">${esc(String(d.category).replace(/_/g, ' ').toLowerCase())}</span>${d.abv != null ? ` <span class="lq-abv">${esc(d.abv)}%</span>` : ''}${d.volumeMl ? ` <span class="text-xs text-muted">${esc(d.volumeMl)} ml</span>` : ''}` : '';
+    }
+    function liquorRowHtml(it, i) {
+      const n = packOf(it);
+      return `<div class="form-row" style="margin-top:var(--space-2)">
+        <div class="field" style="margin-bottom:0"><label class="text-xs">Bottles / cans in one pack <span class="text-muted">(1 = bought singly)</span></label>
+          <input class="input" type="number" min="1" step="1" value="${n}" data-field="pack" data-idx="${i}" />
+          <div class="lq-pack">${[1, 6, 12, 24].map((x) => `<button type="button" data-packset="${x}" data-idx="${i}">${x === 1 ? 'Single' : `Case of ${x}`}</button>`).join('')}</div></div>
+        <div class="field" style="margin-bottom:0"><label class="text-xs">You receive</label>
+          <div class="text-sm" style="padding-top:8px"><b>${(Number(it.quantity) || 0) * n}</b> bottles/cans${n > 1 ? ` (${Number(it.quantity) || 0} × ${n})` : ''}</div></div>
+      </div>`;
     }
 
     function calcHtml(it) {
       const { exVat, inclVat } = splitPrice(it.price, vat.mode, vat.rate);
-      if (vat.mode === 'NONE') return `Line total: <b>${money(inclVat * it.quantity)}</b>`;
-      return `Excl. VAT: ${money(exVat)} &middot; <b>Real cost per unit (incl. VAT): ${money(inclVat)}</b> &middot; Line total: <b>${money(inclVat * it.quantity)}</b>`;
+      const n = packOf(it); const per = n > 1 ? ` &middot; <b>Per bottle: ${money(inclVat / n)}</b>` : '';
+      if (vat.mode === 'NONE') return `Line total: <b>${money(inclVat * it.quantity)}</b>${per}`;
+      return `Excl. VAT: ${money(exVat)} &middot; <b>Real cost per ${n > 1 ? 'pack' : 'unit'} (incl. VAT): ${money(inclVat)}</b>${per} &middot; Line total: <b>${money(inclVat * it.quantity)}</b>`;
     }
 
     function refreshCalc() {
@@ -747,19 +767,21 @@
       el.innerHTML = items.map((it, i) => `
         <div style="border:1px solid var(--color-border); border-radius:var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-2)">
           <div class="flex items-center justify-between" style="margin-bottom: var(--space-2)">
-            <span class="text-sm font-semibold">${esc(it.product.name)}</span>
+            <span class="text-sm font-semibold">${esc(it.product.name)}${liquor ? liquorChip(it) : ''}</span>
             <button type="button" class="btn btn-ghost btn-sm btn-icon" data-remove="${i}">${window.Icons.get('trash')}</button>
           </div>
           <div class="form-row">
             <div class="field" style="margin-bottom:0"><label class="text-xs">Quantity</label><input class="input" type="number" min="0.01" step="0.01" value="${it.quantity}" data-field="quantity" data-idx="${i}" /></div>
-            <div class="field" style="margin-bottom:0"><label class="text-xs">${priceLabel()}</label><input class="input" type="number" min="0" step="0.01" value="${it.price}" data-field="price" data-idx="${i}" /></div>
+            <div class="field" style="margin-bottom:0"><label class="text-xs">${priceLabel(it)}</label><input class="input" type="number" min="0" step="0.01" value="${it.price}" data-field="price" data-idx="${i}" /></div>
           </div>
+          ${liquor ? liquorRowHtml(it, i) : ''}
           <div class="text-xs text-secondary" style="margin-top: var(--space-2)" data-calc="${i}"></div>
           <div data-pricebox="${i}" style="margin-top: var(--space-2)"></div>
         </div>
       `).join('');
       el.querySelectorAll('input[data-field]').forEach((input) => {
         input.addEventListener('input', () => { items[Number(input.dataset.idx)][input.dataset.field] = Number(input.value) || 0; refreshCalc(); });
+        if (input.dataset.field === 'pack' || input.dataset.field === 'quantity') input.addEventListener('change', () => { if (liquor) renderItems(); });
         // Fires when the owner finishes typing the cost (blur / Enter) -> offer the price pop-up.
         if (input.dataset.field === 'price') {
           input.addEventListener('change', () => {
@@ -770,6 +792,7 @@
           });
         }
       });
+      el.querySelectorAll('[data-packset]').forEach((b) => b.addEventListener('click', () => { items[Number(b.dataset.idx)].pack = Number(b.dataset.packset); renderItems(); }));
       el.querySelectorAll('[data-remove]').forEach((btn) => {
         btn.addEventListener('click', () => { items.splice(Number(btn.dataset.remove), 1); renderItems(); });
       });
@@ -822,8 +845,8 @@
         const line = {
           productId: it.product._id,
           variantId: it.variant?._id,
-          quantity: it.quantity,
-          unitCost: splitPrice(it.price, vat.mode, rate).exVat, // backend adds the VAT back via taxRate
+          quantity: it.quantity * packOf(it), // stock is kept per bottle / can
+          unitCost: splitPrice(it.price, vat.mode, rate).exVat / packOf(it), // backend adds the VAT back via taxRate
           taxRate: rate,
         };
         if (it.priceUpdate) {               // owner chose "Update prices"

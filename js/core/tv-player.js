@@ -9,7 +9,7 @@
   const LS = { token: 'tv.token', cache: 'tv.cache', etag: 'tv.etag' };
   const $ = (id) => document.getElementById(id);
   const store = { get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* storage full / blocked */ } }, del: (k) => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } } };
-  let token = store.get(LS.token); let ctrl = null; let content = null; let shown = 0; let es = null; let pollT = null; let beatT = null; let busy = false; let fails = 0; let lastErrAt = 0; let stopped = false;
+  let token = store.get(LS.token); let ctrl = null; let content = null; let shown = 0; let es = null; let pollT = null; let beatT = null; let busy = false; let fails = 0; let lastErrAt = 0; let stopped = false; let oBusy = false; let oOk = Date.now();
 
   const status = (txt, ms = 4000) => { const s = $('stat'); s.textContent = txt; s.classList.add('on'); clearTimeout(status.t); if (ms) status.t = setTimeout(() => s.classList.remove('on'), ms); };
   const panel = (id) => { ['pair', 'blocked'].forEach((p) => $(p).classList.toggle('on', p === id)); $('tv').style.visibility = id ? 'hidden' : 'visible'; };
@@ -68,7 +68,9 @@
 
   function render(c) {
     content = c; if (!ctrl) ctrl = window.TVRender.create($('tv'));
-    ctrl.setContent(resolve(c)); shown = c.version || 0; panel(null);
+    const fresh = !c.generatedAt || Date.now() - new Date(c.generatedAt).getTime() < 120000;    // never show an old copy of the order statuses as if it were live
+    ctrl.setContent(resolve(c.ordersFeed && !fresh ? { ...c, orders: [] } : c)); ctrl.setStale(!!c.ordersFeed && !fresh); if (c.ordersFeed && fresh) oOk = Date.now();
+    shown = c.version || 0; panel(null);
   }
   setInterval(() => { if (content && Array.isArray(content.offlineSlides)) { ctrl && ctrl.setContent(resolve(content)); } }, 30000);   // dayparts follow the clock
   function blocked(title, msg, canRepair) { panel('blocked'); $('btitle').textContent = title; $('bmsg').textContent = msg; $('brepair').style.display = canRepair ? '' : 'none'; }
@@ -88,6 +90,14 @@
       else { fails += 1; status('Offline: showing the last menu'); report(e); if (!content) { const c = JSON.parse(store.get(LS.cache) || 'null') || await restore(); if (c) render(c); } schedulePoll(Math.min(10000 * Math.pow(1.5, Math.min(fails, 3)), 30000)); }
     } finally { busy = false; }
   }
+  // ---- live order status: tiny separate feed so the slides never restart when an order moves from Preparing to Ready ----
+  async function loadOrders() {
+    if (oBusy || !token || stopped || !content || !content.ordersFeed || !ctrl) return; oBusy = true;
+    try { const d = await call('/public/tv/orders'); oOk = Date.now(); content.orders = d.orders || []; ctrl.setOrders(content.orders); ctrl.setStale(false); }
+    catch (e) { if (Date.now() - oOk > 90000) ctrl.setStale(true); if (e.status === 401 || e.code === 'TV_REVOKED' || e.code === 'TV_DISABLED') load(); }
+    finally { oBusy = false; }
+  }
+  setInterval(loadOrders, 8000);
   function schedulePoll(ms) { clearTimeout(pollT); pollT = setTimeout(load, ms); }
   function report(e) { if (!token || Date.now() - lastErrAt < 300000 || e.status === 0) return; lastErrAt = Date.now(); call('/public/tv/error', { method: 'POST', body: { message: String(e.message || e).slice(0, 280) } }).catch(() => {}); }
   function beat() { if (token) call('/public/tv/heartbeat', { method: 'POST', body: { shownVersion: shown, appVersion: 'web-1' } }).catch(() => {}); }
@@ -96,6 +106,7 @@
     closeStream(); if (!token || !window.EventSource) return;
     es = new EventSource(`${API}/public/tv/stream?token=${encodeURIComponent(token)}`);
     es.addEventListener('refresh', () => load());
+    es.addEventListener('orders', () => loadOrders());
     es.addEventListener('command', (ev) => { try { const d = JSON.parse(ev.data); if (d.type === 'RELOAD') location.reload(); else load(); } catch (e) { load(); } });
     es.addEventListener('revoked', () => load());
     es.onerror = () => { /* EventSource retries by itself; polling covers the gap */ };

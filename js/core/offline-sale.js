@@ -41,7 +41,7 @@
      * payments: [{ method, amount (KES), amountTendered?, reference?, mpesa?: { code, payerPhone, payerName } }]
      * Returns { receiptNumber, receipt, clientTransactionId }.
      */
-    async create({ cart, cartDiscount = 0, payments, clientTransactionId, notes }) {
+    async create({ cart, cartDiscount = 0, payments, clientTransactionId, notes, ageCheck }) {
       const chk = Sales.check();
       if (!chk.ok) fail(chk.reason);
       const g = chk.grant; const caps = g.caps || {}; const lim = g.limits || {};
@@ -86,12 +86,15 @@
         if (amountCents <= 0) continue;
         if ((p.method === 'CARD' || p.method === 'BANK') && !caps.allowCard) fail('Card and bank payments cannot be taken offline.');
         if (p.method === 'MPESA' && (!caps.allowManualMpesa || !ctx.mpesaTill)) fail('M-PESA Till payments are not enabled for offline selling.');
+        if (p.method === 'MOBILE_MONEY' && !caps.allowManualMpesa && !caps.allowCard) fail('Mobile-money payments are not enabled for offline selling.');
+        if (p.method === 'MOBILE_MONEY' && !p.reference) fail('Type the mobile-money transaction code.');
         if (p.method === 'CREDIT') fail('Credit sales are not available offline.');
         const row = { method: p.method, amountCents, reference: p.reference || undefined };
         if (p.method === 'CASH') {
           row.amountTenderedCents = p.amountTendered == null ? amountCents : cents(p.amountTendered);
           if (row.amountTenderedCents < amountCents) fail('The cash received is less than the amount due.');
         }
+        if (p.method === 'MOBILE_MONEY') { row.network = p.network || p.provider || 'Other'; if (p.payerPhone) row.payerPhone = p.payerPhone; }
         if (p.method === 'MPESA') row.mpesa = { code: String(p.mpesa.code).toUpperCase(), payerPhone: p.mpesa.payerPhone, payerName: p.mpesa.payerName || undefined };
         pays.push(row);
       }
@@ -111,6 +114,7 @@
         items, payments: pays, cartDiscountCents: cartDiscCents,
         subtotalCents: subtotal, itemDiscountCents: itemDisc, taxCents: tax, totalCents: total,
         catalogVersion: await Offline.catalog.version(), notes: notes || undefined,
+        ...(ageCheck && ageCheck.confirmedOfAge ? { ageCheck } : {}),
         _view: { cashierName: g.name, branchName: (ctx.branch || {}).name }, // kept for reprints (the server ignores it)
       };
       const claims = g.claims || {};

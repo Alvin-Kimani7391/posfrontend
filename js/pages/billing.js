@@ -39,7 +39,7 @@
   };
   const PHONE_KEY = 'sixstar.billing.phone';
 
-  const state = { data: null, tab: 'invoices', invPage: 1, payPage: 1, pollTimer: null };
+  const state = { data: null, tab: 'invoices', invPage: 1, payPage: 1, pollTimer: null, payInvoiceId: null, addons: null };
   let contentEl;
   let user;
 
@@ -135,6 +135,7 @@
 
     parts.push(`<div class="bl-grid-2">${planCard(d, s)}${upcomingCard(d)}</div>`);
     if (d.pricing) parts.push(pricingCard(d.pricing));
+    parts.push('<div id="addons"><div id="bl-addons"></div></div>');
     if (d.openInvoices.length) parts.push(openInvoicesCard(d.openInvoices));
     parts.push(payCard(d, s));
     if (d.pendingPayments.length) parts.push(pendingCard(d.pendingPayments));
@@ -148,6 +149,7 @@
 
     body.innerHTML = parts.join('');
     bindAll(d, s);
+    loadAddons();
     loadHistory();
     resumePendingStk(d.pendingPayments);
   }
@@ -205,7 +207,7 @@
         <td class="text-sm">${esc(i.description)}</td>
         <td class="text-sm">${fdate(i.dueDate)} ${i.overdue ? '<span class="badge badge-danger">Overdue</span>' : ''}</td>
         <td class="bl-right font-semibold">${fm(i.balanceCents)}</td>
-        <td class="actions"><button class="btn btn-secondary btn-sm" data-pay-invoice="${Math.ceil(i.balanceCents / 100)}">Pay</button></td>
+        <td class="actions"><button class="btn btn-secondary btn-sm" data-pay-invoice="${Math.ceil(i.balanceCents / 100)}" data-inv-id="${esc(i._id || '')}">Pay</button></td>
       </tr>`).join('');
     return card('Outstanding invoices', `<div class="table-wrap flat"><table class="table"><thead><tr><th>Invoice</th><th>Description</th><th>Due</th><th class="bl-right">Balance</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
       <p class="bl-muted" style="margin-top:var(--space-3)">Payments are applied to the oldest invoice first. Anything extra is kept as credit for the next invoice.</p>`);
@@ -335,6 +337,7 @@
     }));
 
     document.querySelectorAll('[data-pay-invoice]').forEach((b) => b.addEventListener('click', () => {
+      state.payInvoiceId = b.dataset.invId || null;
       const pay = $('bl-pay');
       if (!pay) return;
       const stkBtn = document.querySelector('#bl-methods [data-method="stk"]');
@@ -383,7 +386,7 @@
     window.UI.setButtonLoading(btn, true, 'Sending…');
     showStatus('pending', 'Sending', 'Sending the prompt to the phone…');
     try {
-      const { data } = await window.Api.post('/billing/payments/stk', { phone, amountCents: kes * 100 });
+      const { data } = await window.Api.post('/billing/payments/stk', { phone, amountCents: kes * 100, ...(state.payInvoiceId ? { invoiceId: state.payInvoiceId } : {}) });
       try { localStorage.setItem(PHONE_KEY, phone); } catch { /* ignore */ }
       startPoll(data.payment.id);
     } catch (err) {
@@ -456,7 +459,9 @@
     const btn = $('bl-man-send');
     window.UI.setButtonLoading(btn, true, 'Submitting…');
     try {
+      if (state.payInvoiceId) payload.invoiceId = state.payInvoiceId;
       await window.Api.post('/billing/payments/manual', payload);
+      state.payInvoiceId = null;
       window.UI.toast.success('Submitted - we will verify it shortly');
       await load();
     } catch (err) {
@@ -464,6 +469,70 @@
     } finally {
       if (document.body.contains(btn)) window.UI.setButtonLoading(btn, false);
     }
+  }
+
+  /* ---------------------------- premium features ---------------------------- */
+  const AD_BADGE = { ACTIVE: 'badge-success', TRIAL: 'badge-info', GRACE: 'badge-warning', CANCELLING: 'badge-warning', COMPLIMENTARY: 'badge-info', PENDING_PAYMENT: 'badge-warning', LOCKED: 'badge-neutral' };
+  const AD_LABEL = { ACTIVE: 'Active', TRIAL: 'Free trial', GRACE: 'Renewal overdue', CANCELLING: 'Ends soon', COMPLIMENTARY: 'Included', PENDING_PAYMENT: 'Awaiting payment', LOCKED: 'Locked' };
+  const CROWN = (window.Premium && window.Premium.crown) || '&#9818;';
+
+  async function loadAddons() {
+    const host = $('bl-addons'); if (!host) return;
+    try {
+      const { data } = await window.Api.get('/billing/addons');
+      state.addons = data;
+      const list = (data.addons || []).filter((a) => a.enforced);
+      if (!list.length) { host.innerHTML = ''; return; }
+      const canManage = data.canManage && window.Permissions.can(user, 'billing.pay');
+      const monthly = data.monthlyCents ? `<span class="bl-muted">Add-ons: ${fm(data.monthlyCents, data.currency)} / month</span>` : '';
+      const rows = list.map((a) => {
+        const inv = a.pendingInvoice;
+        let action = '';
+        if (canManage) {
+          if (a.state === 'ACTIVE' || a.state === 'TRIAL' || a.state === 'GRACE') action = `<button class="btn btn-secondary btn-sm" data-ad-cancel="${esc(a.key)}">Cancel</button>`;
+          else if (a.state === 'CANCELLING') action = `<button class="btn btn-secondary btn-sm" data-ad-resume="${esc(a.key)}">Keep it</button>`;
+          else if (a.state === 'PENDING_PAYMENT' && inv) action = `<button class="btn btn-primary btn-sm" data-ad-pay="${esc(inv.id)}" data-amt="${Math.ceil(inv.balanceCents / 100)}">Pay ${fm(inv.balanceCents)}</button> <button class="btn btn-ghost btn-sm" data-ad-cancel="${esc(a.key)}">Cancel</button>`;
+          else if (a.state === 'LOCKED') action = `<button class="btn btn-primary btn-sm" data-ad-up="${esc(a.key)}">${a.trialAvailable ? 'Start free trial' : 'Upgrade'}</button>`;
+        }
+        const until = a.billingType === 'ONE_TIME' && a.state === 'ACTIVE' ? 'Yours to keep' : a.until ? (a.state === 'CANCELLING' ? `Access until ${fdate(a.until)}` : a.state === 'TRIAL' ? `Trial ends ${fdate(a.until)}` : a.state === 'COMPLIMENTARY' ? '' : `Renews ${fdate(a.until)}`) : '';
+        return `<div class="bl-kv" style="align-items:flex-start;gap:var(--space-3)">
+          <span style="flex:1"><b>${CROWN} ${esc(a.name)}</b> <span class="badge ${AD_BADGE[a.state] || 'badge-neutral'}">${esc(AD_LABEL[a.state] || a.state)}</span>
+            <div class="text-sm text-secondary">${esc(a.tagline || '')}</div>
+            <div class="text-sm text-secondary">${a.priceCents != null ? (a.billingType === 'ONE_TIME' ? `${fm(a.priceCents, data.currency)} one-time` : `${fm(a.priceCents, data.currency)} / ${a.intervalMonths === 1 ? 'month' : `${a.intervalMonths} months`}`) : ''}${until ? ` · ${until}` : ''}</div></span>
+          <span style="white-space:nowrap">${action}</span></div>`;
+      }).join('');
+      host.innerHTML = card('Premium features', `<p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">Added on top of your base plan. Upgrade any time and cancel any time - a cancelled feature stays on until the end of the period you paid for. ${monthly}</p>${rows}`);
+      host.querySelectorAll('[data-ad-up]').forEach((b) => b.addEventListener('click', () => window.Premium && window.Premium.upgrade(b.dataset.adUp, b)));
+      host.querySelectorAll('[data-ad-pay]').forEach((b) => b.addEventListener('click', () => payInvoice(b.dataset.adPay, b.dataset.amt)));
+      host.querySelectorAll('[data-ad-cancel]').forEach((b) => b.addEventListener('click', () => cancelAddon(b.dataset.adCancel)));
+      host.querySelectorAll('[data-ad-resume]').forEach((b) => b.addEventListener('click', async () => {
+        try { await window.Api.post(`/billing/addons/${b.dataset.adResume}/resume`, {}); window.UI.toast.success('Welcome back - it will keep renewing'); window.Premium && window.Premium.refresh(); load(); } catch (e) { window.UI.toast.error(e.message); }
+      }));
+      const want = new URLSearchParams(window.location.search).get('pay');
+      if (want && !state.paidFromUrl) {
+        state.paidFromUrl = true;
+        const a = list.find((x) => x.pendingInvoice && x.pendingInvoice.id === want);
+        if (a) payInvoice(want, Math.ceil(a.pendingInvoice.balanceCents / 100));
+      }
+      if (window.location.hash === '#addons') $('addons')?.scrollIntoView({ block: 'start' });
+    } catch { host.innerHTML = ''; }
+  }
+
+  function payInvoice(invoiceId, amount) {
+    state.payInvoiceId = invoiceId;
+    const pay = $('bl-pay'); if (!pay) return window.UI.toast.info('Online payment is not available. Please contact support.');
+    const stkBtn = document.querySelector('#bl-methods [data-method="stk"]'); if (stkBtn) stkBtn.click();
+    const manBtn = document.querySelector('#bl-methods [data-method="manual"]'); if (!stkBtn && manBtn) manBtn.click();
+    const input = (stkBtn && $('bl-stk-amount')) || $('bl-man-amount'); if (input) input.value = amount;
+    pay.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  async function cancelAddon(key) {
+    const a = (state.addons.addons || []).find((x) => x.key === key); if (!a) return;
+    const now = a.state === 'PENDING_PAYMENT' || a.state === 'TRIAL';
+    const ok = await window.UI.confirmDialog({ title: `Cancel ${a.name}?`, message: now ? 'It will be switched off now.' : `You keep it until ${fdate(a.until)} and will not be charged again. You can change your mind before then.`, confirmText: 'Cancel feature', danger: true });
+    if (!ok) return;
+    try { await window.Api.post(`/billing/addons/${encodeURIComponent(key)}/cancel`, {}); window.UI.toast.success('Cancelled'); window.Premium && window.Premium.refresh(); load(); } catch (e) { window.UI.toast.error(e.message); }
   }
 
   /* -------------------------------- history -------------------------------- */

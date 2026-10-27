@@ -1195,7 +1195,11 @@
           <div class="pz-tbody" id="pz-ticket"></div>
           <div class="pz-tfoot">
             <div class="pz-tfoot-stats" id="pz-products-foot"></div>
-            <button class="btn btn-ghost btn-sm" id="clear-cart-btn"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Clear all</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+              ${!wsOn && canHeld() ? '<button class="btn btn-secondary btn-sm" id="park-btn" title="Park this cart and serve the next customer"><i class="fa-solid fa-pause" aria-hidden="true"></i> Park</button><button class="btn btn-secondary btn-sm" id="recall-btn" title="Recall a parked cart"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Recall</button>' : ''}
+              ${!wsOn && canPromo() ? '<button class="btn btn-secondary btn-sm" id="offers-btn" title="Check promotions for this cart"><i class="fa-solid fa-tags" aria-hidden="true"></i> Offers</button>' : ''}
+              <button class="btn btn-ghost btn-sm" id="clear-cart-btn"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Clear all</button>
+            </div>
           </div>
         </section>
 
@@ -1220,6 +1224,13 @@
     bindTicketEvents();
     renderCart();
 
+    $('park-btn')?.addEventListener('click', parkSale);
+    $('recall-btn')?.addEventListener('click', recallSale);
+    $('offers-btn')?.addEventListener('click', () => {
+      if (isOfflineNow()) return window.UI.toast.error('Offers need a connection. Prices stay as they are while offline.');
+      if (!state.cart.length) return window.UI.toast.error('The cart is empty');
+      schedulePromoQuote(true);
+    });
     $('clear-cart-btn').addEventListener('click', async () => {
       if (!state.cart.length) return;
       const ok = await window.UI.confirmDialog({ title: wsOn ? 'Clear invoice?' : 'Clear cart?', confirmText: 'Clear', danger: true });
@@ -1525,6 +1536,7 @@
     renderTotals();
     if (window.PharmacyTill) window.PharmacyTill.paintBar($('ph-till-bar'), state.pharmacy, state.cart);
     if (window.PharmacyDesk) window.PharmacyDesk.paint();
+    schedulePromoQuote();
   }
 
   /* One row per product: Products half (# | Barcode | Name | Price) and Cart half (Qty | Discount | Subtotal | x) */
@@ -1775,6 +1787,7 @@
         syncAutoDiscount(item);
       } else {
         item.discount = newDiscount;
+        item.promoApplied = false; item.promoName = '';
         // Typing exactly the preset amount puts the line back on auto; anything else is a manual discount.
         const preset = autoDiscountFor(item);
         item.autoDiscount = preset > 0 && Math.abs(newDiscount - preset) < 0.005;
@@ -2415,10 +2428,180 @@
   }
 
   /* ================================================================== *
+   * HELD SALES (Park / Recall) and PROMOTIONS at the till
+   *   Online : POST /shop/held, GET /shop/held, POST /shop/held/:id/recall, DELETE /shop/held/:id
+   *   Offline: carts are parked on THIS device (localStorage) and recalled from there - no server needed.
+   *   Offers : POST /shop/promotions/quote -> suggestedDiscount per line, applied as the line discount.
+   * ================================================================== */
+  const LOCAL_HELD_KEY = 'pos.heldLocal.v1';
+  const canHeld = () => !!(window.AppShell.hasFeature && window.AppShell.hasFeature('heldSales')) && window.Permissions.can(window.AppShell.getUser(), 'shop.held.use');
+  const canPromo = () => !!(window.AppShell.hasFeature && window.AppShell.hasFeature('promotions')) && window.Permissions.can(window.AppShell.getUser(), 'shop.promotions.view');
+
+  function localHeld() { try { const a = JSON.parse(localStorage.getItem(LOCAL_HELD_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
+  function saveLocalHeld(list) { try { localStorage.setItem(LOCAL_HELD_KEY, JSON.stringify(list)); return true; } catch { window.UI.toast.error('Could not save on this device (storage full)'); return false; } }
+  const isNetErr = (e) => !e || e.status == null || e.status === 0 || /network|failed to fetch|offline|timeout/i.test(String((e && e.message) || ''));
+
+  function snapshotCart() {
+    return state.cart.map((i) => ({ product: i.product, variant: i.variant || null, quantity: i.quantity, discount: i.discount || 0, autoDiscount: !!i.autoDiscount, promoApplied: !!i.promoApplied, overridePriceEnabled: !!i.overridePriceEnabled, overridePrice: i.overridePrice == null ? null : i.overridePrice }));
+  }
+  function parkLocal(label) {
+    const list = localHeld();
+    list.unshift({ id: `L${Date.now().toString(36)}`, label, at: Date.now(), cart: snapshotCart(), customer: state.customer, cartDiscount: state.cartDiscount || 0 });
+    return saveLocalHeld(list.slice(0, 30));
+  }
+
+  async function parkSale() {
+    if (isWs()) return window.UI.toast.error('Park is for retail sales');
+    if (!state.cart.length) return window.UI.toast.error('The cart is empty');
+    if (state.pendingMpesa) return window.UI.toast.error('An M-PESA payment is pending. Finish it first.');
+    const ans = window.prompt('Name for this held sale (optional):', state.customer ? state.customer.name : '');
+    if (ans === null) return; // cancelled
+    const label = ans.trim().slice(0, 60);
+    let saved = false;
+    if (!isOfflineNow()) {
+      try {
+        await window.Api.post('/shop/held', {
+          branchId: window.AppShell.getActiveBranchId(), label: label || undefined, customerId: state.customer?._id || undefined, cartDiscount: state.cartDiscount || 0,
+          items: state.cart.map((i) => ({ productId: i.product._id, variantId: i.variantId || i.variant?._id || undefined, quantity: i.quantity, discount: i.discount || 0 })),
+        });
+        saved = true; window.UI.toast.success('Sale parked');
+      } catch (e) {
+        if (!isNetErr(e)) return window.UI.toast.error(e.message || 'Could not park this sale');
+      }
+    }
+    if (!saved) { if (!parkLocal(label || 'Held sale')) return; window.UI.toast.success('Sale parked on this device'); }
+    resetCart();
+    $('pos-search')?.focus();
+  }
+
+  async function loadRecalledCart(r, label) {
+    const lines = r.lines || [];
+    const got = await Promise.all(lines.map(async (l) => {
+      if (l.problems && l.problems.includes('PRODUCT_UNAVAILABLE')) return { l, skip: 'no longer available' };
+      const { data } = await window.Api.get(`/products/${l.productId}`, { branchId: window.AppShell.getActiveBranchId() || undefined });
+      const product = data.product || data;
+      const variant = l.variantId ? (product.variants || []).find((v) => String(v._id) === String(l.variantId)) : null;
+      if (l.variantId && !variant) return { l, skip: 'variant no longer available' };
+      return { l, product, variant };
+    }));
+    const notes = [];
+    state.cart = [];
+    got.forEach((g) => {
+      if (g.skip) { notes.push(`${g.l.name}: ${g.skip}`); return; }
+      const item = { product: g.product, variant: g.variant, quantity: g.l.quantity, discount: Number(g.l.discount) || 0, autoDiscount: false, promoApplied: false, overridePriceEnabled: false, overridePrice: null };
+      if (item.discount > round2(unitPriceOf(item) * item.quantity)) item.discount = round2(unitPriceOf(item) * item.quantity);
+      state.cart.push(item);
+      if ((g.l.problems || []).includes('INSUFFICIENT_STOCK')) notes.push(`${g.l.name}: only ${g.l.available} in stock`);
+    });
+    state.cartDiscount = Number(r.cartDiscount) || 0;
+    state.customer = null;
+    if (r.customerId) { try { const { data } = await window.Api.get(`/customers/${r.customerId._id || r.customerId}`); state.customer = data.customer || null; } catch { /* walk-in */ } }
+    checkoutKey = window.Api.newIdempotencyKey();
+    const d = $('cart-discount-input'); if (d) d.value = state.cartDiscount || '';
+    promoSig = ''; // prices may have changed since it was parked: re-check offers
+    renderCart();
+    if (notes.length) window.UI.toast.error(`Recalled "${label || 'Held sale'}" - check: ${notes.join('; ')}`);
+    else window.UI.toast.success(`Recalled "${label || 'Held sale'}" at today's prices`);
+  }
+
+  async function recallSale() {
+    if (isWs()) return window.UI.toast.error('Recall is for retail sales');
+    let server = []; let serverErr = '';
+    if (!isOfflineNow()) {
+      try { const { data } = await window.Api.get('/shop/held', { branchId: window.AppShell.getActiveBranchId() || undefined, mine: true }); server = data.held || []; }
+      catch (e) { serverErr = isNetErr(e) ? '' : (e.message || ''); }
+    }
+    const local = localHeld();
+    const rows = [
+      ...server.map((h) => ({ kind: 'S', id: h._id, label: h.label || 'Held sale', n: (h.items || []).length, at: new Date(h.createdAt).getTime() })),
+      ...local.map((h) => ({ kind: 'L', id: h.id, label: h.label || 'Held sale', n: h.cart.length, at: h.at })),
+    ].sort((a, b) => b.at - a.at);
+    const time = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const modal = window.UI.openModal({
+      title: 'Recall a held sale',
+      bodyHtml: `${serverErr ? `<p class="text-sm" style="color:var(--color-danger)">${esc(serverErr)}</p>` : ''}${rows.length ? `<div class="pz-held-list" style="display:flex;flex-direction:column;gap:8px">${rows.map((r, i) => `
+        <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 10px;border:1px solid var(--color-border);border-radius:8px">
+          <div><strong>${esc(r.label)}</strong><div class="text-xs text-muted">${r.n} item${r.n === 1 ? '' : 's'} · ${esc(time(r.at))}${r.kind === 'L' ? ' · on this device' : ''}</div></div>
+          <div style="display:flex;gap:6px"><button class="btn btn-primary btn-sm" data-act="recall" data-i="${i}">Recall</button><button class="btn btn-ghost btn-sm" data-act="drop" data-i="${i}" aria-label="Discard">Discard</button></div>
+        </div>`).join('')}</div>` : '<p class="text-sm text-secondary">No held sales.</p>'}`,
+      footerHtml: '<button class="btn btn-secondary" data-action="cancel">Close</button>',
+    });
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => window.UI.closeModal());
+    modal.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('button[data-act]'); if (!b) return;
+      const r = rows[Number(b.dataset.i)];
+      if (b.dataset.act === 'drop') {
+        if (!(await window.UI.confirmDialog({ title: `Discard "${r.label}"?`, danger: true, confirmText: 'Discard' }))) return;
+        try {
+          if (r.kind === 'L') saveLocalHeld(localHeld().filter((h) => h.id !== r.id)); else await window.Api.delete(`/shop/held/${r.id}`);
+          window.UI.closeModal(); window.UI.toast.success('Discarded'); recallSale();
+        } catch (e) { window.UI.toast.error(e.message || 'Could not discard'); }
+        return;
+      }
+      if (state.cart.length && !(await window.UI.confirmDialog({ title: 'Replace the current cart?', message: 'Park the current cart first if you want to keep it.', confirmText: 'Replace', danger: true }))) return;
+      window.UI.setButtonLoading && window.UI.setButtonLoading(b, true, 'Recalling…');
+      try {
+        if (r.kind === 'L') {
+          const h = localHeld().find((x) => x.id === r.id); if (!h) throw new Error('Not found');
+          state.cart = h.cart.map((i) => ({ ...i })); state.customer = h.customer || null; state.cartDiscount = h.cartDiscount || 0;
+          checkoutKey = window.Api.newIdempotencyKey(); promoSig = '';
+          const d = $('cart-discount-input'); if (d) d.value = state.cartDiscount || '';
+          saveLocalHeld(localHeld().filter((x) => x.id !== r.id));
+          renderCart(); window.UI.toast.success(`Recalled "${r.label}"`);
+        } else {
+          const { data } = await window.Api.post(`/shop/held/${r.id}/recall`, {});
+          await loadRecalledCart(data.cart, r.label);
+        }
+        window.UI.closeModal(); $('pos-search')?.focus();
+      } catch (e) { window.UI.toast.error(e.message || 'Could not recall'); }
+    });
+  }
+
+  /* ---- Promotions: ask the server which offer each line earns, apply it as the line discount ---- */
+  let promoAnnounce = false; let promoSig = ''; let promoTimer = null; let promoSeq = 0;
+  const promoEligible = (i) => !i.ws && !(i.discount > 0 && !i.autoDiscount && !i.promoApplied); // a hand-typed discount is never overwritten
+
+  function schedulePromoQuote(force) {
+    if (force) promoAnnounce = true;
+    if (!canPromo() || isOfflineNow() || isWs() || state.view !== 'new-sale') return;
+    const lines = state.cart.filter(promoEligible);
+    const sig = lines.map((i) => `${keyOf(i)}:${i.quantity}:${i.unitId || ''}`).join('|');
+    if (!force && sig === promoSig) return;
+    promoSig = sig;
+    clearTimeout(promoTimer);
+    if (!lines.length) return;
+    promoTimer = setTimeout(() => runPromoQuote(lines, sig), 350);
+  }
+
+  async function runPromoQuote(lines, sig) {
+    const seq = ++promoSeq;
+    try {
+      const { data } = await window.Api.post('/shop/promotions/quote', {
+        branchId: window.AppShell.getActiveBranchId() || undefined,
+        lines: lines.map((i) => ({ productId: i.product._id, variantId: i.variantId || i.variant?._id || undefined, quantity: i.quantity })),
+      });
+      if (seq !== promoSeq) return; // a newer quote is on its way
+      let applied = 0; const names = [];
+      (data.lines || []).forEach((q, idx) => {
+        const item = lines[idx];
+        if (!item || !state.cart.includes(item) || !promoEligible(item)) return;
+        const gross = round2(unitPriceOf(item) * item.quantity);
+        const d = Math.min(round2(Number(q.suggestedDiscount) || 0), gross);
+        if (q.source === 'PROMOTION' && d > 0) { item.discount = d; item.autoDiscount = false; item.promoApplied = true; item.promoName = q.promotion ? q.promotion.name : 'Offer'; applied++; names.push(item.promoName); }
+        else if (item.promoApplied) { item.promoApplied = false; item.promoName = ''; item.discount = autoDiscountFor(item); item.autoDiscount = item.discount > 0; }
+      });
+      promoSig = sig;
+      if (state.view === 'new-sale') renderCart();
+      if (promoAnnounce) { promoAnnounce = false; window.UI.toast[applied ? 'success' : 'info'] ? window.UI.toast[applied ? 'success' : 'info'](applied ? `${applied} offer${applied === 1 ? '' : 's'} applied: ${[...new Set(names)].join(', ')}` : 'No offers apply to this cart') : null; }
+    } catch (e) { promoSig = ''; /* offers are a bonus: never block selling */ }
+  }
+
+  /* ================================================================== *
    * CHECKOUT
    * ================================================================== */
   function resetCart() {
     state.cart = [];
+    promoSig = '';
     if (window.BatchTill) window.BatchTill.clear();
     state.pharmacy = {};
     state.customer = null;
