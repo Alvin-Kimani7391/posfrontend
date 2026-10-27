@@ -254,6 +254,30 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 @media print{body>*:not(#printarea){display:none!important}#printarea{display:block!important}}
 #printarea{display:none}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.lv-mk-wrap{background:none!important;border:0!important}
+.lv-mk{position:relative;width:44px;height:44px;display:grid;place-items:center}
+.lv-mk .core{width:38px;height:38px;border-radius:50%;background:var(--o);color:#fff;display:grid;place-items:center;border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.35);font-size:19px;position:relative;z-index:2}
+.lv-mk.rider{width:64px;height:52px;display:block}
+.lv-mk.rider .core{width:64px;height:48px;border:0;border-radius:0;background:none;box-shadow:none;display:block;position:absolute;left:0;top:0;z-index:2;transform:scaleX(var(--flip,1));transition:transform .25s;filter:drop-shadow(0 3px 3px rgba(0,0,0,.3))}
+.lv-mk.rider .lv-bike{width:64px;height:48px;display:block}
+.lv-mk.rider .pulse{position:absolute;left:6px;right:6px;top:34px;bottom:auto;height:20px;border-radius:50%;background:rgba(242,106,33,.35);animation:pl 1.8s infinite}
+.lv-mk.me .dot{width:18px;height:18px;border-radius:50%;background:#3B82F6;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);position:relative;z-index:2}
+.lv-mk.me .pulse{position:absolute;inset:6px;border-radius:50%;background:rgba(59,130,246,.35);animation:pl 2s infinite}
+@keyframes pl{0%{transform:scale(.7);opacity:.9}100%{transform:scale(1.6);opacity:0}}
+.lv-pin.dest{color:#E5392B;filter:drop-shadow(0 4px 6px rgba(0,0,0,.35))}.lv-pin.dest svg{width:32px;height:40px;display:block}
+.lv-pin.origin span{width:36px;height:36px;border-radius:11px;background:#111;color:#fff;display:grid;place-items:center;border:3px solid #fff;box-shadow:0 4px 10px rgba(0,0,0,.35)}
+.lv-tip{background:#14171A!important;color:#fff!important;border:0!important;border-radius:10px!important;font-weight:700;font-size:12px;box-shadow:0 4px 10px rgba(0,0,0,.3)!important;padding:5px 9px!important}
+.lv-tip::before{display:none!important}
+.lv-nomap{display:grid;place-items:center;height:100%;color:#aab2ba;padding:20px;text-align:center}
+.lv-tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9); }
+
+.lvc{margin-top:14px;border-radius:18px;overflow:hidden;background:#fff;border:1px solid var(--line);box-shadow:0 8px 22px rgba(20,23,26,.07)}
+.lvh{padding:12px 14px;display:flex;align-items:center;gap:10px}.lvh .big{font-weight:800;font-size:18px;letter-spacing:-.2px}.lvh .big em{font-style:normal;color:var(--o)}.lvh .big small{color:var(--mut);font-weight:600;font-size:13px}
+.lvs{font-size:11px;font-weight:800;padding:4px 10px;border-radius:99px;background:var(--warnl);color:var(--warn);flex:none}.lvs.on{background:var(--okl);color:var(--ok)}.lvs.on:before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:6px;animation:pl 1.6s infinite}
+.lvmap{height:320px;position:relative;background:#e8eaed}
+.lvf{padding:12px 14px;display:flex;align-items:center;gap:10px;border-top:1px solid var(--line)}
+.lvav{width:40px;height:40px;border-radius:50%;background:var(--ol);color:var(--od);display:grid;place-items:center;font-weight:800;flex:none}
+.lvcall{width:40px;height:40px;border-radius:50%;background:var(--okl);color:var(--ok);display:grid;place-items:center;flex:none}
 </style>
 </head>
 <body>
@@ -266,6 +290,7 @@ svg.i{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:1.9;st
 <div id="layer"></div><div id="printarea"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="/js/core/config.js"></script>
+<script src="/js/core/live-kit.js"></script>
 <script>
 (function () {
 'use strict';
@@ -383,7 +408,7 @@ function cartBar() {
 }
 var VIEWS = {};
 function render() {
-  clearInterval(tmr); var v = $('#view'); v.className = MAIN.indexOf(cur.v) < 0 ? 'nonav' : ''; if (cur.v === 'splash') v.className = 'full';
+  clearInterval(tmr); stopLive(); var v = $('#view'); v.className = MAIN.indexOf(cur.v) < 0 ? 'nonav' : ''; if (cur.v === 'splash') v.className = 'full';
   try { (VIEWS[cur.v] || VIEWS.home)(cur.p || {}); } catch (e) { console.error(e); v.innerHTML = empty('help', 'Something went wrong', E(e.message || ''), '<button class="btn sm" style="margin-top:14px" id="rl">Reload</button>'); var r = $('#rl'); if (r) r.onclick = function () { location.reload(); }; }
   $$('[data-back]').forEach(function (b) { b.onclick = back; }); drawNav(); cartBar();
 }
@@ -648,6 +673,7 @@ VIEWS.checkout = function () {
   if (!cart.length) return nav('cart', {}, { replace: true });
   var d = ctx.delivery, zl = d.feeMode === 'ZONE' ? (d.zones || []) : [], zoneOn = zl.length > 0, pinOn = d.feeMode !== 'ZONE' || d.zoneAllowPin !== false || !zoneOn;
   if (!zoneOn) DT.lm = 'PIN'; else if (!pinOn) DT.lm = 'ZONE'; else if (DT.lm !== 'ZONE' && DT.lm !== 'PIN') DT.lm = 'ZONE';
+  var zoneFee = d.feeMode === 'ZONE' && zoneOn;
   var counties = []; zl.forEach(function (z) { if (counties.indexOf(z.county) < 0) counties.push(z.county); }); counties.sort();
   function townsOf(c) { return zl.filter(function (z) { return z.county === c; }).sort(function (a, b) { return a.town.localeCompare(b.town); }); }
   if (DT.county && counties.indexOf(DT.county) < 0) { DT.county = ''; DT.town = ''; }
@@ -666,14 +692,40 @@ VIEWS.checkout = function () {
   var seq = 0, zone = DT.lm === 'ZONE';
   function sum() {
     var s = cartTotal(), q = DT.quote, f = q && q.ok ? q.fee : null, label = 'Delivery' + (q && q.ok && q.method === 'ZONE' ? ' (' + E(q.town) + ', ' + E(q.county) + ')' : q && q.distanceKm && d.feeMode !== 'FIXED' ? ' (' + q.distanceKm + ' km)' : '');
-    $('#sum').innerHTML = '<div class="tot"><span>Food</span><b>' + money(s) + '</b></div><div class="tot"><span>' + label + '</span><b>' + (f == null ? (zone ? 'choose your town' : 'pin your location') : f === 0 ? 'Free' : money(f)) + '</b></div>' + (f != null ? '<div class="tot big"><b>Total</b><b>' + money(s + f) + '</b></div><div class="fine">⏱ About ' + eta() + ' minutes</div>' : '');
+    $('#sum').innerHTML = '<div class="tot"><span>Food</span><b>' + money(s) + '</b></div><div class="tot"><span>' + label + '</span><b>' + (f == null ? (DT.locating ? 'finding your area…' : zone ? 'choose your town' : 'pin your location') : f === 0 ? 'Free' : money(f)) + '</b></div>' + (f != null ? '<div class="tot big"><b>Total</b><b>' + money(s + f) + '</b></div><div class="fine">⏱ About ' + eta() + ' minutes</div>' : '');
   }
   function eta() { var mp = Math.max.apply(null, [0].concat(cart.map(function (c) { return c.prep || 10; }))); return Math.round(mp + (DT.quote ? DT.quote.etaMinutes : 10)); }
+  var GEOC = {};
+  function nz(x) { return String(x || '').toLowerCase().replace(/\b(sub[\s-]?county|county|town|city|municipality|ward|constituency|division|location|district|estate|area)\b/g, ' ').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
+  /* the owner prices by county / town, so a map pin is turned into the delivery area it falls in (reverse geocoding) */
+  async function zoneFromPin(lat, lng) {
+    var ck = lat.toFixed(4) + ',' + lng.toFixed(4); if (GEOC[ck] !== undefined) return GEOC[ck];
+    var r = await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=16&accept-language=en&lat=' + lat + '&lon=' + lng), j = await r.json(), a = j.address || {};
+    var cand = [a.neighbourhood, a.suburb, a.quarter, a.city_district, a.residential, a.hamlet, a.village, a.town, a.city, a.municipality, a.county, a.state_district, a.state].concat(String(j.display_name || '').split(',')).map(nz).filter(Boolean);
+    var best = null, bs = 0;
+    zl.forEach(function (z) {
+      var zt = nz(z.town), zc = nz(z.county); if (!zt) return; var s = 0;
+      cand.forEach(function (c, i) { var v = c === zt ? 100 - i : (c.length >= 4 && zt.length >= 4 && (c.indexOf(zt) >= 0 || zt.indexOf(c) >= 0)) ? 60 - i : 0; if (v > s) s = v; });
+      if (s && zc && cand.some(function (c) { return c === zc || (c.length >= 4 && (c.indexOf(zc) >= 0 || zc.indexOf(c) >= 0)); })) s += 30;
+      if (s > bs) { bs = s; best = z; }
+    });
+    GEOC[ck] = bs >= 50 ? best : null; return GEOC[ck];
+  }
   async function requote() {
     var my = ++seq; $('#er').textContent = ''; DT.quote = null;
     var qs = { branchId: branchId || '', subtotal: cartTotal() };
     if (zone) { if (!DT.county || !DT.town) { sum(); return; } qs.method = 'ZONE'; qs.county = DT.county; qs.town = DT.town; }
-    else { if (!DT.pin) { sum(); return; } qs.method = 'PIN'; qs.lat = DT.pin.lat; qs.lng = DT.pin.lng; }
+    else {
+      if (!DT.pin) { sum(); return; }
+      if (zoneFee) {
+        DT.locating = true; sum(); var zz = null;
+        try { zz = await zoneFromPin(DT.pin.lat, DT.pin.lng); } catch (e) { zz = null; }
+        DT.locating = false; if (my !== seq) return;
+        if (!zz) { DT.pinMiss = true; var pt = $('#pinTxt'); if (pt) pt.textContent = 'Pin set ✓'; setMode('ZONE'); var zf = $('#zfee'); if (zf) zf.innerHTML = 'We could not match your pin to a delivery area. Please choose your <b>county</b> and <b>town</b> (your pin is still sent to the rider).'; return; }
+        DT.pinMiss = false; DT.county = zz.county; DT.town = zz.town; var zc0 = $('#zc'); if (zc0) zc0.value = zz.county; paintTowns(); var pt2 = $('#pinTxt'); if (pt2) pt2.textContent = 'Pin set ✓ · ' + zz.town + ', ' + zz.county;
+        qs.method = 'ZONE'; qs.county = zz.county; qs.town = zz.town;
+      } else { qs.method = 'PIN'; qs.lat = DT.pin.lat; qs.lng = DT.pin.lng; }
+    }
     sum();
     try { var q = await call('/delivery/quote?' + new URLSearchParams(qs)); if (my !== seq) return; DT.quote = q; if (!q.ok) $('#er').textContent = q.reason; } catch (e) { if (my !== seq) return; DT.quote = null; $('#er').textContent = e.message; }
     sum();
@@ -739,10 +791,10 @@ VIEWS.payment = function () {
     btn.disabled = true; btn.textContent = 'Placing your order…'; if (!DT.ref) DT.ref = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     var o;
     try {
-      o = await call('/delivery', 'POST', { branchId: branchId || undefined, name: DT.name, phone: DT.phone, address: DT.address, landmark: DT.landmark || undefined, instructions: DT.ins || undefined, locationMethod: DT.quote.method === 'ZONE' ? 'ZONE' : 'PIN', county: DT.quote.method === 'ZONE' ? DT.quote.county : undefined, town: DT.quote.method === 'ZONE' ? DT.quote.town : undefined, lat: DT.quote.method === 'ZONE' ? undefined : DT.pin.lat, lng: DT.quote.method === 'ZONE' ? undefined : DT.pin.lng, clientRef: DT.ref, payMethod: DT.method,
+      o = await call('/delivery', 'POST', { branchId: branchId || undefined, name: DT.name, phone: DT.phone, address: DT.address, landmark: DT.landmark || undefined, instructions: DT.ins || undefined, locationMethod: DT.quote.method === 'ZONE' ? 'ZONE' : 'PIN', county: DT.quote.method === 'ZONE' ? DT.quote.county : undefined, town: DT.quote.method === 'ZONE' ? DT.quote.town : undefined, lat: DT.pin && (DT.lm === 'PIN' || DT.pinMiss) ? DT.pin.lat : undefined, lng: DT.pin && (DT.lm === 'PIN' || DT.pinMiss) ? DT.pin.lng : undefined, clientRef: DT.ref, payMethod: DT.method,
         items: cart.map(function (c) { return { menuItemId: c.id, quantity: c.qty, variantId: c.vid || undefined, notes: c.notes || undefined, modifiers: c.mods.length ? c.mods.map(function (x) { return { groupId: x.groupId, optionId: x.optionId }; }) : undefined }; }) });
     } catch (e) { btn.disabled = false; paint(); er.textContent = e.message; if (e.code === 'GUEST_AUTH_REQUIRED') nav('auth', { why: 'Please sign in to continue.' }); if (e.code !== 'RATE_LIMITED') DT.ref = null; return; }
-    DT.ref = null; rememberOrder({ key: o.trackKey, n: o.orderNumber, at: Date.now() }); cart = []; saveCart(); DT.quote = null; DT.pin = null; DT.ins = '';
+    DT.ref = null; rememberOrder({ key: o.trackKey, n: o.orderNumber, at: Date.now() }); cart = []; saveCart(); DT.quote = null; DT.pin = null; DT.pinMiss = false; DT.ins = '';
     loadHist();
     if (DT.method === 'CASH' || o.pay.state !== 'AWAITING') { stack = []; cur = { v: 'confirmed', p: { o: o } }; return render(); }
     payOrder(o);
@@ -807,9 +859,101 @@ VIEWS.confirmed = async function (p) {
   var vr = $('#vr'); if (vr) vr.onclick = function () { nav('receipt', { ref: o.pay.receiptRef }); };
   $('#bm').onclick = function () { tab('menu'); };
 };
+/* ---------- live rider tracking inside the order page (map + realtime stream, same engine as the rider app) ---------- */
+var LT = null;
+function stopLive() { if (LT) { try { LT.stop(); } catch (e) { /* gone */ } LT = null; } }
+function liveStart(key, onChange) {
+  stopLive();
+  var Lv = window.Live, box = $('#lt'); if (!Lv || !window.L || !box) return;
+  var base = '/delivery/' + encodeURIComponent(key), dead = false, ACTIVE = ['ASSIGNED', 'PICKED_UP', 'ON_THE_WAY', 'ARRIVED'];
+  var S = { live: null, map: null, sse: null, state: 'down', built: false, fit: '', route: null, routeAt: 0, routeDest: '', sharing: false, stopShare: null, lastShare: 0, seen: {}, first: false };
+  var fst = function (n) { return String(n || '').trim().split(/\s+/)[0] || ''; };
+  function alertOnce(a) { if (!a) return; var id = a.id || (a.kind + ':' + a.distanceM + ':' + a.message); if (S.seen[id]) return; S.seen[id] = 1; if (S.first) { toast('🛵 ' + (a.message || 'Your rider is close')); try { Lv.beep('alert'); } catch (e) { /* silent */ } } }
+  async function pull() {
+    try { var l = await call(base + '/live'); if (dead) return; S.live = l; (l.alerts || []).forEach(alertOnce); S.first = true; paint(); } catch (e) { /* keep what we have */ }
+  }
+  async function road(from, to) {
+    var dk = to.lat.toFixed(4) + ',' + to.lng.toFixed(4); if (S.routeDest === dk && Date.now() - S.routeAt < 12000) return;
+    S.routeDest = dk; S.routeAt = Date.now(); var c = new AbortController(), t = setTimeout(function () { c.abort(); }, 6000);
+    try {
+      var r = await fetch('https://router.project-osrm.org/route/v1/driving/' + from.lng + ',' + from.lat + ';' + to.lng + ',' + to.lat + '?overview=full&geometries=geojson', { signal: c.signal });
+      var j = await r.json(); if (dead) return; var rt = j.routes && j.routes[0];
+      S.route = rt ? rt.geometry.coordinates.map(function (x) { return { lat: x[1], lng: x[0] }; }) : null; markers();
+    } catch (e) { /* straight line is shown meanwhile */ } finally { clearTimeout(t); }
+  }
+  function head() {
+    var l = S.live, b = $('#lvb'); if (!l || !b) return; var e = l.etaMinutes, dm = l.distanceM, st = l.stage;
+    b.innerHTML = st === 'ON_THE_WAY' ? 'Arriving in <em>' + (e == null ? '--' : e <= 0 ? 'under a minute' : e + ' min') + '</em>' + (dm != null ? ' <small>(' + Lv.dist(dm) + ')</small>' : '') : st === 'ARRIVED' ? '<em>Your rider has arrived</em>' : st === 'PICKED_UP' ? 'Your rider is about to set off' : 'A rider has been assigned';
+    var m = $('#lvm'); if (m) m.textContent = l.message || '';
+  }
+  function state() { var e = $('#lvs'); if (!e) return; e.className = 'lvs' + (S.state === 'live' ? ' on' : ''); e.textContent = S.state === 'live' ? 'Live' : 'Reconnecting'; }
+  function markers() {
+    var l = S.live, m = S.map; if (!l || !m) return;
+    var dp = l.destination, rl = l.live ? l.riderLocation : null, org = l.origin;
+    if (dp) m.put('dest', 'dest', dp, { label: 'You' });
+    if (org && !rl) m.put('origin', 'origin', org, { label: 'Restaurant' }); else m.drop('origin');
+    if (rl) m.put('rider', 'rider', rl, { label: fst(l.rider && l.rider.name) || 'Rider', heading: rl.heading }); else m.drop('rider');
+    m.trail(l.trail || []);
+    if (rl && dp) {
+      if (S.route && S.route.length > 1) { var bi = 0, bd = 1e9; for (var i = 0; i < S.route.length; i++) { var dx = S.route[i].lat - rl.lat, dy = S.route[i].lng - rl.lng, dd = dx * dx + dy * dy; if (dd < bd) { bd = dd; bi = i; } } m.route([rl].concat(S.route.slice(bi + 1)), { color: '#1A73E8' }); }
+      else m.route([rl, dp], { dashed: true, color: '#F26A21' });
+      road(rl, dp);
+    } else m.route(null);
+    var pts = [rl || org, dp].filter(Boolean), key2 = pts.length + ':' + (rl ? 'r' : 'o');
+    if (S.fit !== key2) { S.fit = key2; m.fit(pts, 60, true); } else if (rl) m.fit(pts, 60);
+  }
+  function card() {
+    var f = $('#lvf'); if (!f) return; var l = S.live, rd = l && l.rider;
+    f.innerHTML = (rd ? '<div class="lvav">' + E(fst(rd.name).charAt(0).toUpperCase()) + '</div><div class="grow"><b>' + E(rd.fullName || rd.name) + '</b><div class="fine">Your rider' + (l.riderLocation && l.riderLocation.stale ? ' · last seen ' + Lv.ago(l.riderLocation.at) : '') + '</div></div>' + (rd.phone ? '<a class="lvcall" href="tel:' + E(String(rd.phone).replace(/[^\d+]/g, '')) + '" aria-label="Call rider">' + ic('phone') + '</a>' : '') : '<div class="grow fine">Your rider will appear here.</div>') +
+      '<button class="btn sm ' + (S.sharing ? '' : 'line') + '" id="sh" style="width:auto;margin:0">' + ic('pin') + (S.sharing ? ' Sharing' : ' Share my location') + '</button>';
+    var sh = $('#sh'); if (sh) sh.onclick = function () { S.sharing ? stopShare(true) : startShare(); };
+  }
+  function paint() {
+    var l = S.live; if (dead || !l || cur.v !== 'track') return;
+    if (ACTIVE.indexOf(l.stage) < 0) { if (S.built) { if (S.map) S.map.destroy(); S.map = null; box.innerHTML = ''; S.built = false; S.fit = ''; } return; }
+    if (!S.built) {
+      box.innerHTML = '<div class="lvc"><div class="lvh"><div class="grow"><div class="big" id="lvb"></div><div class="fine" id="lvm"></div></div><span class="lvs" id="lvs"></span></div><div class="lvmap" id="tm"></div><div class="lvf" id="lvf"></div></div>';
+      S.map = Lv.map($('#tm'), { theme: 'light', center: l.destination ? [l.destination.lat, l.destination.lng] : undefined, zoom: 15 }); S.built = true; S.fit = ''; state(); card();
+    }
+    head(); markers();
+  }
+  function startShare() {
+    if (S.stopShare) return;
+    S.stopShare = Lv.geo.watch(function (p) {
+      S.sharing = true; try { localStorage.setItem('track.share.' + key, '1'); } catch (e) { /* ignore */ }
+      if (S.map) S.map.put('me', 'me', p, { label: 'Me' });
+      if (Date.now() - S.lastShare < 10000) return; S.lastShare = Date.now();
+      call(base + '/location', 'POST', { lat: p.lat, lng: p.lng }).catch(function () { /* the rider still has the address */ }); card();
+    }, function (e) { S.sharing = false; S.stopShare = null; toast(Lv.geo.message(e), true); card(); });
+    toast('Your rider can now see where you are.'); setTimeout(card, 300);
+  }
+  function stopShare(manual) {
+    if (S.stopShare) { S.stopShare(); S.stopShare = null; } S.sharing = false; if (S.map) S.map.drop('me'); try { localStorage.removeItem('track.share.' + key); } catch (e) { /* ignore */ }
+    if (manual) { toast('You stopped sharing your location.'); card(); }
+  }
+  S.sse = Lv.sse({
+    open: async function () { return BASE + base + '/stream'; },
+    events: ['hello', 'location', 'status', 'alert', 'payment', 'arrived', 'rated'],
+    state: function (s) { S.state = s; state(); },
+    on: function (n, d) {
+      if (dead) return;
+      if (n === 'hello') { S.live = d; S.first = true; paint(); return; }
+      if (n === 'location' && S.live) {
+        S.live.riderLocation = { lat: d.lat, lng: d.lng, heading: d.heading, at: d.at, ageSec: 0, stale: false };
+        if (d.distanceM != null) S.live.distanceM = d.distanceM; if (d.etaMinutes != null) S.live.etaMinutes = d.etaMinutes;
+        if (S.live.stage !== 'ARRIVED' && S.live.stage !== 'DELIVERED') S.live.live = true; head(); markers(); return;
+      }
+      if (n === 'alert') { alertOnce(d); pull(); return; }
+      pull(); if (onChange) onChange();
+    },
+    poll: pull, pollMs: 6000
+  });
+  pull(); try { if (localStorage.getItem('track.share.' + key) === '1') startShare(); } catch (e) { /* ignore */ }
+  LT = { stop: function () { dead = true; try { S.sse.close(); } catch (e) { /* closed */ } stopShare(); if (S.map) { S.map.destroy(); S.map = null; } box.innerHTML = ''; } };
+}
 var STEPS = [['RECEIVED', 'Order Received', 'Your order has been received.'], ['PREPARING', 'Preparing', 'The kitchen is preparing your meal.'], ['READY', 'Ready to Serve', 'Waiting for the rider.'], ['ON_THE_WAY', 'On the way', 'Your rider is on the way.'], ['DELIVERED', 'Delivered', 'Enjoy your meal!']];
 VIEWS.track = function (p) {
-  $('#view').innerHTML = top('Order Status') + '<div class="pad" id="t"><div class="sk" style="height:70px;margin-top:14px"></div></div>';
+  $('#view').innerHTML = top('Order Status') + '<div class="pad" style="padding-bottom:0"><div id="lt"></div></div><div class="pad" id="t"><div class="sk" style="height:70px;margin-top:14px"></div></div>';
   var load = async function () {
     try {
       var o = await call('/delivery/' + p.key); if (cur.v !== 'track') return;
@@ -818,7 +962,8 @@ VIEWS.track = function (p) {
       var h = '<div class="obanner" style="margin-top:14px"><div><b>Order ' + E(o.orderNumber) + '</b><small>' + o.items.length + ' item' + (o.items.length > 1 ? 's' : '') + ' · ' + money(o.total) + '</small></div><small>' + ftime(o.placedAt) + '</small></div>';
       if (wait) h += '<div class="card" style="margin-top:12px;border-color:#fbd5bd;background:var(--ol)"><b>Payment needed</b><p class="muted" style="margin:4px 0 12px;font-size:13.5px">' + E(o.message) + '</p><button class="btn" id="pn">Pay ' + money(o.pay.amountDue) + ' with M-PESA</button></div>';
       if (bad) h += '<div class="note" style="background:var(--badl);color:#7a1b13">' + ic('alert') + '<div>' + E(o.message) + '</div></div>';
-      else h += '<div class="card" style="margin-top:12px"><div class="tl">' + STEPS.map(function (s, k) { var st = k < idx || (o.stage === 'DELIVERED' && k <= idx) ? 'done' : k === idx ? 'now' : 'todo'; return '<div class="ts ' + st + '"><div class="dot">' + (st === 'done' ? ic('check') : st === 'now' ? ic('clock') : ic('clock')) + '</div><div><b>' + s[1] + '</b>' + (st !== 'todo' ? '<small>' + (k === 0 ? ftime(o.placedAt) + ' · ' : '') + s[2] + '</small>' : '<small>' + (k === 4 ? 'Enjoy your meal!' : 'Waiting') + '</small>') + '</div></div>'; }).join('') + '</div>' + (o.rider ? '<div class="row" style="margin-top:4px">' + ic('truck') + ' <span>Rider: <b>' + E(o.rider.name) + '</b></span></div>' : '') + (!bad && !wait && o.stage !== 'DELIVERED' && (o.rider || o.stage === 'ON_THE_WAY') ? '<a class="btn" style="margin-top:12px;text-decoration:none" href="track.html?t=' + encodeURIComponent(TOKEN) + '&k=' + encodeURIComponent(p.key) + '">' + ic('truck') + ' Track my rider live</a>' : '') + (o.etaMinutes && o.stage !== 'DELIVERED' ? '<div class="fine" style="margin-top:8px">⏱ Estimated ' + o.etaMinutes + ' min from order time</div>' : '') + '</div>';
+      else h += '<div class="card" style="margin-top:12px"><div class="tl">' + STEPS.map(function (s, k) { var st = k < idx || (o.stage === 'DELIVERED' && k <= idx) ? 'done' : k === idx ? 'now' : 'todo'; return '<div class="ts ' + st + '"><div class="dot">' + (st === 'done' ? ic('check') : st === 'now' ? ic('clock') : ic('clock')) + '</div><div><b>' + s[1] + '</b>' + (st !== 'todo' ? '<small>' + (k === 0 ? ftime(o.placedAt) + ' · ' : '') + s[2] + '</small>' : '<small>' + (k === 4 ? 'Enjoy your meal!' : 'Waiting') + '</small>') + '</div></div>'; }).join('') + '</div>' + (o.rider ? '<div class="row" style="margin-top:4px">' + ic('truck') + ' <span>Rider: <b>' + E(o.rider.name) + '</b></span></div>' : '') + ''
+        + (o.etaMinutes && o.stage !== 'DELIVERED' ? '<div class="fine" style="margin-top:8px">⏱ Estimated ' + o.etaMinutes + ' min from order time</div>' : '') + '</div>';
       h += '<div class="card"><b>Items</b>' + o.items.map(function (i) { return '<div class="row fine" style="padding:6px 0;color:var(--ink2)"><b style="color:var(--o)">' + i.quantity + '×</b><span class="grow">' + E(i.name) + '</span>' + (i.total != null ? '<span>' + money(i.total) + '</span>' : '') + '</div>'; }).join('') + '<div class="row fine" style="margin-top:6px">' + ic('pin') + '<span class="grow">' + E(o.address) + '</span></div><div class="row" style="margin-top:6px"><span class="grow fine">' + (o.pay.state === 'PAID' ? (o.pay.method === 'CASH' ? 'Paid on delivery' : 'Paid with M-PESA') : o.pay.state === 'COD' ? 'Pay the rider on delivery' : '') + '</span>' + (o.pay.state === 'PAID' ? '<span class="tag gr">Paid</span>' : '') + '</div></div>';
       if (o.pay.receiptRef) h += '<button class="btn ghost" id="vr">' + ic('receipt') + ' View e-receipt</button>';
       $('#t').innerHTML = h;
@@ -828,6 +973,7 @@ VIEWS.track = function (p) {
     } catch (e) { var t = $('#t'); if (t) t.innerHTML = empty('help', 'Order not found', E(e.message)); clearInterval(tmr); }
   };
   load(); tmr = setInterval(function () { if (!document.hidden && cur.v === 'track') load(); }, 8000);
+  liveStart(p.key, load);
 };
 
 /* ---------- my orders ---------- */
