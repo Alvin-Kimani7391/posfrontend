@@ -16,16 +16,15 @@
   const err = (e) => window.UI.toast.error(e.message || 'Something went wrong');
   const closeBtn = (m) => m.querySelector('[data-action="close"]').addEventListener('click', () => window.UI.closeModal());
 
-  document.addEventListener('DOMContentLoaded', () => {
-    const el = window.AdminShell.mount({ title: 'Premium features' });
-    if (!el) return;
+  /** Mounted inside the admin Billing page ("Premium features" tab). */
+  function mount(host) {
     const q = new URLSearchParams(window.location.search);
     if (q.get('business')) { st.tab = 'business'; st.bizId = q.get('business'); }
-    el.innerHTML = `<div class="page-header"><div><h1>Premium features</h1><p>Sell extra features on top of the base subscription. Owners upgrade, cancel and renew on their own.</p></div></div>
-      <div class="tabs" id="ad-tabs" style="margin-bottom:var(--space-4)"><button class="tab-btn" data-tab="features">Features</button><button class="tab-btn" data-tab="plans">Base plans</button><button class="tab-btn" data-tab="promote">Promote</button><button class="tab-btn" data-tab="business">Businesses</button></div><div id="ad-body"></div>`;
+    host.innerHTML = `<div class="tabs" id="ad-tabs" style="margin-bottom:var(--space-4)"><button class="tab-btn" data-tab="features">Features</button><button class="tab-btn" data-tab="plans">Base plans</button><button class="tab-btn" data-tab="promote">Promote</button><button class="tab-btn" data-tab="business">Businesses</button></div><div id="ad-body"></div>`;
     $('ad-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { st.tab = b.dataset.tab; show(); } });
     show();
-  });
+  }
+  window.AdminAddons = { mount };
   async function show() {
     document.querySelectorAll('#ad-tabs .tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === st.tab));
     const body = $('ad-body'); body.innerHTML = window.UI.skeletonRows(4, 1);

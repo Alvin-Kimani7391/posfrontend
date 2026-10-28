@@ -16,7 +16,6 @@
     { key: 'audit', label: 'Audit log', icon: 'settings', href: 'admin-audit.html' },
     { key: 'tickets', label: 'Tickets', icon: 'alert', href: 'admin-tickets.html' },
     { key: 'billing', label: 'Billing', icon: 'wallet', href: 'admin-billing.html' },
-    { key: 'addons', label: 'Premium features', icon: 'star', href: 'admin-addons.html' },
         { key: 'sms', label: 'Alerts & SMS', icon: 'bell', href: 'admin-sms.html' },
     { key: 'announcements', label: 'Announcements', icon: 'bell', href: 'admin-announcements.html' },
   ];

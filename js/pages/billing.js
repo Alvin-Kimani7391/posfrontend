@@ -485,23 +485,24 @@
       if (!list.length) { host.innerHTML = ''; return; }
       const canManage = data.canManage && window.Permissions.can(user, 'billing.pay');
       const monthly = data.monthlyCents ? `<span class="bl-muted">Add-ons: ${fm(data.monthlyCents, data.currency)} / month</span>` : '';
-      const rows = list.map((a) => {
-        const inv = a.pendingInvoice;
-        let action = '';
+      const cards = list.map((a) => {
+        const inv = a.pendingInvoice; let action = '';
         if (canManage) {
-          if (a.state === 'ACTIVE' || a.state === 'TRIAL' || a.state === 'GRACE') action = `<button class="btn btn-secondary btn-sm" data-ad-cancel="${esc(a.key)}">Cancel</button>`;
+          if (a.state === 'ACTIVE' || a.state === 'TRIAL' || a.state === 'GRACE') action = a.billingType === 'ONE_TIME' && a.state === 'ACTIVE' ? '' : `<button class="btn btn-secondary btn-sm" data-ad-cancel="${esc(a.key)}">Cancel</button>`;
           else if (a.state === 'CANCELLING') action = `<button class="btn btn-secondary btn-sm" data-ad-resume="${esc(a.key)}">Keep it</button>`;
-          else if (a.state === 'PENDING_PAYMENT' && inv) action = `<button class="btn btn-primary btn-sm" data-ad-pay="${esc(inv.id)}" data-amt="${Math.ceil(inv.balanceCents / 100)}">Pay ${fm(inv.balanceCents)}</button> <button class="btn btn-ghost btn-sm" data-ad-cancel="${esc(a.key)}">Cancel</button>`;
+          else if (a.state === 'PENDING_PAYMENT' && inv) action = `<button class="btn btn-primary btn-sm" data-ad-pay="${esc(inv.id)}" data-amt="${Math.ceil(inv.balanceCents / 100)}">Pay ${fm(inv.balanceCents)}</button><button class="btn btn-ghost btn-sm" data-ad-cancel="${esc(a.key)}">Cancel</button>`;
           else if (a.state === 'LOCKED') action = `<button class="btn btn-primary btn-sm" data-ad-up="${esc(a.key)}">${a.trialAvailable ? 'Start free trial' : 'Upgrade'}</button>`;
         }
-        const until = a.billingType === 'ONE_TIME' && a.state === 'ACTIVE' ? 'Yours to keep' : a.until ? (a.state === 'CANCELLING' ? `Access until ${fdate(a.until)}` : a.state === 'TRIAL' ? `Trial ends ${fdate(a.until)}` : a.state === 'COMPLIMENTARY' ? '' : `Renews ${fdate(a.until)}`) : '';
-        return `<div class="bl-kv" style="align-items:flex-start;gap:var(--space-3)">
-          <span style="flex:1"><b>${CROWN} ${esc(a.name)}</b> <span class="badge ${AD_BADGE[a.state] || 'badge-neutral'}">${esc(AD_LABEL[a.state] || a.state)}</span>
-            <div class="text-sm text-secondary">${esc(a.tagline || '')}</div>
-            <div class="text-sm text-secondary">${a.priceCents != null ? (a.billingType === 'ONE_TIME' ? `${fm(a.priceCents, data.currency)} one-time` : `${fm(a.priceCents, data.currency)} / ${a.intervalMonths === 1 ? 'month' : `${a.intervalMonths} months`}`) : ''}${until ? ` · ${until}` : ''}</div></span>
-          <span style="white-space:nowrap">${action}</span></div>`;
+        if (a.billingType === 'ONE_TIME' && a.state === 'ACTIVE' && canManage) action = `<button class="btn btn-ghost btn-sm" data-ad-cancel="${esc(a.key)}">Remove</button>`;
+        const until = a.billingType === 'ONE_TIME' && a.state === 'ACTIVE' ? 'Yours to keep' : a.until ? (a.state === 'CANCELLING' ? `Access until ${fdate(a.until)}` : a.state === 'TRIAL' ? `Trial ends ${fdate(a.until)}` : a.state === 'COMPLIMENTARY' ? 'Included in your plan' : `Renews ${fdate(a.until)}`) : '';
+        const price = a.priceCents != null ? `<span class="pm-amt">${fm(a.priceCents, data.currency)}</span><span class="pm-per">${a.billingType === 'ONE_TIME' ? 'one-time' : `/ ${a.intervalMonths === 1 ? 'month' : `${a.intervalMonths} months`}`}</span>` : '';
+        const ben = (a.benefits || []).slice(0, 4).map((x) => `<li>${esc(x)}</li>`).join('');
+        return `<div class="pm-card pm-st-${esc(a.state)}">
+          <div class="pm-card-top"><span class="pm-ico">${CROWN}</span><span class="badge ${AD_BADGE[a.state] || 'badge-neutral'}">${esc(AD_LABEL[a.state] || a.state)}</span></div>
+          <h3>${esc(a.name)}</h3><p class="pm-tag">${esc(a.tagline || '')}</p>${ben ? `<ul class="pm-list">${ben}</ul>` : ''}
+          <div class="pm-card-foot"><div class="pm-price">${price}${until ? `<div class="pm-until">${esc(until)}</div>` : ''}</div><div class="pm-act">${action}</div></div></div>`;
       }).join('');
-      host.innerHTML = card('Premium features', `<p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">Added on top of your base plan. Upgrade any time and cancel any time - a cancelled feature stays on until the end of the period you paid for. ${monthly}</p>${rows}`);
+      host.innerHTML = card(`${CROWN} Premium features`, `<p class="text-sm text-secondary" style="margin-bottom:var(--space-4)">Added on top of your base plan. Upgrade any time and cancel any time - a cancelled feature stays on until the end of the period you paid for. ${monthly}</p><div class="pm-grid">${cards}</div>`);
       host.querySelectorAll('[data-ad-up]').forEach((b) => b.addEventListener('click', () => window.Premium && window.Premium.upgrade(b.dataset.adUp, b)));
       host.querySelectorAll('[data-ad-pay]').forEach((b) => b.addEventListener('click', () => payInvoice(b.dataset.adPay, b.dataset.amt)));
       host.querySelectorAll('[data-ad-cancel]').forEach((b) => b.addEventListener('click', () => cancelAddon(b.dataset.adCancel)));

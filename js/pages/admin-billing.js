@@ -14,11 +14,11 @@
     el = window.AdminShell.mount({ title: 'Billing' });
     if (!el) return;
     const wanted = new URLSearchParams(window.location.search).get('tab');
-    if (['overview', 'subs', 'payments'].includes(wanted)) tab = wanted;
+    if (['overview', 'subs', 'payments', 'addons'].includes(wanted)) tab = wanted;
 
     el.innerHTML = `
       <div class="page-header">
-        <div><h1>Billing</h1><p>Subscriptions, arrears and payments across every business.</p></div>
+        <div><h1>Billing</h1><p>Subscriptions, arrears, payments and premium features across every business.</p></div>
         <div class="page-actions" style="display:flex;gap:var(--space-2);flex-wrap:wrap">
           <button class="btn btn-secondary btn-sm" id="ab-backfill">Start subscriptions for existing businesses</button>
           <button class="btn btn-secondary btn-sm" id="ab-cycle">Run billing cycle now</button>
@@ -29,10 +29,12 @@
         <button class="tab-btn" data-tab="overview">Overview</button>
         <button class="tab-btn" data-tab="subs">Subscriptions</button>
         <button class="tab-btn" data-tab="payments">Payments <span id="ab-pay-badge"></span></button>
+        <button class="tab-btn" data-tab="addons">Premium features</button>
       </div>
       <div class="bl-pane" id="pane-overview"></div>
       <div class="bl-pane" id="pane-subs"></div>
-      <div class="bl-pane" id="pane-payments"></div>`;
+      <div class="bl-pane" id="pane-payments"></div>
+      <div class="bl-pane" id="pane-addons"></div>`;
 
     document.getElementById('ab-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) show(b.dataset.tab); });
     document.getElementById('ab-cycle').addEventListener('click', runCycle);
@@ -47,6 +49,7 @@
     if (t === 'overview') loadOverview();
     if (t === 'subs') initSubs();
     if (t === 'payments') initPayments();
+    if (t === 'addons' && window.AdminAddons) window.AdminAddons.mount(document.getElementById('pane-addons'));
   }
 
   /* ------------------------------- actions ------------------------------- */

@@ -51,6 +51,7 @@
     const TYPE = { DINE_IN: 'Dine-in', TAKEAWAY: 'Takeaway', DELIVERY: 'Delivery', COUNTER: 'Counter', BAR_TAB: 'Bar', ROOM_SERVICE: 'Room service', PICKUP: 'Pickup' };
     const RANK = { READY: 0, ON_THE_WAY: 0, PREPARING: 1, RECEIVED: 2 };
     let orders = []; let stale = false; let oSig = ''; const prevStage = new Map(); const readyStamp = new Map();
+    const lbl = (o) => `order-${o.number}`;   // customers see "order-40", not just "40"
     const isReady = (o) => o.stage === 'READY' || o.stage === 'ON_THE_WAY';
     const readyText = (o) => (o.stage === 'ON_THE_WAY' ? 'On the way' : o.orderType === 'DINE_IN' ? 'Being served' : 'Ready for pickup');
     const stateText = (o, cfg) => (isReady(o) ? readyText(o) : o.stage === 'PREPARING' ? `Preparing${cfg.showTime !== false && o.etaMin ? ` · ~${o.etaMin} min` : ''}` : 'Received');
@@ -60,27 +61,27 @@
     const byTime = (a, b) => new Date(a.sentAt) - new Date(b.sentAt);
     const byReady = (a, b) => new Date(b.readyAt || b.sentAt) - new Date(a.readyAt || a.sentAt);
     const itemsLine = (o, cfg) => (cfg.showItems && o.items && o.items.length ? `<em class="ord-items">${o.items.slice(0, 4).map((i) => `${i.qty > 1 ? E(i.qty) + '× ' : ''}${E(i.name)}`).join(' · ')}${o.items.length > 4 || o.more ? ' …' : ''}</em>` : '');
-    const chip = (o, cfg) => `<div class="ord-chip st-${o.stage} ${isNew(o) ? 'is-new' : ''}"><b>${E(o.number)}</b><span>${E(subText(o, cfg))}</span><small>${E(stateText(o, cfg))}</small>${itemsLine(o, cfg)}</div>`;
+    const chip = (o, cfg) => `<div class="ord-chip st-${o.stage} ${isNew(o) ? 'is-new' : ''}"><b>${E(lbl(o))}</b><span>${E(subText(o, cfg))}</span><small>${E(stateText(o, cfg))}</small>${itemsLine(o, cfg)}</div>`;
     function boardHtml(list, cfg) {
       const cap = cfg.maxOrders || 12; const rdy = list.filter(isReady).sort(byReady); const prep = list.filter((o) => !isReady(o)).sort(byTime);
-      const col = (cls, title, arr, color) => { const shown = arr.slice(0, cap); const cols = shown.length > 4 && !cfg.showItems ? 2 : 1;
+      const col = (cls, title, arr, color) => { const shown = arr.slice(0, cap); const cols = shown.length > 5 && !cfg.showItems ? 2 : 1;
         return `<section class="ord-col ${cls}" style="--c:${color}"><h3><i></i>${title}<span class="ord-count">${arr.length}</span></h3><div class="ord-chips" style="--oc:${cols}">${shown.map((o) => chip(o, cfg)).join('') || `<p class="ord-none">${cls === 'ready' ? 'Nothing ready yet' : 'Kitchen is clear'}</p>`}</div>${arr.length > shown.length ? `<div class="ord-more">+${arr.length - shown.length} more</div>` : ''}</section>`; };
       return `<div class="ord-board">${col('prep', 'Preparing', prep, 'var(--tv-accent)')}${col('ready', 'Ready', rdy, '#22C55E')}</div>`;
     }
     function cardsHtml(list, cfg) {
       const cap = cfg.maxOrders || 12; const arr = list.slice().sort((a, b) => (RANK[a.stage] - RANK[b.stage]) || byTime(a, b)); const shown = arr.slice(0, cap); const n = shown.length; const cols = n <= 1 ? 1 : n <= 2 ? 2 : n <= 6 ? 3 : 4;
-      const card = (o) => `<article class="ord-card st-${o.stage} ${isNew(o) ? 'is-new' : ''}"><div class="ord-top"><b>${E(o.number)}</b><span class="ord-tag">${E(STAGE[o.stage])}</span></div>${subText(o, cfg) ? `<p class="ord-sub">${E(subText(o, cfg))}</p>` : ''}${cfg.showItems && o.items.length ? `<ul>${o.items.slice(0, 3).map((i) => `<li>${i.qty > 1 ? E(i.qty) + '× ' : ''}${E(i.name)}</li>`).join('')}${o.items.length > 3 || o.more ? '<li>…</li>' : ''}</ul>` : ''}
+      const card = (o) => `<article class="ord-card st-${o.stage} ${isNew(o) ? 'is-new' : ''}"><div class="ord-top"><b>${E(lbl(o))}</b><span class="ord-tag">${E(STAGE[o.stage])}</span></div>${subText(o, cfg) ? `<p class="ord-sub">${E(subText(o, cfg))}</p>` : ''}${cfg.showItems && o.items.length ? `<ul>${o.items.slice(0, 3).map((i) => `<li>${i.qty > 1 ? E(i.qty) + '× ' : ''}${E(i.name)}</li>`).join('')}${o.items.length > 3 || o.more ? '<li>…</li>' : ''}</ul>` : ''}
         <div class="ord-bar" style="--p:${Math.max(6, o.progress)}%"><i></i></div><div class="ord-steps"><span class="on">Received</span><span class="${o.stage !== 'RECEIVED' ? 'on' : ''}">Preparing</span><span class="${isReady(o) ? 'on' : ''}">Ready</span></div>${cfg.showTime !== false && !isReady(o) && o.etaMin ? `<div class="ord-time">About ${E(o.etaMin)} min</div>` : ''}</article>`;
       return `<div class="ord-cards" style="--oc:${cols}">${shown.map(card).join('')}</div>${arr.length > n ? `<div class="ord-more">+${arr.length - n} more orders</div>` : ''}`;
     }
     function nowHtml(list, cfg) {
-      const cap = cfg.maxOrders || 12; const rdy = list.filter(isReady).sort(byReady).slice(0, cap); const prep = list.filter((o) => !isReady(o)).sort(byTime); const n = rdy.length; const fs = n <= 2 ? 280 : n <= 4 ? 200 : n <= 8 ? 140 : 100;
-      return `<div class="ord-now"><section class="ord-nowl"><h3>Now serving</h3><div class="ord-big" style="--fs:${fs}px">${rdy.map((o) => `<div class="ord-bn st-READY ${isNew(o) ? 'is-new' : ''}"><b>${E(o.number)}</b><span>${E(subText(o, cfg) || readyText(o))}</span></div>`).join('') || '<p class="ord-none">Your number appears here when your order is ready</p>'}</div></section>
-        <section class="ord-nowr"><h3>In the kitchen<span class="ord-count">${prep.length}</span></h3><div class="ord-rows">${prep.slice(0, Math.min(cap, 9)).map((o) => `<div class="ord-row st-${o.stage}"><b>${E(o.number)}</b><div class="ord-mini"><i style="width:${Math.max(6, o.progress)}%"></i></div><small>${E(STAGE[o.stage])}</small></div>`).join('') || '<p class="ord-none">Kitchen is clear</p>'}</div></section></div>`;
+      const cap = cfg.maxOrders || 12; const rdy = list.filter(isReady).sort(byReady).slice(0, cap); const prep = list.filter((o) => !isReady(o)).sort(byTime); const n = rdy.length; const fs = n <= 2 ? 150 : n <= 4 ? 110 : n <= 8 ? 80 : 60;
+      return `<div class="ord-now"><section class="ord-nowl"><h3>Now serving</h3><div class="ord-big" style="--fs:${fs}px">${rdy.map((o) => `<div class="ord-bn st-READY ${isNew(o) ? 'is-new' : ''}"><b>${E(lbl(o))}</b><span>${E(subText(o, cfg) || readyText(o))}</span></div>`).join('') || '<p class="ord-none">Your number appears here when your order is ready</p>'}</div></section>
+        <section class="ord-nowr"><h3>In the kitchen<span class="ord-count">${prep.length}</span></h3><div class="ord-rows">${prep.slice(0, Math.min(cap, 9)).map((o) => `<div class="ord-row st-${o.stage}"><b>${E(lbl(o))}</b><div class="ord-mini"><i style="width:${Math.max(6, o.progress)}%"></i></div><small>${E(STAGE[o.stage])}</small></div>`).join('') || '<p class="ord-none">Kitchen is clear</p>'}</div></section></div>`;
     }
     function minimalHtml(list, cfg) {
       const arr = list.slice().sort((a, b) => (RANK[a.stage] - RANK[b.stage]) || byTime(a, b)).slice(0, Math.min(cfg.maxOrders || 12, 14));
-      return `<div class="ord-min">${arr.map((o) => `<div class="ord-mrow st-${o.stage}"><b>${E(o.number)}</b><span>${E(isReady(o) ? readyText(o) : STAGE[o.stage])}</span></div>`).join('')}</div>`;
+      return `<div class="ord-min">${arr.map((o) => `<div class="ord-mrow st-${o.stage}"><b>${E(lbl(o))}</b><span>${E(isReady(o) ? readyText(o) : STAGE[o.stage])}</span></div>`).join('')}</div>`;
     }
     function ordersInner(s) {
       const cfg = s.orders || {}; const list = pickOrders(cfg);
@@ -91,7 +92,7 @@
     const ordersSlideHtml = (s) => `<section class="tvr-slide ord-slide" data-ord="${E(s.id)}">${ordersInner(s)}</section>`;
     function panelInner(p) {
       const cap = p.maxOrders || 8; const rdy = orders.filter(isReady).sort(byReady); const prep = orders.filter((o) => !isReady(o)).sort(byTime);
-      const grp = (cls, label, arr) => `<div class="ord-pg ${cls}"><h4>${label}<span>${arr.length}</span></h4><div class="ord-pc">${arr.slice(0, cap).map((o) => `<span class="ord-pn st-${o.stage} ${isNew(o) ? 'is-new' : ''}">${E(o.number)}</span>`).join('') || '<em>-</em>'}</div></div>`;
+      const grp = (cls, label, arr) => `<div class="ord-pg ${cls}"><h4>${label}<span>${arr.length}</span></h4><div class="ord-pc">${arr.slice(0, cap).map((o) => `<span class="ord-pn st-${o.stage} ${isNew(o) ? 'is-new' : ''}">${E(lbl(o))}</span>`).join('') || '<em>-</em>'}</div></div>`;
       return `<h3 class="ord-ph"><i></i>Orders${stale ? ' <small>reconnecting…</small>' : ''}</h3>${grp('ready', 'Ready', rdy)}${grp('prep', 'Preparing', prep)}`;
     }
     function applyOrdersPanel() {
