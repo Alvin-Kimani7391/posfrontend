@@ -63,7 +63,8 @@
         const rate = p.taxRate || 0;
         const c = lineCalc(unit, qty, disc, rate, inclusive);
         if (disc > c.gross) fail(`Discount on ${p.name} is more than the line total.`);
-        const preset = Math.min(Math.round(cents(p.defaultDiscount) * qty), c.gross);
+        // an offer applied by the till (promoApplied) is the owner's own preset, like a standing product discount; the server re-checks it against the offers that were running
+        const preset = Math.min(Math.max(Math.round(cents(p.defaultDiscount) * qty), it.promoApplied ? disc : 0), c.gross);
         const manual = disc - preset;
         if (manual > 1 && maxPct < 100 && manual > Math.round((c.gross * maxPct) / 100)) fail(`Discount on ${p.name} is above the ${maxPct}% limit for offline sales.`);
         items.push({ productId: p._id, variantId: v ? v._id : undefined, name: nameOf(p, v), quantity: qty, unitPriceCents: unit, priceType: priced.priceType, discountCents: disc, taxRate: rate, taxAmountCents: c.tax, totalCents: c.total });
@@ -86,7 +87,6 @@
         if (amountCents <= 0) continue;
         if ((p.method === 'CARD' || p.method === 'BANK') && !caps.allowCard) fail('Card and bank payments cannot be taken offline.');
         if (p.method === 'MPESA' && (!caps.allowManualMpesa || !ctx.mpesaTill)) fail('M-PESA Till payments are not enabled for offline selling.');
-        if (p.method === 'MOBILE_MONEY' && !caps.allowManualMpesa && !caps.allowCard) fail('Mobile-money payments are not enabled for offline selling.');
         if (p.method === 'MOBILE_MONEY' && !p.reference) fail('Type the mobile-money transaction code.');
         if (p.method === 'CREDIT') fail('Credit sales are not available offline.');
         const row = { method: p.method, amountCents, reference: p.reference || undefined };

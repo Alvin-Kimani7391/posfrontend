@@ -74,7 +74,7 @@
     hardware: ['unitConversions', 'quotationManagement', 'deliveryManagement', 'heldSales', 'promotions'],
     cosmetics: ['expiryTracking', 'batchTracking', 'productVariants', 'loyaltyProgram', 'quarantineManagement', 'recallManagement', 'heldSales', 'promotions'],
     restaurant: ['restaurantOrdering', 'tableManagement', 'kitchenDisplay', 'recipeManagement', 'reservations', 'guestQrOrdering', 'batchTracking'],
-    general_shop: ['heldSales', 'promotions'],
+    general_shop: ['layaway', 'heldSales', 'promotions', 'customerCredit'],
     wines_spirits: ['liquorCompliance', 'ageVerification', 'emptiesTracking', 'totSales', 'unitConversions', 'batchTracking', 'loyaltyProgram', 'heldSales', 'promotions', 'wholesalePricing'],
     wholesale: ['wholesalePricing', 'unitConversions', 'quotationManagement', 'deliveryManagement', 'multiWarehouse', 'customerCredit'],
     garage: ['vehicleManagement', 'jobCards', 'quotationManagement'],

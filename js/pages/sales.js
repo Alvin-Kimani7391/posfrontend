@@ -114,6 +114,7 @@
     { id: 'CASH', label: 'Cash', ico: 'fa-solid fa-money-bill-wave' },
     { id: 'MPESA', label: 'M-PESA STK', ico: 'fa-solid fa-mobile-screen-button' },
     { id: 'MPESA_TILL', label: 'M-PESA Till', ico: 'fa-solid fa-store' },
+    { id: 'MOBILE_MONEY', label: 'Mobile money', ico: 'fa-solid fa-mobile-retro' },
     { id: 'BANK', label: 'Bank', ico: 'fa-solid fa-building-columns' },
     { id: 'CREDIT', label: 'Credit', ico: 'fa-solid fa-file-invoice-dollar' },
     { id: 'CARD', label: 'Card', ico: 'fa-solid fa-credit-card' },
@@ -350,6 +351,7 @@
   const OFFLINE_METHODS = [
     { id: 'CASH', label: 'Cash', ico: 'fa-solid fa-money-bill-wave' },
     { id: 'MPESA_OFFLINE', label: 'M-PESA Till', ico: 'fa-solid fa-store' },
+    { id: 'MOBILE_MONEY', label: 'Mobile money', ico: 'fa-solid fa-mobile-retro' },
     { id: 'BANK', label: 'Bank', ico: 'fa-solid fa-building-columns' },
     { id: 'CARD', label: 'Card', ico: 'fa-solid fa-credit-card' },
   ];
@@ -1227,7 +1229,6 @@
     $('park-btn')?.addEventListener('click', parkSale);
     $('recall-btn')?.addEventListener('click', recallSale);
     $('offers-btn')?.addEventListener('click', () => {
-      if (isOfflineNow()) return window.UI.toast.error('Offers need a connection. Prices stay as they are while offline.');
       if (!state.cart.length) return window.UI.toast.error('The cart is empty');
       schedulePromoQuote(true);
     });
@@ -1870,6 +1871,7 @@
       if (m.id === resumeId) return true; // always show the tab that holds already-received money
       if (m.id === 'MPESA') return state.flags.mpesaEnabled;
       if (m.id === 'MPESA_TILL') return state.flags.mpesaManualEnabled;
+      // MOBILE_MONEY (any network, typed code) is on for every business type, online and offline
       return true;
     });
     let method = resumeId || (initialMethod && methods.some((m) => m.id === initialMethod) ? initialMethod : 'CASH');
@@ -1930,7 +1932,7 @@
 
       method = next;
       modal.querySelectorAll('.pz-method').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
-      const renderers = { CASH: renderCash, MPESA: renderMpesa, MPESA_TILL: renderMpesaTill, MPESA_OFFLINE: renderMpesaOffline, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
+      const renderers = { CASH: renderCash, MPESA: renderMpesa, MPESA_TILL: renderMpesaTill, MPESA_OFFLINE: renderMpesaOffline, MOBILE_MONEY: renderMobileMoney, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
       renderers[method]();
       syncWs();
     }
@@ -2021,6 +2023,31 @@
       panel.querySelector('#pz-ref').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !completeBtn.disabled) completeBtn.click(); });
       onComplete = async () => {
         state.payments = [{ method, amount: dueAmount, reference: panel.querySelector('#pz-ref').value.trim() || undefined }];
+        await checkout({ btn: completeBtn });
+      };
+    }
+
+    /* ---- MOBILE MONEY (any network: Airtel Money, T-Kash, Equitel, M-PESA paid to a paybill/till ...) ----
+       The cashier reads the confirmation SMS and types the reference. Works with or without internet; a manager checks it against
+       the network statement later (same flow as the restaurant's mobile-money payments). */
+    function renderMobileMoney() {
+      const nets = ['M-PESA', 'Airtel Money', 'T-Kash', 'Equitel', 'Other'];
+      panel.innerHTML = `
+        <div class="pz-note">Customer pays <strong>${fm(dueAmount)}</strong> by mobile money. Read the confirmation SMS on their phone and type the details below.</div>
+        ${offlineNow ? '<div class="pz-note warn">No internet: this payment is saved with the sale and checked when the till reconnects.</div>' : ''}
+        <div class="form-row">
+          <div class="field"><label for="mm-net">Network</label><select class="select" id="mm-net">${nets.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></div>
+          <div class="field"><label for="mm-ref">Transaction code</label><input class="input pz-code-input" id="mm-ref" maxlength="30" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. UJK1A2B3C4" /></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label for="mm-phone">Customer phone <span class="text-muted">(optional)</span></label><input class="input" id="mm-phone" inputmode="tel" placeholder="07XXXXXXXX" /></div>
+        </div>`;
+      const net = panel.querySelector('#mm-net'); const ref = panel.querySelector('#mm-ref'); const phone = panel.querySelector('#mm-phone');
+      const upd = () => { ref.value = ref.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); setComplete({ enabled: ref.value.length >= 6, label: offlineNow ? 'Save sale offline & print receipt' : 'Complete sale & print receipt' }); };
+      ref.addEventListener('input', upd); upd();
+      setTimeout(() => ref.focus(), 50);
+      onComplete = async () => {
+        state.payments = [{ method: 'MOBILE_MONEY', amount: dueAmount, reference: ref.value, provider: net.value, network: net.value, payerPhone: phone.value.trim() || undefined }];
         await checkout({ btn: completeBtn });
       };
     }
@@ -2561,9 +2588,48 @@
   let promoAnnounce = false; let promoSig = ''; let promoTimer = null; let promoSeq = 0;
   const promoEligible = (i) => !i.ws && !(i.discount > 0 && !i.autoDiscount && !i.promoApplied); // a hand-typed discount is never overwritten
 
+  /* Offers cached on this till so they still apply with no internet. Same rules as the server (promotion.service.js): the best single offer per line. */
+  const PROMO_CACHE_KEY = 'pos.promosActive.v1';
+  async function refreshPromoCache() {
+    if (!canPromo() || isOfflineNow()) return;
+    try {
+      const { data } = await window.Api.get('/shop/promotions/active', { branchId: window.AppShell.getActiveBranchId() || undefined });
+      localStorage.setItem(PROMO_CACHE_KEY, JSON.stringify({ at: Date.now(), promotions: data.promotions || [] }));
+    } catch { /* keep the old copy */ }
+  }
+  function localPromoQuote(lines) {
+    let list = []; try { list = (JSON.parse(localStorage.getItem(PROMO_CACHE_KEY) || '{}').promotions) || []; } catch { list = []; }
+    const idOf = (x) => String((x && x._id) || x || ''); const now = Date.now(); const dow = new Date().getDay(); const branch = String(window.AppShell.getActiveBranchId() || '');
+    const calc = (p, unit, qty) => {
+      const gross = round2(unit * qty); let d = 0;
+      if (p.type === 'PERCENT') d = gross * p.value / 100; else if (p.type === 'AMOUNT_OFF') d = p.value * qty;
+      else if (p.type === 'FIXED_PRICE') d = unit > p.value ? (unit - p.value) * qty : 0;
+      else if (p.type === 'MULTI_BUY') d = Math.floor(qty / p.buyQty) * (p.buyQty - p.payQty) * unit;
+      return Math.max(0, Math.min(gross, round2(d)));
+    };
+    return { lines: lines.map((i) => {
+      const unit = unitPriceOf(i); const pid = idOf(i.product); const cat = idOf(i.product.categoryId); let best = null;
+      list.forEach((p) => {
+        if (p.status && p.status !== 'ACTIVE') return;
+        if (now < new Date(p.startsAt).getTime() || now > new Date(p.endsAt).getTime()) return;
+        if ((p.branchIds || []).length && branch && !p.branchIds.map(idOf).includes(branch)) return;
+        if ((p.daysOfWeek || []).length && !p.daysOfWeek.includes(dow)) return;
+        const inScope = p.scope === 'ALL' || (p.scope === 'PRODUCTS' && (p.productIds || []).map(idOf).includes(pid)) || (p.scope === 'CATEGORIES' && cat && (p.categoryIds || []).map(idOf).includes(cat));
+        if (!inScope || i.quantity < (p.minQty || 0)) return;
+        const d = calc(p, unit, i.quantity); if (d > 0 && (!best || d > best.d)) best = { d, p };
+      });
+      const standing = Math.min(round2(unit * i.quantity), round2((Number(i.product.defaultDiscount) || 0) * i.quantity));
+      const promoD = best ? best.d : 0;
+      return { suggestedDiscount: Math.max(promoD, standing), source: promoD > 0 && promoD >= standing ? 'PROMOTION' : null, promotion: best ? { name: best.p.name } : null };
+    }) };
+  }
+  window.addEventListener('online', refreshPromoCache);
+  window.addEventListener('connectivitychange', (e) => { if (e.detail && e.detail.online) refreshPromoCache(); });
+  document.addEventListener('DOMContentLoaded', () => setTimeout(refreshPromoCache, 2000));
+
   function schedulePromoQuote(force) {
     if (force) promoAnnounce = true;
-    if (!canPromo() || isOfflineNow() || isWs() || state.view !== 'new-sale') return;
+    if (!canPromo() || isWs() || state.view !== 'new-sale') return;
     const lines = state.cart.filter(promoEligible);
     const sig = lines.map((i) => `${keyOf(i)}:${i.quantity}:${i.unitId || ''}`).join('|');
     if (!force && sig === promoSig) return;
@@ -2576,10 +2642,16 @@
   async function runPromoQuote(lines, sig) {
     const seq = ++promoSeq;
     try {
-      const { data } = await window.Api.post('/shop/promotions/quote', {
-        branchId: window.AppShell.getActiveBranchId() || undefined,
-        lines: lines.map((i) => ({ productId: i.product._id, variantId: i.variantId || i.variant?._id || undefined, quantity: i.quantity })),
-      });
+      let data;
+      if (isOfflineNow()) data = localPromoQuote(lines); // no internet: work the offers out here from the copy cached on this till
+      else {
+        try {
+          ({ data } = await window.Api.post('/shop/promotions/quote', {
+            branchId: window.AppShell.getActiveBranchId() || undefined,
+            lines: lines.map((i) => ({ productId: i.product._id, variantId: i.variantId || i.variant?._id || undefined, quantity: i.quantity })),
+          }));
+        } catch (e) { if (!isNetErr(e)) throw e; data = localPromoQuote(lines); }
+      }
       if (seq !== promoSeq) return; // a newer quote is on its way
       let applied = 0; const names = [];
       (data.lines || []).forEach((q, idx) => {
@@ -2621,8 +2693,15 @@
    * is opened (and the POS locked) the moment the sale is saved.
    */
   async function saveOffline(ctid) {
+    // Wines & spirits: the till asks the age check itself (the server cannot while offline). null = refused / cancelled: save nothing.
+    let ageCheck;
+    if (window.LiquorTill && window.LiquorTill.active()) {
+      const lp = await window.LiquorTill.offlinePrepare(state.cart);
+      if (lp === null) { const e = new Error('Sale not saved: the age check was not completed.'); e.code = 'AGE_CHECK_CANCELLED'; throw e; }
+      ageCheck = lp.ageCheck;
+    }
     const r = await window.Offline.sales.create({
-      cart: state.cart, cartDiscount: state.cartDiscount || 0, payments: state.payments, clientTransactionId: ctid,
+      cart: state.cart, cartDiscount: state.cartDiscount || 0, payments: state.payments, clientTransactionId: ctid, ageCheck,
     });
     return { sale: { receiptNumber: r.receiptNumber, _id: null }, receipt: r.receipt, offline: true };
   }
@@ -2671,6 +2750,7 @@
       })),
       payments: state.payments.map((p) => ({
         method: p.method, amount: p.amount, reference: p.reference,
+        provider: p.method === 'MOBILE_MONEY' ? p.provider : undefined,
         amountTendered: p.method === 'CASH' ? p.amountTendered : undefined,
       })),
       ...(canOffline ? { deviceId: off.device.id(), clientTransactionId: ctid } : {}),
