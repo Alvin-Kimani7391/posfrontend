@@ -15,6 +15,8 @@
   const PROFILE_KEY = 'pos.businessProfile';
   const RETAIL_HOME = 'dashboard.html';
   const HX_HOME = 'hx-dashboard.html';
+  const HW_HOME = 'hardware/index.html';
+  const HW_ROLES = ['SALES_REP', 'DISPATCHER', 'DRIVER'];
   const HX_ROLES = ['WAITER', 'HEAD_WAITER', 'SUPERVISOR', 'CHEF', 'KITCHEN_STAFF', 'BARTENDER', 'EXPEDITOR', 'DELIVERY_RIDER', 'RECEPTIONIST', 'HOUSEKEEPER'];
 
   const uid = (u) => (u && (u._id || u.id)) || '';
@@ -45,8 +47,12 @@
   function hasRestaurant(profile) { return !!(profile && profile.featureSettings && profile.featureSettings.restaurantOrdering === true); }
 
   /** Each role opens the screen it works in all day. Owners and managers get the overview. */
+  /** Hardware & building materials businesses (and their field roles) use the hardware workspace. */
+  function isHardware(profile) { return !!profile && profile.businessType === 'hardware'; }
+
   function landingFor(user, profile) {
     const role = user && user.role;
+    if (isHardware(profile) || HW_ROLES.includes(role)) return HW_HOME;
     const hx = isHospitality(profile) || HX_ROLES.includes(role);
     if (!hx) return RETAIL_HOME;
     const rooms = hasRooms(profile), food = hasRestaurant(profile) || !rooms;
@@ -74,6 +80,7 @@
     const user = window.Storage.getUser();
     let profile = cachedProfile();
     if (!profile) { try { profile = await fetchProfile(); } catch { /* offline */ } }
+    if (isHardware(profile) || HW_ROLES.includes(user && user.role)) { window.location.replace(HW_HOME); return true; }
     if (isHospitality(profile) || HX_ROLES.includes(user && user.role)) {
       window.location.replace(landingFor(user, profile));
       return true;
@@ -81,5 +88,5 @@
     return false;
   }
 
-  window.HomeRoute = { resolve, landingFor, isHospitality, hasRooms, hasRestaurant, cachedProfile, fetchProfile, redirectIfHospitality, HX_ROLES, HX_HOME, RETAIL_HOME };
+  window.HomeRoute = { resolve, landingFor, isHospitality, isHardware, hasRooms, hasRestaurant, cachedProfile, fetchProfile, redirectIfHospitality, HX_ROLES, HX_HOME, RETAIL_HOME };
 })(window);

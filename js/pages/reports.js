@@ -29,6 +29,7 @@
 
   const TABS = [
     { key: 'sales', label: 'Sales', endpoint: 'sales', permission: 'reports.view', scope: { dates: true, branch: true, cashier: true }, render: renderSales },
+    { key: 'allsales', label: 'All sales', endpoint: 'sales/all', permission: 'reports.view', scope: { dates: true, branch: true, cashier: true }, render: null },
     { key: 'profit', label: 'Profit & loss', endpoint: 'profit', permission: 'reports.profit', scope: { dates: true, branch: true, cashier: false }, render: renderProfit },
     { key: 'wholesale', label: 'Wholesale', endpoint: 'wholesale', permission: 'reports.profit', feature: 'multiWarehouse', extra: { top: 100 }, scope: { dates: true, branch: true, cashier: false }, render: renderWholesale },
     { key: 'payments', label: 'Payments', endpoint: 'payments', permission: 'reports.view', scope: { dates: true, branch: true, cashier: false }, render: renderPayments },
@@ -127,6 +128,14 @@
     document.getElementById('report-meta').innerHTML = `<span><strong>${esc(tab.label)}</strong>${filterBar.describe(tab.scope) ? ` · ${esc(filterBar.describe(tab.scope))}` : ' · current position'}</span>`;
     exportBtn.disabled = true;
     state.exportData = null;
+    if (state.allSales && tab.key !== 'allsales') { state.allSales.destroy(); state.allSales = null; }
+    if (tab.key === 'allsales') {   // every sale, searchable, with full detail (js/pages/reports-allsales.js)
+      if (state.allSales) state.allSales.destroy();
+      body.innerHTML = '';
+      state.allSales = window.AllSales.mount(body, { getQuery: () => filterBar.getQuery(tab.scope) });
+      exportBtn.disabled = false;
+      return;
+    }
 
     try {
       let data = state.cache[cacheKey];
@@ -164,6 +173,7 @@
   }
 
   function exportCurrent() {
+    if (state.tab === 'allsales' && state.allSales) return state.allSales.exportCsv();
     const ex = typeof state.exportData === 'function' ? state.exportData() : state.exportData;
     if (!ex) return;
     RT.downloadCSV(`${ex.name}-${RT.stamp()}.csv`, ex.sections);
