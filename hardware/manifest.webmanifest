@@ -1,0 +1,25 @@
+{
+  "id": "../",
+  "name": "Hardware POS",
+  "short_name": "Hardware POS",
+  "description": "Counter till, quotes, orders, deliveries and stock for hardware and building materials. Works offline.",
+  "lang": "en-KE",
+  "start_url": "index.html?source=pwa#/counter",
+  "scope": "../",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#1d1c35",
+  "theme_color": "#1d1c35",
+  "categories": ["business", "finance", "productivity"],
+  "prefer_related_applications": false,
+  "launch_handler": { "client_mode": "focus-existing" },
+  "icons": [
+    { "src": "../icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "../icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "../icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Counter till", "short_name": "Till", "url": "index.html?source=shortcut#/counter", "icons": [{ "src": "../icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Quotes & orders", "short_name": "Quotes", "url": "index.html?source=shortcut#/quotes", "icons": [{ "src": "../icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}

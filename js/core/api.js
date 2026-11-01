@@ -142,7 +142,10 @@
         recent = Date.now() - last < 10000;
         if (!onExempt && !recent) sessionStorage.setItem('pos.lockRedirectAt', String(Date.now()));
       } catch { /* storage blocked */ }
-      if (!onExempt && !recent) window.location.replace('billing?locked=1');
+      // Pages in a sub-folder (/hardware/, /restaurant/) must go to the ROOT billing page, not /hardware/billing.
+      const sub = p.search(/\/(hardware|restaurant)(\/|$)/);
+      const rootPrefix = sub >= 0 ? p.slice(0, sub) : '';
+      if (!onExempt && !recent) window.location.replace(`${rootPrefix}${sub >= 0 ? '/' : ''}billing?locked=1`.replace(/^\/\//, '/'));
     }
 
     if (!res.ok || payload.success === false) {

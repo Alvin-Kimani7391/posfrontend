@@ -1,8 +1,9 @@
 /**
  * hx-skin-early.js - put in <head> (last item) of every shared page.
- * Restaurant / accommodation businesses get the black-rail / blue look from the FIRST paint, so the default
- * orange theme never flashes. It reads the cached business profile (same cache app-shell.js uses), loads the
- * hx stylesheets as render-blocking <link>s and tags <body class="hx-skin"> the moment <body> exists.
+ * Restaurant / accommodation businesses get the black-rail / blue look, and HARDWARE businesses get the
+ * navy & lime look (css/hw-skin.css), from the FIRST paint, so the default orange theme never flashes.
+ * It reads the cached business profile (same cache app-shell.js uses), loads the stylesheets as
+ * render-blocking <link>s and tags <body class="hx-skin"> / <body class="hw-skin"> the moment <body> exists.
  */
 (function () {
   try {
@@ -10,12 +11,26 @@
     if (/^(hx-|admin|login|register|verify|kiosk|track|rider|store|offline|index|q$)/.test(file)) return;
     var p = JSON.parse(localStorage.getItem('pos.businessProfile') || 'null'); if (!p) return;
     var f = p.featureSettings || {};
+    var tagBody = function (cls) {
+      var tag = function () { if (document.body) { document.body.classList.add(cls); return true; } return false; };
+      if (!tag()) { var mo = new MutationObserver(function () { if (tag()) mo.disconnect(); }); mo.observe(document.documentElement, { childList: true }); }
+    };
+    var font = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" data-hx-skin="font">';
+
+    // ---- Hardware & building materials: navy + lime (matches /hardware/) ----
+    if (p.businessType === 'hardware') {
+      document.write('<link rel="stylesheet" href="css/hw-skin.css" data-hw-skin="css">' + font);
+      try { var m = document.querySelector('meta[name="theme-color"]'); if (!m) { m = document.createElement('meta'); m.name = 'theme-color'; document.head.appendChild(m); } m.content = '#1d1c35'; } catch (e) { /* ignore */ }
+      tagBody('hw-skin');
+      return;
+    }
+
+    // ---- Restaurant / accommodation: black rail + blue ----
     if (!(p.businessType === 'restaurant' || f.restaurantOrdering === true || f.accommodation === true)) return;
     ['css/hospitality.css', 'css/hx-redesign.css', 'css/hx-pro.css', 'css/hx-fixes.css'].forEach(function (h) {
       document.write('<link rel="stylesheet" href="' + h + '" data-hx-skin="' + h + '">');
     });
-    document.write('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" data-hx-skin="font">');
-    var tag = function () { if (document.body) { document.body.classList.add('hx-skin'); return true; } return false; };
-    if (!tag()) { var mo = new MutationObserver(function () { if (tag()) mo.disconnect(); }); mo.observe(document.documentElement, { childList: true }); }
+    document.write(font);
+    tagBody('hx-skin');
   } catch (e) { /* never block the page */ }
 })();

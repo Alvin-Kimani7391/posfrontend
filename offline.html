@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0f766e" />
   <title>Offline · Six Star POS</title>
+  <script>
+    /* Hardware & building-materials businesses get the same Navy & Lime look as /hardware/ (read from the cached business profile). */
+    (function () {
+      try {
+        var p = JSON.parse(localStorage.getItem('pos.businessProfile') || 'null');
+        if (p && p.businessType === 'hardware') {
+          document.documentElement.className += ' hw';
+          window.HW_HOME = 'hardware/index.html#/counter';
+          var m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute('content', '#1d1c35');
+        }
+      } catch (e) { /* default look */ }
+    })();
+  </script>
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
   <link rel="stylesheet" href="css/variables.css" />
   <link rel="stylesheet" href="css/base.css" />
@@ -14,6 +27,13 @@
     @media (prefers-color-scheme: dark) {
       :root { --bg:#0b1220; --card:#111a2e; --text:#e5edf9; --muted:#9fb0c8; --line:#22304a; --brand:#14b8a6; }
     }
+    html.hw { --bg:#f6f6f2; --card:#ffffff; --text:#16162a; --muted:#757a88; --line:#eceef0; --brand:#1d1c35; color-scheme: light; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+    html.hw main { border-radius: 26px; border-top: 6px solid #d4ee5a; box-shadow: 0 18px 50px rgba(29,28,53,.12); }
+    html.hw h1 { font-weight: 800; letter-spacing: -.01em; }
+    html.hw button.primary { background: #d4ee5a; color: #1d1c35; border: 1px solid #c3e03a; font-weight: 800; border-radius: 12px; }
+    html.hw button.ghost, html.hw a.btn2 { border-radius: 12px; color: #1d1c35; font-weight: 700; }
+    html.hw #unlock { border-color: #1d1c35; }
+    html.hw button:focus-visible, html.hw a.btn2:focus-visible { outline-color: #d4ee5a; }
     * { box-sizing: border-box; }
     html, body { min-height: 100%; margin: 0; }
     body {
@@ -101,6 +121,7 @@
 
         var unlocked = !!(window.Storage.isAuthenticated() && auth && !auth.requiresUnlock());
         $('go-sales').style.display = unlocked ? '' : 'none';
+        if (window.HW_HOME) { $('go-sales').href = window.HW_HOME; $('go-sales').textContent = 'Open the counter till (till is unlocked)'; }
 
         var canPin = !online && auth && auth.canOfflineLogin && auth.canOfflineLogin() && !unlocked;
         $('unlock').style.display = canPin ? 'block' : 'none';
@@ -119,7 +140,7 @@
         e.preventDefault();
         $('err').textContent = '';
         window.Offline.auth.offlineLogin($('u').value, $('pin').value).then(function () {
-          window.location.href = 'sales.html';
+          window.location.href = window.HW_HOME || 'sales.html';
         }).catch(function (ex) { $('err').textContent = ex.message || 'Could not unlock'; $('pin').value = ''; });
       });
 
@@ -128,7 +149,7 @@
       $('retry').addEventListener('click', function () {
         status.textContent = 'Checking connection…';
         window.Connectivity.check().then(function (on) {
-          if (on) window.location.href = window.Storage.isAuthenticated() ? 'dashboard.html' : 'login.html';
+          if (on) window.location.href = window.Storage.isAuthenticated() ? (window.HW_HOME ? 'hardware/index.html' : 'dashboard.html') : 'login.html';
           else status.textContent = 'Still offline.';
         });
       });

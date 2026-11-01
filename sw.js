@@ -4,7 +4,18 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v4.9.3-order-status';
+const VERSION = 'v4.9.8-hardware-nav';
+/** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
+ *  Edit this list together with VERSION on every deploy. */
+const NOTES = [
+  'Hardware workspace now works offline: sell, scan and print receipts with no internet',
+  'Offline sales are saved on this till and sync by themselves when the internet returns',
+  'Update prompt and offline status now use the hardware Navy & Lime theme',
+  'Choosing the hardware business type opens the hardware workspace straight away',
+  'Install-as-app prompt and the POS icon on every hardware page',
+  'Shop tools pages keep the hardware menu; Billing and Business settings added',
+];
+const META_CACHE = 'kenya-pos-meta';
 const CACHE = `kenya-pos-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 3000;
 const OFFLINE_URL = 'offline.html';
@@ -17,10 +28,13 @@ const CDN_HOSTS = /^(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|fonts\
 // Missing files are skipped (all
 // Settled), so listing a file that does not exist is harmless.
 const PRECACHE = [
+  'hardware/', 'hardware/index.html', 'hardware/css/hw.css', 'hardware/css/hw-pro.css', 'hardware/css/hw-till.css', 'hardware/css/hw-offline.css', 'hardware/manifest.webmanifest',
+  'hardware/js/hw-core.js', 'hardware/js/hw-icons.js', 'hardware/js/hw-fast.js', 'hardware/js/hw-sell.js', 'hardware/js/hw-ops.js', 'hardware/js/hw-back.js', 'hardware/js/hw-products.js', 'hardware/js/hw-dash.js', 'hardware/js/hw-pro.js', 'hardware/js/hw-sales.js', 'hardware/js/hw-till.js', 'hardware/js/hw-till-more.js', 'hardware/js/hw-pwa.js', 'hardware/js/hw-offline.js',
+  'js/core/hx-skin-early.js',
   'js/core/hx-autoprint.js',
   'rider.html', 'track.html', 'hx-live.html', 'css/live.css', 'css/rider-login.css', 'js/core/live-kit.js', 'js/rider/rider-app.js', 'js/track/track-app.js', 'js/pages/hx-live.js', 'manifest-rider.json',
   'hx-cashier.html', 'css/hx-cashier.css', 'js/pages/hx-cashier.js', 'hx-floor.html', 'hx-kitchen.html', 'hx-bills.html', 'hx-reservations.html', 'hx-delivery.html', 'hx-storefront.html', 'js/pages/hx-storefront.js', 'hx-tv.html', 'tv.html', 'js/core/tv-player.js', 'js/pages/hx-tv.js', 'css/tv.css', 'js/core/tv-render.js', 'kiosk.html', 'css/kiosk.css', 'js/pages/kiosk.js', 'hx-selfservice.html', 'js/pages/hx-selfservice.js', 'store.html', 'css/store-auth.css', 'hx-menu.html', 'hx-stock.html', 'hx-guest.html', 'hx-staff.html', 'hx-desk.html', 'hx-rooms.html', 'hx-stays.html', 'hx-housekeeping.html', 'hx-reports.html', 'js/pages/hx-floor.js', 'js/pages/hx-kitchen.js', 'js/pages/hx-bills.js', 'js/pages/hx-reservations.js', 'js/pages/hx-delivery.js', 'js/pages/hx-menu.js', 'js/pages/hx-stock.js', 'js/pages/hx-guest.js', 'js/pages/hx-staff.js', 'js/pages/hx-desk.js', 'js/pages/hx-rooms.js', 'js/pages/hx-stays.js', 'js/pages/hx-housekeeping.js', 'js/pages/hx-reports.js', 'js/core/qr-encoder.js',
-  'hx-dashboard.html', 'hx-manager.html', 'js/pages/hx-manager.js', 'hx-restaurant-settings.html', 'js/pages/hx-restaurant-settings.js', 'css/hx-restsettings.css', 'js/core/business-types.js', 'hx-setup.html', 'hx-settings.html', 'hx-operations.html', 'css/hospitality.css', 'css/hx-redesign.css', 'css/hx-pro.css', 'css/hx-fixes.css', 'js/core/hx-art.js', 'js/core/home-route.js', 'js/core/hx-kit.js', 'js/core/hx-history.js', 'js/core/hx-offline.js', 'js/core/hx-offline-tour.js', 'js/core/hx-pay.js', 'js/core/hx-order.js', 'js/core/hx-recipe.js', 'js/pages/hx-dashboard.js', 'js/pages/hx-setup.js', 
+  'hx-dashboard.html', 'hx-manager.html', 'js/pages/hx-manager.js', 'hx-restaurant-settings.html', 'js/pages/hx-restaurant-settings.js', 'css/hx-restsettings.css', 'js/core/business-types.js', 'hx-setup.html', 'hx-settings.html', 'hx-operations.html', 'css/hospitality.css', 'css/hx-redesign.css', 'css/hx-pro.css', 'css/hx-fixes.css', 'css/hw-skin.css', 'js/core/hx-art.js', 'js/core/home-route.js', 'js/core/hx-kit.js', 'js/core/hx-history.js', 'js/core/hx-offline.js', 'js/core/hx-offline-tour.js', 'js/core/hx-pay.js', 'js/core/hx-order.js', 'js/core/hx-recipe.js', 'js/pages/hx-dashboard.js', 'js/pages/hx-setup.js', 
   'offline.html', 'shop.html', 'js/pages/shop.js', 'liquor.html', 'js/pages/liquor.js', 'js/core/liquor-till.js', 'css/liquor.css', 'js/core/liquor-product-form.js', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'alerts.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'index.html', 'login.html', 'register.html', 'dashboard.html', 'sales.html',
   'products.html', 'inventory.html', 'customers.html', 'branches.html', 'employees.html', 'suppliers.html',
   'purchases.html', 'expenses.html', 'refunds.html', 'reports.html', 'audit-logs.html', 'settings.html',
@@ -46,6 +60,11 @@ const PRECACHE = [
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png',
 ];
 
+/** Send a message to every open page (also pages this worker does not control yet). */
+async function tell(msg) {
+  try { (await self.clients.matchAll({ type: 'window', includeUncontrolled: true })).forEach((c) => c.postMessage(msg)); } catch (e) { /* ignore */ }
+}
+const versionOf = (key) => key.replace(/^kenya-pos-/, '');
 const scopeUrl = (path) => new URL(path, self.registration.scope).toString();
 
 async function cleanResponse(res) {
@@ -80,29 +99,44 @@ async function matchCached(cache, request) {
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
+    const total = PRECACHE.length; let done = 0;
     await Promise.allSettled(PRECACHE.map(async (path) => {
-      const res = await fetch(new Request(scopeUrl(path), { cache: 'reload' }));
-      if (res && res.ok) await cache.put(scopeUrl(path), await cleanResponse(res));
+      try {
+        const res = await fetch(new Request(scopeUrl(path), { cache: 'reload' }));
+        if (res && res.ok) await cache.put(scopeUrl(path), await cleanResponse(res));
+      } finally { done += 1; if (done % 8 === 0 || done === total) tell({ type: 'SW_PROGRESS', version: VERSION, done, total }); }
     }));
+    tell({ type: 'SW_READY', version: VERSION, notes: NOTES });
   })());
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k.startsWith('kenya-pos-') && k !== CACHE).map((k) => caches.delete(k)));
+    // Remember which version this one replaced, so the page can say "updated from X to Y".
+    const old = keys.filter((k) => k.startsWith('kenya-pos-') && k !== CACHE && k !== META_CACHE).map(versionOf);
+    let previous = old.sort().pop() || '';
+    try {
+      const meta = await caches.open(META_CACHE);
+      if (previous) await meta.put('previous', new Response(previous)); else { const m = await meta.match('previous'); previous = m ? await m.text() : ''; }
+      await meta.put('current', new Response(VERSION));
+    } catch (e) { /* ignore */ }
+    await Promise.all(keys.filter((k) => k.startsWith('kenya-pos-') && k !== CACHE && k !== META_CACHE).map((k) => caches.delete(k)));
     if (self.registration.navigationPreload) { try { await self.registration.navigationPreload.disable(); } catch (e) { /* ignore */ } }
     await self.clients.claim();
+    tell({ type: 'SW_ACTIVATED', version: VERSION, previous, notes: NOTES });
   })());
 });
 
 self.addEventListener('message', (event) => {
   const type = event.data && event.data.type;
   if (type === 'SKIP_WAITING') self.skipWaiting();
-  if (type === 'GET_VERSION' && event.ports && event.ports[0]) event.ports[0].postMessage({ version: VERSION });
+  if (type === 'GET_VERSION' && event.ports && event.ports[0]) {
+    caches.open(CACHE).then((c) => c.keys()).then((k) => k.length, () => 0).then((cached) => event.ports[0].postMessage({ version: VERSION, notes: NOTES, cached, total: PRECACHE.length }));
+  }
 });
 
-async function networkFirst(event, isNavigation) {
+async function networkFirst(event, isNavigation, shell) {
   const request = event.request;
   const cache = await caches.open(CACHE);
   const networkPromise = fetch(request).then((res) => {
@@ -118,6 +152,7 @@ async function networkFirst(event, isNavigation) {
     const cached = await matchCached(cache, request);
     if (cached) return cached;
     if (err && err.message === 'timeout') { try { return await networkPromise; } catch (e) { /* fall through */ } }
+    if (isNavigation && shell) { const s = await cache.match(scopeUrl(shell)); if (s) return s; }
     if (isNavigation) { const offline = await cache.match(scopeUrl(OFFLINE_URL)); if (offline) return offline; }
     return new Response('Offline', { status: 503, statusText: 'Offline', headers: { 'Content-Type': 'text/plain' } });
   }
@@ -171,7 +206,7 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/s/') || url.pathname === '/s' || url.pathname.startsWith('/q/') || url.pathname === '/q' || url.pathname === '/q.html') return; // guest QR menu: always straight from the network
   if (url.pathname.endsWith('/sw.js')) return;
 
-  if (req.mode === 'navigate') { event.respondWith(networkFirst(event, true)); return; }
+  if (req.mode === 'navigate') { event.respondWith(networkFirst(event, true, url.pathname.startsWith('/hardware') ? 'hardware/index.html' : '')); return; }
   if (/\.(?:png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf)$/i.test(url.pathname)) { event.respondWith(cacheFirst(event)); return; }
   event.respondWith(networkFirst(event, false));
 });

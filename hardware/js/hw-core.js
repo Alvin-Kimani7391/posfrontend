@@ -137,7 +137,7 @@
     ['reports', 'Reports', '', ['hardware.reports', 'hardware.transport'], 'Money'],
     ['settings', 'Settings', '', ['hardware.settings', 'hardware.templates'], 'Setup'],
   ];
-  const SHOP = [['Inventory', '../inventory.html'], ['Purchases', '../purchases.html'], ['Customers', '../customers.html'], ['Expenses', '../expenses.html'], ['Cash register', '../cash-register.html'], ['Sales history', '../sales.html'], ['Returns', '../refunds.html'], ['Staff', '../employees.html']];
+  const SHOP = [['Inventory', '../inventory.html'], ['Purchases', '../purchases.html'], ['Customers', '../customers.html'], ['Expenses', '../expenses.html'], ['Cash register', '../cash-register.html'], ['Sales history', '../sales.html'], ['Returns', '../refunds.html'], ['Staff', '../employees.html'], ['Billing', '../billing.html'], ['Business settings', '../settings.html']];
   const LANDING = { DRIVER: 'dispatch', DISPATCHER: 'dispatch', SALES_REP: 'quotes', STOREKEEPER: 'shelves', ACCOUNTANT: 'finance', CASHIER: 'counter' };
   HW.NAV = NAV;
 

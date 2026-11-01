@@ -1,0 +1,78 @@
+/* ==========================================================================
+   HW SKIN - Hardware & Building Materials ("Lime & Navy"), applied to every shared page
+   (Billing, Settings, Inventory, Customers, Expenses ...) so it matches /hardware/ exactly.
+   Same mechanism as the restaurant skin: body.hw-skin is set by js/core/hx-skin-early.js (first paint)
+   and js/core/app-shell.js. Palette is identical to hardware/css/hw.css.
+   ========================================================================== */
+body.hw-skin {
+  --hw-navy: #1d1c35; --hw-navy2: #2a2948; --hw-navy3: #3b3a60; --hw-lime: #d4ee5a; --hw-lime-d: #c3e03a; --hw-lime-l: #f3f9cf;
+  --hw-ink: #16162a; --hw-mute: #757a88; --hw-line: #eceef0; --hw-bg: #f6f6f2;
+  --color-primary: #1d1c35; --color-primary-dark: #2a2948; --color-primary-light: #f3f9cf; --color-primary-50: #f8fbe3;
+  --color-bg: #f6f6f2; --color-border: #eceef0; --color-text: #16162a;
+  --color-info: #3b3a60; --color-info-bg: #f3f9cf;
+  --radius-md: 12px; --radius-lg: 20px;
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: var(--hw-ink); background: var(--hw-bg);
+}
+body.hw-skin button, body.hw-skin input, body.hw-skin select, body.hw-skin textarea { font-family: inherit; }
+body.hw-skin .main-area, body.hw-skin .page-content { background: var(--hw-bg); }
+body.hw-skin :focus-visible { outline: 3px solid rgba(212,238,90,.85); outline-offset: 2px; }
+body.hw-skin ::selection { background: var(--hw-lime); color: var(--hw-navy); }
+
+/* ---- sidebar: navy rail, lime active item ---- */
+body.hw-skin .sidebar { background: var(--hw-navy); border-right: 0; }
+body.hw-skin .sidebar-brand { color: #fff; border-bottom: 1px solid rgba(255,255,255,.08); }
+body.hw-skin .sidebar-brand .logo-mark { background: var(--hw-lime); color: var(--hw-navy); box-shadow: 0 6px 16px rgba(212,238,90,.25); }
+body.hw-skin .sidebar-section-label { color: #a5a6c2; font-weight: 700; letter-spacing: .1em; }
+body.hw-skin .sidebar-link { color: #d5d6ea; border-radius: 12px; font-weight: 600; }
+body.hw-skin .sidebar-link:hover { background: rgba(255,255,255,.07); color: #fff; }
+body.hw-skin .sidebar-link.active { background: var(--hw-lime); color: var(--hw-navy); font-weight: 800; }
+body.hw-skin .sidebar-link.active .icon svg { stroke: var(--hw-navy); }
+body.hw-skin .sidebar-footer { border-top: 1px solid rgba(255,255,255,.08); background: transparent; }
+body.hw-skin .sidebar-user-info .name { color: #fff; }
+body.hw-skin .sidebar-user-info .role { color: #a5a6c2; }
+body.hw-skin .sidebar-rail-toggle { background: rgba(255,255,255,.07); border: 0; color: #d5d6ea; border-radius: 12px; }
+body.hw-skin .sidebar-rail-toggle:hover { background: rgba(255,255,255,.14); color: #fff; }
+body.hw-skin .avatar { background: var(--hw-lime); color: var(--hw-navy); font-weight: 800; }
+
+/* ---- top bar ---- */
+body.hw-skin .topbar { background: #fff; border-bottom: 1px solid var(--hw-line); }
+body.hw-skin .topbar-title { color: var(--hw-ink); font-weight: 800; letter-spacing: -.01em; }
+
+/* ---- cards, buttons, tabs, badges, inputs ---- */
+body.hw-skin .card { border: 1px solid var(--hw-line); border-radius: 20px; box-shadow: none; background: #fff; }
+body.hw-skin .card-header { border-bottom-color: var(--hw-line); }
+body.hw-skin .btn { border-radius: 12px; font-weight: 700; }
+body.hw-skin .btn-primary { background: var(--hw-lime); color: var(--hw-navy); border: 1px solid var(--hw-lime-d); box-shadow: none; }
+body.hw-skin .btn-primary:hover:not(:disabled) { background: var(--hw-lime-d); color: var(--hw-navy); }
+body.hw-skin .btn-secondary, body.hw-skin .btn-outline { border-color: #dfe2e6; color: var(--hw-navy); background: #fff; }
+body.hw-skin .btn-secondary:hover:not(:disabled), body.hw-skin .btn-outline:hover:not(:disabled) { border-color: var(--hw-navy); background: var(--hw-lime-l); }
+body.hw-skin .input:focus, body.hw-skin .select:focus, body.hw-skin .textarea:focus,
+body.hw-skin input:focus, body.hw-skin select:focus, body.hw-skin textarea:focus { border-color: var(--hw-navy); box-shadow: 0 0 0 3px rgba(212,238,90,.55); outline: none; }
+body.hw-skin a:not(.btn):not(.sidebar-link):not(.bottom-nav-item):not(.bl-banner a) { color: var(--hw-navy); }
+body.hw-skin .bl-link { color: var(--hw-navy); text-decoration: underline; text-decoration-color: var(--hw-lime-d); text-underline-offset: 3px; }
+body.hw-skin .badge-info { background: var(--hw-lime-l); color: var(--hw-navy); }
+body.hw-skin .tabs .tab.active, body.hw-skin .tab.active, body.hw-skin [role="tab"][aria-selected="true"] { color: var(--hw-navy); border-bottom-color: var(--hw-lime-d); }
+body.hw-skin th { background: #f6f6f2; color: var(--hw-navy); }
+body.hw-skin .modal, body.hw-skin .modal-content { border-radius: 20px; border-top: 6px solid var(--hw-lime); }
+body.hw-skin .progress > span, body.hw-skin .bl-bar > span, body.hw-skin .bl-progress > span { background: var(--hw-navy); }
+
+/* ---- bottom nav (phones) ---- */
+body.hw-skin .bottom-nav { background: var(--hw-navy); border-top: 0; }
+body.hw-skin .bottom-nav-item { color: #b9bad3; }
+body.hw-skin .bottom-nav-item.active { color: var(--hw-lime); }
+
+/* ---- billing banner: lime for info, red when locked/overdue ---- */
+body.hw-skin .bl-banner-info { background: var(--hw-lime); color: var(--hw-navy); font-weight: 600; }
+body.hw-skin .bl-banner-info a { color: var(--hw-navy); }
+body.hw-skin .bl-banner-danger { background: #e5484d; color: #fff; font-weight: 600; }
+body.hw-skin .bl-banner-warning { background: #fff4de; color: #92400e; }
+
+/* ---- desktop: slightly wider rail + collapsed icon rail ---- */
+@media (min-width: 960px) {
+  body.hw-skin .sidebar { width: 252px; }
+  body.hw-skin .sidebar-link { flex-direction: row; justify-content: flex-start; gap: 12px; padding: 10px 12px; font-size: 13.5px; text-align: left; white-space: nowrap; }
+  body.hw-skin .sidebar-link .icon { width: 22px; height: 22px; display: grid; place-items: center; flex: none; }
+  body.hw-skin.sidebar-rail .sidebar { width: 78px; }
+  body.hw-skin.sidebar-rail .sidebar-link { justify-content: center; gap: 0; padding: 12px 0; font-size: 0; }
+}

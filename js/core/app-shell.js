@@ -473,7 +473,20 @@
     SKIN_CSS.forEach((h) => { if (!document.querySelector(`link[data-hx-skin="${h}"]`)) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = h; l.setAttribute('data-hx-skin', h); document.head.appendChild(l); } });
     if (!document.querySelector('link[data-hx-skin="font"]')) { const f = document.createElement('link'); f.rel = 'stylesheet'; f.href = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'; f.setAttribute('data-hx-skin', 'font'); document.head.appendChild(f); }
   }
-  window.addEventListener('businessprofilechange', () => applyHxSkin());
+  window.addEventListener('businessprofilechange', () => { applyHxSkin(); applyHwSkin(); });
+
+  /** Hardware & building materials business: navy + lime look on every shared page (css/hw-skin.css). */
+  function isHardware() { return !!profile && profile.businessType === 'hardware'; }
+  const HW_SKIN_PAGES_OFF = ['login', 'register', 'verify', 'kiosk', 'track', 'rider', 'store', 'offline'];
+  function applyHwSkin() {
+    const page = document.body.getAttribute('data-page') || '';
+    const on = isHardware() && !HW_SKIN_PAGES_OFF.includes(page) && !/^(admin|hx-)/.test(page);
+    document.body.classList.toggle('hw-skin', !!on);
+    if (!on) { const t = document.querySelector('meta[name="theme-color"]'); if (t && t.content === '#1d1c35' && !isHardware()) t.content = '#0f766e'; return; }
+    if (!document.querySelector('link[data-hw-skin="css"]')) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'css/hw-skin.css'; l.setAttribute('data-hw-skin', 'css'); document.head.appendChild(l); }
+    if (!document.querySelector('link[data-hx-skin="font"]')) { const f = document.createElement('link'); f.rel = 'stylesheet'; f.href = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'; f.setAttribute('data-hx-skin', 'font'); document.head.appendChild(f); }
+    const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = '#1d1c35';
+  }
 
   function itemAllowed(item, user) {
     if (!itemVisibleForBusiness(item)) return false;
@@ -486,13 +499,58 @@
 
   function hrefFor(item) {
     if (item.key === 'dashboard' && isHospitality()) return 'hx-dashboard.html';
+    if (item.key === 'dashboard' && isHardware()) return 'hardware/index.html';
     if (item.phHref && hasFeature('pharmacyDispensing')) return item.phHref;
     return item.href;
+  }
+
+  /* ---- Hardware businesses: shared pages (Inventory, Billing, Settings ...) keep the HARDWARE menu, same as /hardware/ ---- */
+  // [id, label, icon, permissions(any) or null, group]  - same order and ids as hardware/js/hw-core.js
+  const HW_NAV = [
+    ['home', 'Overview', 'dashboard', null, 'Work'], ['counter', 'Counter till', 'terminal', ['sales.create'], 'Work'], ['quotes', 'Quotes & orders', 'receipt', ['hardware.quotes'], 'Work'],
+    ['projects', 'Projects & BOQ', 'flag', ['hardware.quotes', 'hardware.boq'], 'Work'], ['deposits', 'Deposits', 'wallet', ['hardware.deposits'], 'Work'],
+    ['dispatch', 'Dispatch & deliveries', 'truck', ['hardware.deliveries', 'hardware.deliver'], 'Yard & delivery'], ['fleet', 'Fleet & transport', 'truck', ['hardware.transport'], 'Yard & delivery'],
+    ['shelves', 'Shelves & picking', 'box', ['hardware.locations', 'hardware.remnants', 'hardware.repack'], 'Yard & delivery'],
+    ['stock', 'Products & specs', 'tag', ['hardware.profile', 'hardware.quotes'], 'Stock & prices'], ['pricing', 'Contractor pricing', 'tag', ['hardware.pricing', 'hardware.quotes'], 'Stock & prices'],
+    ['suppliers', 'Suppliers & landed cost', 'truck', ['hardware.supplier'], 'Stock & prices'],
+    ['finance', 'Finance', 'wallet', ['hardware.finance'], 'Money'], ['reports', 'Reports', 'reports', ['hardware.reports', 'hardware.transport'], 'Money'],
+    ['settings', 'Workspace settings', 'sliders', ['hardware.settings', 'hardware.templates'], 'Setup'],
+  ];
+  // Shop tools: shared pages. [nav key, label override]
+  const HW_SHOP = [['inventory', 'Inventory'], ['purchases', 'Purchases'], ['customers', 'Customers'], ['expenses', 'Expenses'], ['cash-register', 'Cash register'], ['sales', 'Sales history'], ['refunds', 'Returns'], ['employees', 'Staff'], ['billing', 'Billing'], ['settings', 'Business settings']];
+  const HW_GRANTS = {
+    CASHIER: ['hardware.quotes', 'hardware.deposits', 'sales.create', 'shifts.open', 'shifts.close', 'sales.view'], SALES_REP: ['hardware.quotes', 'sales.create', 'sales.view', 'hardware.boq', 'hardware.deposits'],
+    STOREKEEPER: ['hardware.profile', 'hardware.locations', 'hardware.remnants', 'hardware.deliveries', 'hardware.repack', 'hardware.supplier'], DISPATCHER: ['hardware.deliveries', 'hardware.transport', 'hardware.transport.costs', 'hardware.locations'],
+    DRIVER: ['hardware.deliver', 'hardware.transport.costs'], ACCOUNTANT: ['hardware.reports', 'hardware.finance', 'hardware.transport', 'hardware.deposits', 'hardware.supplier'],
+  };
+  function hwCan(perms) {
+    if (!perms || !perms.length) return true;
+    const u = getUser() || {};
+    if (['OWNER', 'ADMIN', 'MANAGER'].includes(u.role)) return true;
+    return perms.some((p) => (Array.isArray(u.permissions) && u.permissions.length ? u.permissions.includes(p) : (HW_GRANTS[u.role] || []).includes(p)) || window.Permissions.can(u, p));
+  }
+  function buildHardwareNav(activePage) {
+    const user = getUser(); let last = ''; let html = '';
+    HW_NAV.filter((n) => hwCan(n[3])).forEach((n) => {
+      if (n[4] !== last) { html += `<div class="sidebar-section-label">${n[4]}</div>`; last = n[4]; }
+      html += `<a class="sidebar-link" data-nav-key="hw-${n[0]}" href="hardware/index.html#/${n[0]}" title="${n[1]}"><span class="icon">${window.Icons.get(n[2])}</span><span>${n[1]}</span></a>`;
+    });
+    let shop = '';
+    HW_SHOP.forEach(([key, label]) => {
+      const item = NAV_ITEMS.find((i) => i.key === key) || (key === 'cash-register' ? { key, icon: 'wallet', href: 'cash-register.html', permission: 'shifts.view' } : null);
+      if (!item || (item.ownerOnly && user?.role !== 'OWNER') || (item.roles && !item.roles.includes(user?.role))) return;
+      if (item.permission && !window.Permissions.can(user, item.permission) && !['OWNER', 'ADMIN'].includes(user?.role)) return;
+      const active = key === activePage || (key === 'cash-register' && activePage === 'cash');
+      shop += `<a class="sidebar-link ${active ? 'active' : ''}" data-nav-key="${key}" href="${item.href}" title="${label}"><span class="icon">${window.Icons.get(item.icon)}</span><span>${label}</span></a>`;
+    });
+    if (shop) html += `<div class="sidebar-section-label">Shop tools</div>${shop}`;
+    return html;
   }
 
   function buildSidebarNav(activePage) {
     const user = getUser();
     const hx = isHospitality();
+    if (isHardware() && !hx) return buildHardwareNav(activePage);
     let lastGroup = null;
     return NAV_ITEMS.filter((i) => itemAllowed(i, user) && !(hx === false && i.group)).map((item) => {
       const gated = item.permission ? `data-requires-permission="${item.permission}"` : '';
@@ -523,6 +581,11 @@
   }
 
   function buildBottomNav(activePage) {
+    if (isHardware() && !isHospitality()) {
+      const tabs = [['counter', 'Till', 'terminal', 'hardware/index.html#/counter', ['sales.create']], ['quotes', 'Quotes', 'receipt', 'hardware/index.html#/quotes', ['hardware.quotes']], ['dispatch', 'Dispatch', 'truck', 'hardware/index.html#/dispatch', ['hardware.deliveries', 'hardware.deliver']],
+        ['inventory', 'Stock', 'inventory', 'inventory.html', null], ['settings', 'Settings', 'settings', 'settings.html', null]];
+      return tabs.filter((t) => hwCan(t[4])).map((t) => `<button class="bottom-nav-item ${t[0] === activePage ? 'active' : ''}" data-href="${t[3]}"><span class="icon">${window.Icons.get(t[2])}</span><span>${t[1]}</span></button>`).join('');
+    }
     const keys = bottomNavKeys();
     return keys.map((k) => NAV_ITEMS.find((n) => n.key === k)).filter(Boolean).map((item) => `
       <button class="bottom-nav-item ${item.key === activePage ? 'active' : ''}"
@@ -539,7 +602,7 @@
       <div class="sidebar-overlay" id="sidebar-overlay"></div>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
-          <span class="logo-mark">${window.Icons.get('store')}</span>
+          <span class="logo-mark" ${isHardware() && !isHospitality() ? 'style="background:#fff;padding:0;overflow:hidden"' : ''}>${isHardware() && !isHospitality() ? '<img src="icons/icon-192.png" alt="" width="36" height="36" style="width:100%;height:100%;object-fit:cover;display:block">' : window.Icons.get('store')}</span>
           <span>${window.UI.escapeHtml(APP_NAME)}</span>
         </div>
         <nav class="sidebar-nav">
@@ -835,6 +898,7 @@
     document.title = title ? `${title} · ${APP_NAME}` : APP_NAME;
 
     applyHxSkin();
+    applyHwSkin();
     root.innerHTML = shellTemplate(user, title, activePage);
     bindShellEvents();
     window.Permissions.applyPermissionGates(root, user);
