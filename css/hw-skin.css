@@ -19,22 +19,6 @@ body.hw-skin .main-area, body.hw-skin .page-content { background: var(--hw-bg); 
 body.hw-skin :focus-visible { outline: 3px solid rgba(212,238,90,.85); outline-offset: 2px; }
 body.hw-skin ::selection { background: var(--hw-lime); color: var(--hw-navy); }
 
-/* ---- sidebar: navy rail, lime active item ---- */
-body.hw-skin .sidebar { background: var(--hw-navy); border-right: 0; }
-body.hw-skin .sidebar-brand { color: #fff; border-bottom: 1px solid rgba(255,255,255,.08); }
-body.hw-skin .sidebar-brand .logo-mark { background: var(--hw-lime); color: var(--hw-navy); box-shadow: 0 6px 16px rgba(212,238,90,.25); }
-body.hw-skin .sidebar-section-label { color: #a5a6c2; font-weight: 700; letter-spacing: .1em; }
-body.hw-skin .sidebar-link { color: #d5d6ea; border-radius: 12px; font-weight: 600; }
-body.hw-skin .sidebar-link:hover { background: rgba(255,255,255,.07); color: #fff; }
-body.hw-skin .sidebar-link.active { background: var(--hw-lime); color: var(--hw-navy); font-weight: 800; }
-body.hw-skin .sidebar-link.active .icon svg { stroke: var(--hw-navy); }
-body.hw-skin .sidebar-footer { border-top: 1px solid rgba(255,255,255,.08); background: transparent; }
-body.hw-skin .sidebar-user-info .name { color: #fff; }
-body.hw-skin .sidebar-user-info .role { color: #a5a6c2; }
-body.hw-skin .sidebar-rail-toggle { background: rgba(255,255,255,.07); border: 0; color: #d5d6ea; border-radius: 12px; }
-body.hw-skin .sidebar-rail-toggle:hover { background: rgba(255,255,255,.14); color: #fff; }
-body.hw-skin .avatar { background: var(--hw-lime); color: var(--hw-navy); font-weight: 800; }
-
 /* ---- top bar ---- */
 body.hw-skin .topbar { background: #fff; border-bottom: 1px solid var(--hw-line); }
 body.hw-skin .topbar-title { color: var(--hw-ink); font-weight: 800; letter-spacing: -.01em; }
@@ -49,7 +33,7 @@ body.hw-skin .btn-secondary, body.hw-skin .btn-outline { border-color: #dfe2e6; 
 body.hw-skin .btn-secondary:hover:not(:disabled), body.hw-skin .btn-outline:hover:not(:disabled) { border-color: var(--hw-navy); background: var(--hw-lime-l); }
 body.hw-skin .input:focus, body.hw-skin .select:focus, body.hw-skin .textarea:focus,
 body.hw-skin input:focus, body.hw-skin select:focus, body.hw-skin textarea:focus { border-color: var(--hw-navy); box-shadow: 0 0 0 3px rgba(212,238,90,.55); outline: none; }
-body.hw-skin a:not(.btn):not(.sidebar-link):not(.bottom-nav-item):not(.bl-banner a) { color: var(--hw-navy); }
+body.hw-skin a:not(.btn):not(.sidebar-link):not(.bottom-nav-item):not(.bl-banner a):not(.sidebar a) { color: var(--hw-navy); }
 body.hw-skin .bl-link { color: var(--hw-navy); text-decoration: underline; text-decoration-color: var(--hw-lime-d); text-underline-offset: 3px; }
 body.hw-skin .badge-info { background: var(--hw-lime-l); color: var(--hw-navy); }
 body.hw-skin .tabs .tab.active, body.hw-skin .tab.active, body.hw-skin [role="tab"][aria-selected="true"] { color: var(--hw-navy); border-bottom-color: var(--hw-lime-d); }
@@ -68,11 +52,105 @@ body.hw-skin .bl-banner-info a { color: var(--hw-navy); }
 body.hw-skin .bl-banner-danger { background: #e5484d; color: #fff; font-weight: 600; }
 body.hw-skin .bl-banner-warning { background: #fff4de; color: #92400e; }
 
-/* ---- desktop: slightly wider rail + collapsed icon rail ---- */
-@media (min-width: 960px) {
-  body.hw-skin .sidebar { width: 252px; }
-  body.hw-skin .sidebar-link { flex-direction: row; justify-content: flex-start; gap: 12px; padding: 10px 12px; font-size: 13.5px; text-align: left; white-space: nowrap; }
-  body.hw-skin .sidebar-link .icon { width: 22px; height: 22px; display: grid; place-items: center; flex: none; }
-  body.hw-skin.sidebar-rail .sidebar { width: 78px; }
-  body.hw-skin.sidebar-rail .sidebar-link { justify-content: center; gap: 0; padding: 12px 0; font-size: 0; }
+/* ==========================================================================
+   SIDEBAR - pixel-for-pixel the same menu as /hardware/ (hardware/css/hw.css + hw-pro.css + hw-till.css).
+   Same floating navy rail, same brand block, group labels, rows, "New sale!" card, footer and collapse button,
+   so a user moving between the workspace and any shop-tools page sees NO change in the menu at all.
+   Markup comes from buildHardwareNav() / hwBrandHtml() / hwFooterHtml() in js/core/app-shell.js.
+   ========================================================================== */
+body.hw-skin { font-size: 15px; }
+body.hw-skin .sidebar {
+  background: var(--hw-navy); color: #c4cad3; width: 262px; border: 1px solid rgba(255,255,255,.05); border-radius: 28px;
+  box-shadow: none; contain: layout paint; font-size: 15px; line-height: 1.5; overflow: hidden;
+  display: flex; flex-direction: column;
 }
+body.hw-skin .sidebar a { text-decoration: none; }
+body.hw-skin .sidebar *, body.hw-skin .sidebar *::before, body.hw-skin .sidebar *::after { box-sizing: border-box; }
+
+/* brand */
+body.hw-skin .sidebar-brand.hw-brand {
+  height: auto; min-height: 0; display: flex; align-items: center; gap: 12px; position: relative; flex: none;
+  padding: 24px 22px 18px; border-bottom: 1px solid rgba(255,255,255,.07); background: transparent;
+  color: var(--hw-lime); font: 800 21px/1.5 'Plus Jakarta Sans','Inter',system-ui,sans-serif; letter-spacing: 0; text-transform: none;
+}
+body.hw-skin .hw-brand .hw-logo {
+  width: 42px; height: 42px; border-radius: 14px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  background: #fff; color: var(--hw-navy); box-shadow: 0 0 0 2px var(--hw-lime); overflow: hidden;
+}
+body.hw-skin .hw-brand .hw-logo img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 0; }
+body.hw-skin .hw-brand .nm { display: block; flex: 1; min-width: 0; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; font-weight: 800; }
+body.hw-skin .hw-brand .nm small { display: block; margin-top: 4px; font: 600 9.5px/1.15 'Plus Jakarta Sans','Inter',system-ui,sans-serif; letter-spacing: .07em; color: #9a9bb8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.hw-skin .hw-collapse {
+  flex: none; width: 34px; height: 34px; border-radius: 11px; border: 0; background: rgba(255,255,255,.09); color: #fff; font-size: 22px; line-height: 1;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: background .15s, transform .24s;
+}
+body.hw-skin .hw-collapse:hover { background: var(--hw-lime); color: #16162a; }
+
+/* menu */
+body.hw-skin .sidebar-nav {
+  display: block; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 10px 14px; gap: 0;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent;
+}
+body.hw-skin .sidebar-nav .sidebar-section-label.sep {
+  display: block; padding: 16px 10px 6px; margin: 0; font: 600 12px/normal 'Plus Jakarta Sans','Inter',system-ui,sans-serif; letter-spacing: 0; text-transform: none; color: #c9cadf;
+}
+body.hw-skin .sidebar-nav .sidebar-link {
+  display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; min-height: 42px; padding: 10px 14px; margin: 0 0 2px;
+  border: 0; border-radius: 12px; color: #d5d6ea; background: transparent; font: 500 15px/1.5 'Plus Jakarta Sans','Inter',system-ui,sans-serif; letter-spacing: 0; text-align: left; white-space: nowrap;
+}
+body.hw-skin .sidebar-nav .sidebar-link i { font-style: normal; display: inline-flex; align-items: center; justify-content: center; width: 20px; flex: none; opacity: .9; }
+body.hw-skin .sidebar-nav .sidebar-link .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+body.hw-skin .sidebar-nav .sidebar-link:hover { background: rgba(255,255,255,.07); color: #fff; }
+body.hw-skin .sidebar-nav .sidebar-link.active, body.hw-skin .sidebar-nav .sidebar-link.on { background: var(--hw-lime); color: #16162a; font-weight: 700; }
+body.hw-skin .sidebar-nav .sidebar-link.active .icon svg { stroke: currentColor; }
+body.hw-skin .hw-svg { display: block; flex: none; }
+
+/* "Customer at the counter?" card */
+body.hw-skin .hw-promo { margin: 30px 4px 6px; background: var(--hw-lime); border-radius: 22px; padding: 16px 14px 14px; text-align: center; color: #16162a; font-weight: 600; position: relative; }
+body.hw-skin .hw-promo .ic { display: flex; justify-content: center; line-height: 1; margin-top: -34px; color: #16162a; }
+body.hw-skin .hw-promo p { margin: 6px 0 10px; font-size: 14px; color: #16162a; }
+body.hw-skin .hw-promo a { display: block; background: #0e0e1c; color: #fff; border-radius: 12px; padding: 11px; font-weight: 700; cursor: pointer; }
+body.hw-skin .hw-promo a:hover { background: var(--hw-navy3); color: #fff; }
+
+/* footer: name, role, sign out (the generic avatar block and the rail toggle are not part of the hardware menu) */
+body.hw-skin .sidebar-footer { padding: 0; border-top: 0; background: transparent; flex: none; }
+body.hw-skin .sidebar-footer .sidebar-user, body.hw-skin .sidebar-footer .sidebar-rail-toggle { display: none !important; }
+body.hw-skin .hw-foot { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.07); font-size: 13px; color: #a5a6c2; }
+body.hw-skin .hw-foot .fu { flex: 1; min-width: 0; }
+body.hw-skin .hw-foot .fu b, body.hw-skin .hw-foot .fu small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.hw-skin .hw-foot b { color: #fff; font-weight: 700; }
+body.hw-skin .hw-foot a { color: var(--hw-lime); cursor: pointer; font-weight: 600; margin: 0; }
+body.hw-skin .hw-foot #hw-out { display: inline-flex; align-items: center; gap: 6px; }
+body.hw-skin .hw-foot #hw-out i { font-style: normal; display: inline-flex; align-items: center; }
+
+/* ---- desktop: floating rail with the same gutters as the hardware workspace ---- */
+@media (min-width: 960px) {
+  body.hw-skin .app-shell { padding: 14px; gap: 18px; background: var(--hw-bg); }
+  body.hw-skin .sidebar { position: sticky; top: 14px; height: calc(100vh - 28px); transform: none; transition: width .24s cubic-bezier(.4,0,.2,1); flex: none; }
+  body.hw-skin .main-area { gap: 18px; }
+  body.hw-skin .topbar { position: static; border: 0; border-radius: 24px; padding: 0 24px; box-shadow: 0 1px 0 rgba(0,0,0,.02); }
+  body.hw-skin .page-content { padding: 0 2px 24px; }
+  body.hw-skin.sidebar-rail .sidebar { width: 262px; }
+
+  /* collapsed icon rail - same widths and behaviour as /hardware/ */
+  body.hw-skin.hw-collapsed .sidebar { width: 86px; }
+  body.hw-skin.hw-collapsed .hw-collapse { transform: rotate(180deg); }
+  body.hw-skin.hw-collapsed .sidebar-brand.hw-brand { flex-direction: column; padding: 18px 0 14px; gap: 12px; }
+  body.hw-skin.hw-collapsed .hw-brand .nm, body.hw-skin.hw-collapsed .sidebar-nav .t, body.hw-skin.hw-collapsed .hw-promo,
+  body.hw-skin.hw-collapsed .hw-foot .fu, body.hw-skin.hw-collapsed .hw-foot #hw-out .t { display: none; }
+  body.hw-skin.hw-collapsed .sidebar-nav { padding: 10px 12px; }
+  body.hw-skin.hw-collapsed .sidebar-nav .sidebar-link { justify-content: center; padding: 11px 0; min-height: 46px; }
+  body.hw-skin.hw-collapsed .sidebar-nav .sidebar-link i { width: auto; }
+  body.hw-skin.hw-collapsed .sidebar-nav .sidebar-section-label.sep { height: 1px; background: rgba(255,255,255,.12); margin: 12px 10px; padding: 0; }
+  body.hw-skin.hw-collapsed .sidebar-nav .sidebar-section-label.sep span { display: none; }
+  body.hw-skin.hw-collapsed .hw-foot { justify-content: center; padding: 14px 0; }
+  body.hw-skin.hw-collapsed .hw-foot #hw-out { width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.08); justify-content: center; }
+}
+
+/* ---- phones / tablets: slide-in drawer, same look as the hardware workspace (burger opens it) ---- */
+@media (max-width: 959px) {
+  body.hw-skin .sidebar { width: min(262px, 86vw); top: 8px; bottom: 8px; left: 8px; height: auto; transform: translateX(-120%); }
+  body.hw-skin .sidebar.open { transform: translateX(0); }
+  body.hw-skin .hw-collapse { display: none; }
+}
+

@@ -207,7 +207,7 @@
     const minBand = Math.max(52, 30 + series.length * 26);
 
     responsive(container, (containerW) => {
-      const h = chartHeight(height, containerW);
+      const h = opts.fixedHeight || chartHeight(height, containerW);
       const all = series.flatMap((s) => s.values);
       const scale = niceScale(Math.min(0, ...all), Math.max(0, ...all), 5);
       const probe = layout(containerW, h, scale, format);
@@ -260,7 +260,7 @@
     const minBand = 92;
 
     responsive(container, (containerW) => {
-      const h = chartHeight(height, containerW);
+      const h = opts.fixedHeight || chartHeight(height, containerW);
       let run = 0;
       const bars = steps.map((s) => {
         let from;
@@ -356,7 +356,7 @@
     const total = items.reduce((s, d) => s + d.value, 0);
 
     responsive(container, (containerW) => {
-      const size = donutSize(requestedSize, containerW);
+      const size = opts.fixedSize || donutSize(requestedSize, containerW);
       const r = size / 2 - 10;
       const cx = size / 2;
       const cy = size / 2;
@@ -467,5 +467,8 @@
     attachTips(container);
   }
 
-  window.Charts = { bar, hbar, donut, waterfall, gauge, stackbar, compact, PALETTE };
+  /** Swap the default series colours in place (used by the hardware workspace for its navy & lime palette). */
+  function setPalette(list) { if (Array.isArray(list) && list.length) PALETTE.splice(0, PALETTE.length, ...list); }
+
+  window.Charts = { bar, hbar, donut, waterfall, gauge, stackbar, compact, PALETTE, setPalette };
 })(window);

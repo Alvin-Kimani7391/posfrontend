@@ -25,6 +25,8 @@
   }
 
   function apply(rail) {
+    // Hardware businesses use the hardware menu's own collapse button (same as /hardware/), never this one.
+    if (document.body.classList.contains('hw-skin')) rail = false;
     document.body.classList.toggle('sidebar-rail', rail);
     const btn = document.querySelector('.sidebar-rail-toggle');
     if (btn) {

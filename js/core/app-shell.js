@@ -473,7 +473,7 @@
     SKIN_CSS.forEach((h) => { if (!document.querySelector(`link[data-hx-skin="${h}"]`)) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = h; l.setAttribute('data-hx-skin', h); document.head.appendChild(l); } });
     if (!document.querySelector('link[data-hx-skin="font"]')) { const f = document.createElement('link'); f.rel = 'stylesheet'; f.href = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'; f.setAttribute('data-hx-skin', 'font'); document.head.appendChild(f); }
   }
-  window.addEventListener('businessprofilechange', () => { applyHxSkin(); applyHwSkin(); refreshHwBrand(); });
+  window.addEventListener('businessprofilechange', () => { applyHxSkin(); applyHwSkin(); refreshHwBrand(); hwCollapseInit(); });
 
   /** Hardware & building materials business: navy + lime look on every shared page (css/hw-skin.css). */
   function isHardware() { return !!profile && profile.businessType === 'hardware'; }
@@ -492,10 +492,26 @@
   /** Hardware shared pages: same brand block, caption and footer as the hardware workspace (hardware/index.html). */
   function hwShell() { return isHardware() && !isHospitality(); }
   function hwBrandHtml() {
-    return `<div class="sidebar-brand hw-brand"><span class="logo-mark hw-logo"><img src="icons/icon-192.png" alt="" width="42" height="42"></span><span class="nm">${window.UI.escapeHtml(hwBrandName())}<small>HARDWARE &amp; BUILDING MATERIALS</small></span></div>`;
+    return `<div class="sidebar-brand hw-brand"><span class="logo-mark hw-logo"><img src="icons/icon-192.png" alt="" width="42" height="42"></span><span class="nm">${window.UI.escapeHtml(hwBrandName())}<small>HARDWARE &amp; BUILDING MATERIALS</small></span><button class="hw-collapse" id="hw-collapse" type="button" title="Collapse menu" aria-label="Collapse menu">&lsaquo;</button></div>`;
   }
   function hwFooterHtml(user) {
     return `<div class="hw-foot"><div class="fu"><b>${window.UI.escapeHtml(user?.name || '')}</b><small>${window.UI.escapeHtml(hwHuman(user?.role))}</small></div><a id="hw-out" href="#" title="Sign out"><i>${hwIcon('logout', 17, 1.9)}</i><span class="t">Sign out</span></a></div>`;
+  }
+  /** Same collapse button + remembered state ("hw.rail") as the hardware workspace, so the menu looks and behaves identically on every page. */
+  function hwCollapseApply(on, save) {
+    document.body.classList.toggle('hw-collapsed', !!on);
+    const b = document.getElementById('hw-collapse');
+    if (b) { b.title = on ? 'Expand menu' : 'Collapse menu'; b.setAttribute('aria-label', b.title); }
+    if (save) { try { localStorage.setItem('hw.rail', on ? '1' : '0'); } catch { /* blocked */ } }
+  }
+  function hwCollapseInit() {
+    if (!hwShell()) return;
+    let saved = false; try { saved = localStorage.getItem('hw.rail') === '1'; } catch { /* blocked */ }
+    hwCollapseApply(saved, false);
+    if (!document.documentElement.dataset.hwCollapseBound) {
+      document.documentElement.dataset.hwCollapseBound = '1';
+      document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#hw-collapse')) hwCollapseApply(!document.body.classList.contains('hw-collapsed'), true); });
+    }
   }
   function refreshHwBrand() {
     const b = document.querySelector('#sidebar .sidebar-brand');
@@ -554,8 +570,8 @@
   function buildHardwareNav(activePage) {
     const user = getUser(); let last = ''; let html = '';
     HW_NAV.filter((n) => hwCan(n[3])).forEach((n) => {
-      if (n[4] !== last) { html += `<div class="sidebar-section-label">${n[4]}</div>`; last = n[4]; }
-      html += `<a class="sidebar-link" data-nav-key="hw-${n[0]}" href="hardware/index.html#/${n[0]}" title="${n[1]}"><span class="icon">${hwIcon(n[2])}</span><span>${n[1]}</span></a>`;
+      if (n[4] !== last) { html += `<div class="sidebar-section-label sep"><span>${n[4]}</span></div>`; last = n[4]; }
+      html += `<a class="sidebar-link" data-nav-key="hw-${n[0]}" href="hardware/index.html#/${n[0]}" title="${n[1]}"><i>${hwIcon(n[2])}</i><span class="t">${n[1]}</span></a>`;
     });
     let shop = '';
     HW_SHOP.forEach(([key, label]) => {
@@ -563,9 +579,9 @@
       if (!item || (item.ownerOnly && user?.role !== 'OWNER') || (item.roles && !item.roles.includes(user?.role))) return;
       if (item.permission && !window.Permissions.can(user, item.permission) && !['OWNER', 'ADMIN'].includes(user?.role)) return;
       const active = key === activePage || (key === 'cash-register' && activePage === 'cash');
-      shop += `<a class="sidebar-link ${active ? 'active' : ''}" data-nav-key="${key}" href="${item.href}" title="${label}"><span class="icon">${hwIcon('external', 16, 1.9)}</span><span>${label}</span></a>`;
+      shop += `<a class="sidebar-link ${active ? 'active on' : ''}" data-nav-key="${key}" href="${item.href}" title="${label}"><i>${hwIcon('external', 16, 1.9)}</i><span class="t">${label}</span></a>`;
     });
-    if (shop) html += `<div class="sidebar-section-label">Shop tools</div>${shop}`;
+    if (shop) html += `<div class="sidebar-section-label sep"><span>Shop tools</span></div>${shop}`;
     html += `<div class="hw-promo"><span class="ic">${hwIcon('rocket', 34, 1.9)}</span><p>Customer at the counter?<br>Start a sale in one tap.</p><a href="hardware/index.html#/counter">New sale!</a></div>`;
     return html;
   }
@@ -927,6 +943,7 @@
     applyHwSkin();
     root.innerHTML = shellTemplate(user, title, activePage);
     bindShellEvents();
+    hwCollapseInit();
     window.Permissions.applyPermissionGates(root, user);
     loadBusinessProfile();
     loadBranchSwitcher(); // async, fills in the dropdown once branches load - doesn't block the page. getActiveBranchId() itself does NOT depend on this.
