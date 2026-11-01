@@ -438,7 +438,7 @@
     const nav = document.querySelector('#sidebar .sidebar-nav');
     if (!nav) return;
     const active = document.body.dataset.page || '';
-    nav.innerHTML = `<div class="sidebar-section-label">Menu</div>${buildSidebarNav(active)}`;
+    nav.innerHTML = `${hwShell() ? '' : '<div class="sidebar-section-label">Menu</div>'}${buildSidebarNav(active)}`;
     window.Permissions.applyPermissionGates(nav, getUser());
     const bn = document.querySelector('.bottom-nav');
     if (bn) {
@@ -473,7 +473,7 @@
     SKIN_CSS.forEach((h) => { if (!document.querySelector(`link[data-hx-skin="${h}"]`)) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = h; l.setAttribute('data-hx-skin', h); document.head.appendChild(l); } });
     if (!document.querySelector('link[data-hx-skin="font"]')) { const f = document.createElement('link'); f.rel = 'stylesheet'; f.href = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'; f.setAttribute('data-hx-skin', 'font'); document.head.appendChild(f); }
   }
-  window.addEventListener('businessprofilechange', () => { applyHxSkin(); applyHwSkin(); });
+  window.addEventListener('businessprofilechange', () => { applyHxSkin(); applyHwSkin(); refreshHwBrand(); });
 
   /** Hardware & building materials business: navy + lime look on every shared page (css/hw-skin.css). */
   function isHardware() { return !!profile && profile.businessType === 'hardware'; }
@@ -486,6 +486,23 @@
     if (!document.querySelector('link[data-hw-skin="css"]')) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'css/hw-skin.css'; l.setAttribute('data-hw-skin', 'css'); document.head.appendChild(l); }
     if (!document.querySelector('link[data-hx-skin="font"]')) { const f = document.createElement('link'); f.rel = 'stylesheet'; f.href = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'; f.setAttribute('data-hx-skin', 'font'); document.head.appendChild(f); }
     const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = '#1d1c35';
+  }
+
+
+  /** Hardware shared pages: same brand block, caption and footer as the hardware workspace (hardware/index.html). */
+  function hwShell() { return isHardware() && !isHospitality(); }
+  function hwBrandHtml() {
+    return `<div class="sidebar-brand hw-brand"><span class="logo-mark hw-logo"><img src="icons/icon-192.png" alt="" width="42" height="42"></span><span class="nm">${window.UI.escapeHtml(hwBrandName())}<small>HARDWARE &amp; BUILDING MATERIALS</small></span></div>`;
+  }
+  function hwFooterHtml(user) {
+    return `<div class="hw-foot"><div class="fu"><b>${window.UI.escapeHtml(user?.name || '')}</b><small>${window.UI.escapeHtml(hwHuman(user?.role))}</small></div><a id="hw-out" href="#" title="Sign out"><i>${hwIcon('logout', 17, 1.9)}</i><span class="t">Sign out</span></a></div>`;
+  }
+  function refreshHwBrand() {
+    const b = document.querySelector('#sidebar .sidebar-brand');
+    if (!b || !hwShell()) return;
+    b.outerHTML = hwBrandHtml();
+    const f = document.querySelector('#sidebar .sidebar-footer');
+    if (f && !f.querySelector('.hw-foot')) { f.insertAdjacentHTML('afterbegin', hwFooterHtml(getUser())); document.getElementById('hw-out')?.addEventListener('click', (e) => { e.preventDefault(); handleLogout(); }); }
   }
 
   function itemAllowed(item, user) {
@@ -506,15 +523,20 @@
 
   /* ---- Hardware businesses: shared pages (Inventory, Billing, Settings ...) keep the HARDWARE menu, same as /hardware/ ---- */
   // [id, label, icon, permissions(any) or null, group]  - same order and ids as hardware/js/hw-core.js
+  const HW_ICONS = {"home":"<rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.6\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.6\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.6\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.6\"/>","counter":"<circle cx=\"9\" cy=\"20\" r=\"1.2\"/><circle cx=\"18\" cy=\"20\" r=\"1.2\"/><path d=\"M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6\"/>","quotes":"<path d=\"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z\"/><path d=\"M14 2v6h6M8 13h8M8 17h8\"/>","projects":"<rect x=\"8\" y=\"2\" width=\"8\" height=\"4\" rx=\"1\"/><path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 12h6M9 16h6\"/>","deposits":"<path d=\"M20 12V8H6a2 2 0 0 1 0-4h12v4\"/><path d=\"M4 6v12a2 2 0 0 0 2 2h14v-4\"/><path d=\"M18 12a2 2 0 0 0 0 4h4v-4z\"/>","dispatch":"<path d=\"M22 2 11 13\"/><path d=\"M22 2l-7 20-4-9-9-4z\"/>","fleet":"<path d=\"M1 3h15v13H1z\"/><path d=\"M16 8h4l3 3v5h-7z\"/><circle cx=\"5.5\" cy=\"18.5\" r=\"2.5\"/><circle cx=\"18.5\" cy=\"18.5\" r=\"2.5\"/>","shelves":"<path d=\"M21 8v13H3V8\"/><rect x=\"1\" y=\"3\" width=\"22\" height=\"5\" rx=\"1\"/><path d=\"M10 12h4\"/>","stock":"<path d=\"M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/><path d=\"M3.3 7 12 12l8.7-5M12 22V12\"/>","pricing":"<path d=\"M19 5 5 19\"/><circle cx=\"6.5\" cy=\"6.5\" r=\"2.5\"/><circle cx=\"17.5\" cy=\"17.5\" r=\"2.5\"/>","suppliers":"<path d=\"m17 1 4 4-4 4\"/><path d=\"M3 11V9a4 4 0 0 1 4-4h14\"/><path d=\"m7 23-4-4 4-4\"/><path d=\"M21 13v2a4 4 0 0 1-4 4H3\"/>","finance":"<rect x=\"2\" y=\"6\" width=\"20\" height=\"12\" rx=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"2.4\"/><path d=\"M6 12h.01M18 12h.01\"/>","reports":"<path d=\"M3 3v18h18\"/><path d=\"M18 17V9M13 17V5M8 17v-3\"/>","settings":"<circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z\"/>","rocket":"<path d=\"M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z\"/><path d=\"m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z\"/><path d=\"M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0\"/><path d=\"M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5\"/>","external":"<path d=\"M15 3h6v6\"/><path d=\"M10 14 21 3\"/><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"/>","logout":"<path d=\"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4\"/><polyline points=\"16 17 21 12 16 7\"/><line x1=\"21\" x2=\"9\" y1=\"12\" y2=\"12\"/>"};
+  const hwIcon = (k, size, sw) => `<svg class="hw-svg" width="${size || 18}" height="${size || 18}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw || 1.8}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${HW_ICONS[k] || ''}</svg>`;
+  /** Same name + caption the hardware workspace shows at the top of its menu (never the generic product name). */
+  function hwBrandName() { return (profile && (profile.name || profile.businessName)) || 'Hardware'; }
+  function hwHuman(r) { return String(r || '').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()); }
   const HW_NAV = [
-    ['home', 'Overview', 'dashboard', null, 'Work'], ['counter', 'Counter till', 'terminal', ['sales.create'], 'Work'], ['quotes', 'Quotes & orders', 'receipt', ['hardware.quotes'], 'Work'],
-    ['projects', 'Projects & BOQ', 'flag', ['hardware.quotes', 'hardware.boq'], 'Work'], ['deposits', 'Deposits', 'wallet', ['hardware.deposits'], 'Work'],
-    ['dispatch', 'Dispatch & deliveries', 'truck', ['hardware.deliveries', 'hardware.deliver'], 'Yard & delivery'], ['fleet', 'Fleet & transport', 'truck', ['hardware.transport'], 'Yard & delivery'],
-    ['shelves', 'Shelves & picking', 'box', ['hardware.locations', 'hardware.remnants', 'hardware.repack'], 'Yard & delivery'],
-    ['stock', 'Products & specs', 'tag', ['hardware.profile', 'hardware.quotes'], 'Stock & prices'], ['pricing', 'Contractor pricing', 'tag', ['hardware.pricing', 'hardware.quotes'], 'Stock & prices'],
-    ['suppliers', 'Suppliers & landed cost', 'truck', ['hardware.supplier'], 'Stock & prices'],
-    ['finance', 'Finance', 'wallet', ['hardware.finance'], 'Money'], ['reports', 'Reports', 'reports', ['hardware.reports', 'hardware.transport'], 'Money'],
-    ['settings', 'Workspace settings', 'sliders', ['hardware.settings', 'hardware.templates'], 'Setup'],
+    ['home', 'Overview', 'home', null, 'Work'], ['counter', 'Counter till', 'counter', ['sales.create'], 'Work'], ['quotes', 'Quotes & orders', 'quotes', ['hardware.quotes'], 'Work'],
+    ['projects', 'Projects & BOQ', 'projects', ['hardware.quotes', 'hardware.boq'], 'Work'], ['deposits', 'Deposits', 'deposits', ['hardware.deposits'], 'Work'],
+    ['dispatch', 'Dispatch & deliveries', 'dispatch', ['hardware.deliveries', 'hardware.deliver'], 'Yard & delivery'], ['fleet', 'Fleet & transport', 'fleet', ['hardware.transport'], 'Yard & delivery'],
+    ['shelves', 'Shelves & picking', 'shelves', ['hardware.locations', 'hardware.remnants', 'hardware.repack'], 'Yard & delivery'],
+    ['stock', 'Products & specs', 'stock', ['hardware.profile', 'hardware.quotes'], 'Stock & prices'], ['pricing', 'Contractor pricing', 'pricing', ['hardware.pricing', 'hardware.quotes'], 'Stock & prices'],
+    ['suppliers', 'Suppliers & landed cost', 'suppliers', ['hardware.supplier'], 'Stock & prices'],
+    ['finance', 'Finance', 'finance', ['hardware.finance'], 'Money'], ['reports', 'Reports', 'reports', ['hardware.reports', 'hardware.transport'], 'Money'],
+    ['settings', 'Settings', 'settings', ['hardware.settings', 'hardware.templates'], 'Setup'],
   ];
   // Shop tools: shared pages. [nav key, label override]
   const HW_SHOP = [['inventory', 'Inventory'], ['purchases', 'Purchases'], ['customers', 'Customers'], ['expenses', 'Expenses'], ['cash-register', 'Cash register'], ['sales', 'Sales history'], ['refunds', 'Returns'], ['employees', 'Staff'], ['billing', 'Billing'], ['settings', 'Business settings']];
@@ -533,7 +555,7 @@
     const user = getUser(); let last = ''; let html = '';
     HW_NAV.filter((n) => hwCan(n[3])).forEach((n) => {
       if (n[4] !== last) { html += `<div class="sidebar-section-label">${n[4]}</div>`; last = n[4]; }
-      html += `<a class="sidebar-link" data-nav-key="hw-${n[0]}" href="hardware/index.html#/${n[0]}" title="${n[1]}"><span class="icon">${window.Icons.get(n[2])}</span><span>${n[1]}</span></a>`;
+      html += `<a class="sidebar-link" data-nav-key="hw-${n[0]}" href="hardware/index.html#/${n[0]}" title="${n[1]}"><span class="icon">${hwIcon(n[2])}</span><span>${n[1]}</span></a>`;
     });
     let shop = '';
     HW_SHOP.forEach(([key, label]) => {
@@ -541,9 +563,10 @@
       if (!item || (item.ownerOnly && user?.role !== 'OWNER') || (item.roles && !item.roles.includes(user?.role))) return;
       if (item.permission && !window.Permissions.can(user, item.permission) && !['OWNER', 'ADMIN'].includes(user?.role)) return;
       const active = key === activePage || (key === 'cash-register' && activePage === 'cash');
-      shop += `<a class="sidebar-link ${active ? 'active' : ''}" data-nav-key="${key}" href="${item.href}" title="${label}"><span class="icon">${window.Icons.get(item.icon)}</span><span>${label}</span></a>`;
+      shop += `<a class="sidebar-link ${active ? 'active' : ''}" data-nav-key="${key}" href="${item.href}" title="${label}"><span class="icon">${hwIcon('external', 16, 1.9)}</span><span>${label}</span></a>`;
     });
     if (shop) html += `<div class="sidebar-section-label">Shop tools</div>${shop}`;
+    html += `<div class="hw-promo"><span class="ic">${hwIcon('rocket', 34, 1.9)}</span><p>Customer at the counter?<br>Start a sale in one tap.</p><a href="hardware/index.html#/counter">New sale!</a></div>`;
     return html;
   }
 
@@ -601,15 +624,16 @@
     return `
       <div class="sidebar-overlay" id="sidebar-overlay"></div>
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">
-          <span class="logo-mark" ${isHardware() && !isHospitality() ? 'style="background:#fff;padding:0;overflow:hidden"' : ''}>${isHardware() && !isHospitality() ? '<img src="icons/icon-192.png" alt="" width="36" height="36" style="width:100%;height:100%;object-fit:cover;display:block">' : window.Icons.get('store')}</span>
+        ${hwShell() ? hwBrandHtml() : `<div class="sidebar-brand">
+          <span class="logo-mark">${window.Icons.get('store')}</span>
           <span>${window.UI.escapeHtml(APP_NAME)}</span>
-        </div>
+        </div>`}
         <nav class="sidebar-nav">
-          <div class="sidebar-section-label">Menu</div>
+          ${hwShell() ? '' : '<div class="sidebar-section-label">Menu</div>'}
           ${buildSidebarNav(activePage)}
         </nav>
         <div class="sidebar-footer">
+          ${hwShell() ? hwFooterHtml(user) : ''}
           <div class="sidebar-user">
             <div class="avatar">${window.UI.initials(user?.name)}</div>
             <div class="sidebar-user-info">
@@ -682,6 +706,7 @@
     sidebar.querySelectorAll('.sidebar-link').forEach((link) => link.addEventListener('click', closeSidebar));
 
     document.getElementById('logout-btn')?.addEventListener('click', handleLogout);
+    document.getElementById('hw-out')?.addEventListener('click', (e) => { e.preventDefault(); handleLogout(); });
 
     document.querySelectorAll('.bottom-nav-item').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -895,7 +920,8 @@
       return null;
     }
 
-    document.title = title ? `${title} · ${APP_NAME}` : APP_NAME;
+    const docName = hwShell() ? hwBrandName() : APP_NAME;
+    document.title = title ? `${title} · ${docName}` : docName;
 
     applyHxSkin();
     applyHwSkin();

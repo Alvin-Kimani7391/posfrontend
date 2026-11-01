@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v4.9.8-hardware-nav';
+const VERSION = 'v4.9.9-hardware-reports';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list together with VERSION on every deploy. */
 const NOTES = [
@@ -28,8 +28,8 @@ const CDN_HOSTS = /^(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|fonts\
 // Missing files are skipped (all
 // Settled), so listing a file that does not exist is harmless.
 const PRECACHE = [
-  'hardware/', 'hardware/index.html', 'hardware/css/hw.css', 'hardware/css/hw-pro.css', 'hardware/css/hw-till.css', 'hardware/css/hw-offline.css', 'hardware/manifest.webmanifest',
-  'hardware/js/hw-core.js', 'hardware/js/hw-icons.js', 'hardware/js/hw-fast.js', 'hardware/js/hw-sell.js', 'hardware/js/hw-ops.js', 'hardware/js/hw-back.js', 'hardware/js/hw-products.js', 'hardware/js/hw-dash.js', 'hardware/js/hw-pro.js', 'hardware/js/hw-sales.js', 'hardware/js/hw-till.js', 'hardware/js/hw-till-more.js', 'hardware/js/hw-pwa.js', 'hardware/js/hw-offline.js',
+  'hardware/', 'hardware/index.html', 'hardware/css/hw.css', 'hardware/css/hw-pro.css', 'hardware/css/hw-till.css', 'hardware/css/hw-offline.css', 'hardware/css/hw-reports.css', 'hardware/manifest.webmanifest',
+  'hardware/js/hw-core.js', 'hardware/js/hw-icons.js', 'hardware/js/hw-fast.js', 'hardware/js/hw-sell.js', 'hardware/js/hw-ops.js', 'hardware/js/hw-back.js', 'hardware/js/hw-products.js', 'hardware/js/hw-dash.js', 'hardware/js/hw-pro.js', 'hardware/js/hw-sales.js', 'hardware/js/hw-reports.js', 'hardware/js/hw-till.js', 'hardware/js/hw-till-more.js', 'hardware/js/hw-pwa.js', 'hardware/js/hw-offline.js',
   'js/core/hx-skin-early.js',
   'js/core/hx-autoprint.js',
   'rider.html', 'track.html', 'hx-live.html', 'css/live.css', 'css/rider-login.css', 'js/core/live-kit.js', 'js/rider/rider-app.js', 'js/track/track-app.js', 'js/pages/hx-live.js', 'manifest-rider.json',

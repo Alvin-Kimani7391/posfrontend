@@ -183,28 +183,28 @@
     const arrow = (up) => `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">${up ? '<path d="M12 19V5M5 12l7-7 7 7"/>' : '<path d="M12 5v14M19 12l-7 7-7-7"/>'}</svg>`;
     const dots = (href) => `<a class="hwd-dots" href="${href}" title="Open" aria-label="Open">${'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>'}</a>`;
     const val = (v) => (v === null || v === undefined ? '<b class="na">—</b>' : `<b>${grp(v)}<small>${E(cur)}</small></b>`);
-    const stat = (cls, label, valueHtml, chipHtml, icon, href) => `<div class="hwd-stat ${cls}"><div class="top"><span>${label}</span>${dots(href)}</div>${valueHtml}<div class="bot">${chipHtml}</div><div class="ghost">${svg(icon, 64, 1.2)}</div></div>`;
+    const stat = (cls, label, valueHtml, chipHtml, icon, href) => `<div class="hwd-stat ${cls}" data-href="${href}" style="cursor:pointer"><div class="top"><span>${label}</span>${dots(href)}</div>${valueHtml}<div class="bot">${chipHtml}</div><div class="ghost">${svg(icon, 64, 1.2)}</div></div>`;
     const statsHtml = canRep ? `<div class="hwd-stats">
-      ${stat('dark', 'Sales this month', val(haveSales ? incNow : null), chip(pctChange(incNow, incPrev)), 'coins', '#/reports')}
-      ${stat('', 'Expenses this month', val(spNow), spNow === null ? '' : chip(pctChange(spNow, spPrev), false), 'swap', '#/finance')}
-      ${stat('', 'Owed by customers', val(dash ? owed || 0 : null), dash ? chip(null, true, owed > 0 ? `${Math.round(((over || 0) / owed) * 100)}% overdue` : 'nothing overdue') : '', 'target', '#/reports')}
-      ${stat('', 'Transactions', haveSales ? `<b>${grp(txNow)}</b>` : '<b class="na">—</b>', haveSales ? chip(pctChange(txNow, txPrev)) : '', 'swap', '../sales.html')}
+      ${stat('dark', 'Sales this month', val(haveSales ? incNow : null), chip(pctChange(incNow, incPrev)), 'coins', '#/reports/sales')}
+      ${stat('', 'Expenses this month', val(spNow), spNow === null ? '' : chip(pctChange(spNow, spPrev), false), 'swap', '#/reports/expenses')}
+      ${stat('', 'Owed by customers', val(dash ? owed || 0 : null), dash ? chip(null, true, owed > 0 ? `${Math.round(((over || 0) / owed) * 100)}% overdue` : 'nothing overdue') : '', 'target', '#/reports/customers')}
+      ${stat('', 'Transactions', haveSales ? `<b>${grp(txNow)}</b>` : '<b class="na">—</b>', haveSales ? chip(pctChange(txNow, txPrev)) : '', 'swap', '#/reports/allsales')}
     </div>` : '';
 
     /* chart cards (filled after the HTML is in) */
     const sel = (id, opts) => `<select class="hwd-sel" id="${id}">${opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>`;
     const chartsHtml = canRep ? `<div class="hwd-row">
-      <div class="hw-card hwd-card"><div class="hwd-h"><h3>Sales overview</h3>${sel('hwdBarMode', [['month', 'Monthly'], ['day', 'Daily']])}</div><div class="hwd-leg" id="hwdBarLeg"></div><div id="hwdBar" class="hwd-host"></div></div>
-      <div class="hw-card hwd-card"><div class="hwd-h"><h3>Sales trend</h3>${sel('hwdAreaMode', [['week', 'Week'], ['month', 'Month'], ['quarter', 'Quarter']])}</div><div class="hwd-leg"><span><u class="a"></u>This period</span><span><u class="p"></u>Period before</span></div><div id="hwdArea" class="hwd-host"></div></div>
+      <div class="hw-card hwd-card"><div class="hwd-h"><h3>Sales overview</h3><span style="display:flex;gap:8px;align-items:center">${dots('#/reports/sales')}${sel('hwdBarMode', [['month', 'Monthly'], ['day', 'Daily']])}</span></div><div class="hwd-leg" id="hwdBarLeg"></div><div id="hwdBar" class="hwd-host"></div></div>
+      <div class="hw-card hwd-card"><div class="hwd-h"><h3>Sales trend</h3><span style="display:flex;gap:8px;align-items:center">${dots('#/reports/sales')}${sel('hwdAreaMode', [['week', 'Week'], ['month', 'Month'], ['quarter', 'Quarter']])}</span></div><div class="hwd-leg"><span><u class="a"></u>This period</span><span><u class="p"></u>Period before</span></div><div id="hwdArea" class="hwd-host"></div></div>
     </div>` : '';
 
     /* latest transactions */
     const rows = latest && latest.data ? HW.list(latest.data).slice(0, 5) : [];
     const sortIc = '<svg width="10" height="12" viewBox="0 0 10 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5l3-3 3 3M2 9l3 3 3-3"/></svg>';
-    const txHtml = canSales ? `<div class="hw-card hwd-card"><div class="hwd-h"><h3>Latest transactions</h3>${dots('../sales.html')}</div>
-      ${rows.length ? `<div class="hwd-tx"><div class="hd"><span>Title ${sortIc}</span><span>Medium ${sortIc}</span><span>Amount ${sortIc}</span></div>${rows.map((s) => { const [ml, mc] = medOf(s); const who = s.customerId && s.customerId.name ? s.customerId.name : 'Walk-in'; return `<div class="rw"><div class="t"><em style="background:${mc}">${E(ml.slice(0, 1))}</em><div><b>${E(s.receiptNumber || s.invoiceNumber || '')}</b><small>${E(who)} · ${E(ago(s.createdAt))}</small></div></div><span class="m">${E(ml)}</span><span class="a">${E(HW.money(s.total))}</span></div>`; }).join('')}</div>` : (latest ? HW.empty('No sales yet', 'Completed sales will show here.') : HW.empty('Not available', 'You need sales permission to see transactions.'))}</div>` : '';
+    const txHtml = canSales ? `<div class="hw-card hwd-card"><div class="hwd-h"><h3>Latest transactions</h3>${dots('#/reports/allsales')}</div>
+      ${rows.length ? `<div class="hwd-tx"><div class="hd"><span>Title ${sortIc}</span><span>Medium ${sortIc}</span><span>Amount ${sortIc}</span></div>${rows.map((s) => { const [ml, mc] = medOf(s); const who = s.customerId && s.customerId.name ? s.customerId.name : 'Walk-in'; return `<div class="rw" data-sid="${E(s._id || s.id || '')}" style="cursor:pointer"><div class="t"><em style="background:${mc}">${E(ml.slice(0, 1))}</em><div><b>${E(s.receiptNumber || s.invoiceNumber || '')}</b><small>${E(who)} · ${E(ago(s.createdAt))}</small></div></div><span class="m">${E(ml)}</span><span class="a">${E(HW.money(s.total))}</span></div>`; }).join('')}</div>` : (latest ? HW.empty('No sales yet', 'Completed sales will show here.') : HW.empty('Not available', 'You need sales permission to see transactions.'))}</div>` : '';
     const tops = ((sales && sales.data && sales.data.topProducts) || []).slice(0, 5), topMax = Math.max(...tops.map((t) => Number(t.revenue) || 0), 1);
-    const mapHtml = canRep ? `<div class="hw-card hwd-card"><div class="hwd-h"><h3>Top materials <small>(12 months)</small></h3>${dots('#/reports')}</div>
+    const mapHtml = canRep ? `<div class="hw-card hwd-card"><div class="hwd-h"><h3>Top materials <small>(12 months)</small></h3>${dots('#/reports/sales')}</div>
       ${tops.length ? `<div class="hwd-top">${tops.map((t) => `<div class="it"><div class="l"><b>${E(t.name || 'Material')}</b><span>${E(HW.money(t.revenue))}</span></div><div class="bar"><i style="width:${Math.max(3, Math.round(((Number(t.revenue) || 0) / topMax) * 100))}%"></i></div><small>${E(HW.num(t.quantity, 2))} sold</small></div>`).join('')}</div>` : HW.empty(haveSales ? 'No sales yet' : 'Not available', haveSales ? 'Your best-selling materials will show here.' : 'Sales figures could not be loaded.')}</div>` : '';
 
     /* day-to-day work (kept from the old Overview) */
@@ -212,11 +212,13 @@
     const flow = `<div class="hw-flow"><a href="#/counter">Sell<small>counter till</small></a><a href="#/quotes">Quote<small>price the job</small></a><a href="#/quotes">Order<small>reserve stock</small></a><a href="#/dispatch">Deliver<small>load · drive · proof</small></a><a href="#/finance">Collect<small>deposits · credit</small></a></div>`;
     const opsHtml = `<div class="hwd-row">
       <div class="hw-card hwd-card"><div class="hwd-h"><h3>Needs attention</h3></div>${canRep ? todo(d.openOrders, 'Open orders approved, not fully invoiced', 'quotes') + todo(d.pendingDeliveries, 'Deliveries waiting to go out', 'dispatch') + todo(d.overdueDeliveries, 'Deliveries past their scheduled time', 'dispatch', d.overdueDeliveries > 0) + todo(d.quotationsExpiringIn3Days, 'Quotations about to expire (3 days)', 'quotes') + todo(d.outOfStockLines, 'Order lines short on stock (backorders)', 'quotes/back', d.outOfStockLines > 0) + todo(alertList.length, 'Vehicle papers / services due in 30 days', 'fleet', alertList.length > 0) : '<p style="color:#757a88">Use the menu to open your work screens.</p>'}</div>
-      <div class="hw-card hwd-card"><div class="hwd-h"><h3>Top customers owing</h3>${dots('#/reports')}</div>${HW.tbl([{ h: 'Customer', f: (r) => E(r.name || '') }, { h: 'Owed', c: 'n', f: (r) => HW.money(r.owed) }, { h: 'Limit used', c: 'n', f: (r) => HW.num(r.usedPct, 0) + '%' }], d.contractorBalances || [], { empty: 'No balances owing', hint: canRep ? '' : 'Reports permission needed' })}</div></div>
+      <div class="hw-card hwd-card"><div class="hwd-h"><h3>Top customers owing</h3>${dots('#/reports/customers')}</div>${HW.tbl([{ h: 'Customer', f: (r) => E(r.name || '') }, { h: 'Owed', c: 'n', f: (r) => HW.money(r.owed) }, { h: 'Limit used', c: 'n', f: (r) => HW.num(r.usedPct, 0) + '%' }], d.contractorBalances || [], { empty: 'No balances owing', hint: canRep ? '' : 'Reports permission needed' })}</div></div>
       <div class="hw-card hwd-card" style="margin-top:18px"><div class="hwd-h"><h3>Quick start</h3></div>${flow}<div class="hw-bar" style="margin:6px 0 0">${[['counter', 'New sale'], ['stock/new', 'New product'], ['quotes/new', 'New quotation'], ['dispatch/new', 'Schedule delivery'], ['projects', 'Projects & BOQ'], ['deposits', 'Take deposit'], ['shelves', 'Pick list']].filter(([to]) => HW.NAV.find((n) => n[0] === to.split('/')[0] && HW.canAny(n[3]))).map(([to, l]) => `<a class="hw-btn" href="#/${to}">${l}</a>`).join('')}</div></div>`;
 
     el.innerHTML = `<div class="hwd">${statsHtml}${chartsHtml}<div class="hwd-row">${txHtml}${mapHtml}</div>${opsHtml}</div>`;
     $$('[data-go]', el).forEach((x) => x.onclick = () => HW.go(...x.dataset.go.split('/')));
+    $$('.hwd-stat[data-href]', el).forEach((x) => x.addEventListener('click', (e) => { if (e.target.closest('a,select,button')) return; location.hash = x.dataset.href; }));
+    $$('.rw[data-sid]', el).forEach((x) => x.addEventListener('click', () => { if (x.dataset.sid && HW.saleDetail) HW.saleDetail(x.dataset.sid); else location.hash = '#/reports/allsales'; }));
     if (!canRep) return;
 
     /* ---- bar chart: Monthly (12 months of this year, each split in three parts) / Daily (last 14 days) ---- */

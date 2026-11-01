@@ -1,0 +1,50 @@
+/* Hardware workspace - Reports (hybrid). Lime & Navy. Loaded after hw.css / hw-pro.css. */
+.hwr-tabs{display:flex;gap:6px;overflow-x:auto;flex-wrap:nowrap;padding-bottom:4px;margin-bottom:12px;scrollbar-width:thin}
+.hwr-tabs a{white-space:nowrap;flex:none}
+.hwr-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#fff;border-radius:18px;padding:10px 14px;margin-bottom:14px}
+.hwr-bar label{display:flex;align-items:center;gap:6px;font-size:13px;color:#757a88;font-weight:600}
+.hwr-bar input[type=date]{border:1px solid #e3e5e8;border-radius:10px;padding:7px 9px;font:inherit;min-height:38px}
+.hwr-bar .sp{flex:1}
+.hwr-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.hwr-bar .hwr-chips{margin:0}
+.hwr-chips button{border:1px solid #e3e5e8;background:#fff;border-radius:99px;padding:7px 13px;font-size:13px;font-weight:600;font-family:inherit;color:#16162a;cursor:pointer;min-height:36px}
+.hwr-chips button:hover{border-color:#1d1c35}
+.hwr-chips button.on{background:#1d1c35;color:#fff;border-color:#1d1c35}
+.hwr-sub{color:#757a88;font-size:13px;margin:0 0 8px}
+.hwr-card{margin-bottom:18px}
+.hwr-card .hwr-h{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px}
+.hwr-card .hwr-h h3{margin:0}
+.hwr-r{color:#757a88;font-size:13px;font-weight:600}
+.hwr-more{color:#1d1c35;font-weight:700;font-size:13px;text-decoration:underline;text-decoration-color:#c3e03a;text-underline-offset:3px}
+.hwr-links{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 18px}
+.hwr-g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.hwr-g2>.hwr-card{min-width:0}
+@media(max-width:1100px){.hwr-g2{grid-template-columns:1fr}}
+.hwr-svgw{overflow-x:auto}
+.hwr-hbs{display:grid;gap:12px}
+.hwr-hb{display:grid;grid-template-columns:minmax(90px,30%) minmax(0,1fr) auto;gap:10px;align-items:center;font-size:14px}
+.hwr-hb .l{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hwr-hb .b{height:10px;background:#eceef0;border-radius:99px;overflow:hidden}
+.hwr-hb .b i{display:block;height:100%;background:#1d1c35;border-radius:99px}
+.hwr-hb .b i.neg,.hwr-mb i.neg{background:#e5484d}
+.hwr-hb .v{text-align:right;font-weight:700;white-space:nowrap}
+.hwr-hb .v small{display:block;font-weight:500;color:#757a88;font-size:12px}
+.hwr-mb{display:inline-block;vertical-align:middle;width:90px;max-width:100%;height:8px;background:#eceef0;border-radius:99px;overflow:hidden}
+.hwr-mb i{display:block;height:100%;background:#1d1c35;border-radius:99px}
+td .hwr-mb{width:100%;max-width:160px}
+.hw-t tr.st td{font-weight:700;background:#f6f6f2}.hw-t tr.tot td{font-size:16px;border-top:2px solid #1d1c35}
+.hw-t td.neg{color:#e5484d}
+.hwr-up{color:#1f9d55;font-weight:700}.hwr-dn{color:#e5484d;font-weight:700}
+.hwr-chg{font-size:12px;font-weight:700}.hwr-chg.good{color:#1f9d55}.hwr-chg.bad{color:#e5484d}
+.hw-kpi .hw-card:first-child .hwr-chg.good{color:#d4ee5a}.hw-kpi .hw-card:first-child .hwr-chg.bad{color:#ff9a9d}
+.hwr-verdict{display:flex;gap:16px;align-items:flex-start;border-radius:24px;padding:20px 24px;margin-bottom:14px;border:1px solid transparent}
+.hwr-verdict .vi{flex:none;width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800}
+.hwr-verdict .vt{display:block;font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;margin-bottom:2px}
+.hwr-verdict b{font-size:20px;display:block}.hwr-verdict p{margin:6px 0 0;font-size:14px;line-height:1.5}.hwr-verdict p b{font-size:inherit;display:inline}
+.hwr-verdict.ok{background:#f3f9cf;border-color:#d4ee5a;color:#1d1c35}.hwr-verdict.ok .vi{background:#1d1c35;color:#d4ee5a}
+.hwr-verdict.er{background:#fdeaea;border-color:#f5b5b7;color:#7a1d20}.hwr-verdict.er .vi{background:#e5484d;color:#fff}
+.hwr-insl{display:grid;gap:8px;margin-bottom:16px}
+.hwr-ins{border-radius:14px;padding:10px 14px;font-size:14px;background:#fff;border-left:5px solid #3b3a60}
+.hwr-ins.ok{border-left-color:#1f9d55;background:#f3faf5}.hwr-ins.wa{border-left-color:#e0a100;background:#fff8e6}.hwr-ins.bl{border-left-color:#3b3a60}
+@media(max-width:700px){.hwr-verdict{padding:16px}.hwr-verdict b{font-size:17px}.hwr-hb{grid-template-columns:minmax(70px,34%) minmax(0,1fr) auto}.hwr-bar{padding:10px}}
+@media print{.hwr-bar,.hwr-tabs{display:none!important}.hwr-card,.hwr-verdict{break-inside:avoid}}
