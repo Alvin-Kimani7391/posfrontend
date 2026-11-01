@@ -7,7 +7,7 @@
 
   /* ---------- permissions (UI only; the backend re-checks everything) ---------- */
   const GRANTS = {
-    CASHIER: ['hardware.quotes', 'hardware.deposits', 'sales.create'],
+    CASHIER: ['hardware.quotes', 'hardware.deposits', 'sales.create', 'shifts.open', 'shifts.close', 'sales.view'],
     SALES_REP: ['hardware.quotes', 'sales.create', 'sales.view', 'hardware.boq', 'hardware.deposits'],
     STOREKEEPER: ['hardware.profile', 'hardware.locations', 'hardware.remnants', 'hardware.deliveries', 'hardware.repack', 'hardware.supplier'],
     DISPATCHER: ['hardware.deliveries', 'hardware.transport', 'hardware.transport.costs', 'hardware.locations'],
@@ -56,7 +56,7 @@
     const close = () => { el.remove(); if (!document.querySelector('.hw-modal')) document.body.classList.remove('hw-lock'); }; el.querySelector('.x').onclick = close; document.body.classList.add('hw-lock');
     el.addEventListener('mousedown', (e) => { if (e.target === el) el._down = true; }); el.addEventListener('mouseup', (e) => { if (e.target === el && el._down) close(); el._down = false; });
     ($('#app') || document.body).appendChild(el);
-    actions.forEach((a, i) => { const b = el.querySelector(`[data-a="${i}"]`); b.onclick = async () => { if (!a.fn) return close(); b.disabled = true; try { const r = await a.fn(el, close); if (r !== false) close(); } finally { b.disabled = false; } }; });
+    actions.forEach((a, i) => { const b = el.querySelector(`[data-a="${i}"]`); b.onclick = async () => { if (!a.fn) return close(); b.disabled = true; b.classList.add('is-busy'); try { const r = await a.fn(el, close); if (r !== false) close(); } finally { b.disabled = false; b.classList.remove('is-busy'); } }; });
     if (onMount) onMount(el, close); return { el, close };
   };
   HW.confirm = (msg, fn, label = 'Confirm') => HW.modal({ title: 'Please confirm', body: `<p>${msg}</p>`, actions: [{ label: 'Cancel' }, { label: label, cls: 'p', fn }] });
@@ -122,20 +122,20 @@
   /* ---------- navigation ---------- */
   // [id, label, icon, permissions(any), group]
   const NAV = [
-    ['home', 'Overview', '▦', null, 'Work'],
-    ['counter', 'Counter till', '⌗', ['sales.create'], 'Work'],
-    ['quotes', 'Quotes & orders', '✎', ['hardware.quotes'], 'Work'],
-    ['projects', 'Projects & BOQ', '▤', ['hardware.quotes', 'hardware.boq'], 'Work'],
-    ['deposits', 'Deposits', '⛁', ['hardware.deposits'], 'Work'],
-    ['dispatch', 'Dispatch & deliveries', '➜', ['hardware.deliveries', 'hardware.deliver'], 'Yard & delivery'],
-    ['fleet', 'Fleet & transport', '⛟', ['hardware.transport'], 'Yard & delivery'],
-    ['shelves', 'Shelves & picking', '▥', ['hardware.locations', 'hardware.remnants', 'hardware.repack'], 'Yard & delivery'],
-    ['stock', 'Products & specs', '⚙', ['hardware.profile', 'hardware.quotes'], 'Stock & prices'],
+    ['home', 'Overview', '', null, 'Work'],
+    ['counter', 'Counter till', '', ['sales.create'], 'Work'],
+    ['quotes', 'Quotes & orders', '', ['hardware.quotes'], 'Work'],
+    ['projects', 'Projects & BOQ', '', ['hardware.quotes', 'hardware.boq'], 'Work'],
+    ['deposits', 'Deposits', '', ['hardware.deposits'], 'Work'],
+    ['dispatch', 'Dispatch & deliveries', '', ['hardware.deliveries', 'hardware.deliver'], 'Yard & delivery'],
+    ['fleet', 'Fleet & transport', '', ['hardware.transport'], 'Yard & delivery'],
+    ['shelves', 'Shelves & picking', '', ['hardware.locations', 'hardware.remnants', 'hardware.repack'], 'Yard & delivery'],
+    ['stock', 'Products & specs', '', ['hardware.profile', 'hardware.quotes'], 'Stock & prices'],
     ['pricing', 'Contractor pricing', '％', ['hardware.pricing', 'hardware.quotes'], 'Stock & prices'],
-    ['suppliers', 'Suppliers & landed cost', '⇄', ['hardware.supplier'], 'Stock & prices'],
+    ['suppliers', 'Suppliers & landed cost', '', ['hardware.supplier'], 'Stock & prices'],
     ['finance', 'Finance', '₭', ['hardware.finance'], 'Money'],
-    ['reports', 'Reports', '◔', ['hardware.reports', 'hardware.transport'], 'Money'],
-    ['settings', 'Settings', '☰', ['hardware.settings', 'hardware.templates'], 'Setup'],
+    ['reports', 'Reports', '', ['hardware.reports', 'hardware.transport'], 'Money'],
+    ['settings', 'Settings', '', ['hardware.settings', 'hardware.templates'], 'Setup'],
   ];
   const SHOP = [['Inventory', '../inventory.html'], ['Purchases', '../purchases.html'], ['Customers', '../customers.html'], ['Expenses', '../expenses.html'], ['Cash register', '../cash-register.html'], ['Sales history', '../sales.html'], ['Returns', '../refunds.html'], ['Staff', '../employees.html']];
   const LANDING = { DRIVER: 'dispatch', DISPATCHER: 'dispatch', SALES_REP: 'quotes', STOREKEEPER: 'shelves', ACCOUNTANT: 'finance', CASHIER: 'counter' };
@@ -150,20 +150,20 @@
     HW.S.branches = await HW.opt.branches();
     HW.S.branch = Storage.getActiveBranchId() || (HW.S.user && (HW.S.user.branchId || (HW.S.user.branchIds || [])[0])) || (HW.S.branches[0] && HW.S.branches[0][0]);
     if (HW.S.branch) Storage.setActiveBranchId(HW.S.branch);
-    shell();
+    shell(); if (HW.afterShell) { try { HW.afterShell(); } catch (e) { console.warn(e); } }
     if (!location.hash || location.hash === '#/' || location.hash === '#') location.hash = '#/' + (LANDING[HW.S.user && HW.S.user.role] && HW.canAny(NAV.find((n) => n[0] === LANDING[HW.S.user.role])[3]) ? LANDING[HW.S.user.role] : 'home');
     window.addEventListener('hashchange', route); route();
   }
   function shell() {
     const groups = []; NAV.filter((n) => HW.canAny(n[3])).forEach((n) => { let g = groups.find((x) => x[0] === n[4]); if (!g) groups.push(g = [n[4], []]); g[1].push(n); });
     const name = (HW.S.profile && HW.S.profile.name) || 'Hardware'; const ic = (k, z, w) => (HW.icon ? HW.icon(k, z, w) : '');
-    $('#app').innerHTML = `<aside class="hw-rail" id="rail"><div class="hw-brand"><span class="hw-logo">${ic('stock', 22, 2)}</span><span class="nm">${E(name)}<small>HARDWARE &amp; BUILDING MATERIALS</small></span></div>
-      <nav class="hw-nav">${groups.map(([g, items]) => `<div class="sep">${g}</div>${items.map((n) => `<a href="#/${n[0]}" data-id="${n[0]}"><i>${n[2]}</i>${n[1]}</a>`).join('')}`).join('')}<div class="sep">Shop tools</div>${SHOP.map(([l, h]) => `<a href="${h}"><i>↗</i>${l}</a>`).join('')}<div class="hw-promo"><span class="ic">🚀</span><p>Customer at the counter?<br>Start a sale in one tap.</p><a href="#/counter">New sale!</a></div></nav>
-      <div class="hw-foot"><b>${E(HW.S.user && HW.S.user.name || '')}</b><br><small>${E(HW.human(HW.S.user && HW.S.user.role))}</small><br><a id="out">Sign out</a></div></aside>
-      <main class="hw-main"><div class="hw-top"><button class="hw-btn hw-burger s" id="burger">☰</button><h1 id="ttl"></h1><div class="hw-search">${ic('search', 18, 2)}<input id="gsearch" placeholder="Search products…" autocomplete="off"></div>${HW.S.branches.length > 1 ? `<select id="brSel" title="Branch">${HW.S.branches.map(([id, n]) => `<option value="${id}" ${id === HW.S.branch ? 'selected' : ''}>${E(n)}</option>`).join('')}</select>` : ''}<span class="u" id="upd"></span><a class="hw-ico" href="../notifications.html" title="Notifications" aria-label="Notifications">${ic('bell', 20, 1.8) || '🔔'}<b></b></a><span class="hw-ico av" title="${E(HW.S.user && HW.S.user.name || '')}">${E(UI.initials ? UI.initials(HW.S.user && HW.S.user.name || 'U') : 'U')}</span></div><div class="hw-pg" id="pg"></div></main>`;
+    $('#app').innerHTML = `<aside class="hw-rail" id="rail"><div class="hw-brand"><span class="hw-logo">${ic('stock', 22, 2)}</span><span class="nm">${E(name)}<small>HARDWARE &amp; BUILDING MATERIALS</small></span><button class="hw-collapse" id="collapse" type="button" title="Collapse menu" aria-label="Collapse menu">‹</button></div>
+      <nav class="hw-nav">${groups.map(([g, items]) => `<div class="sep"><span>${g}</span></div>${items.map((n) => `<a href="#/${n[0]}" data-id="${n[0]}" title="${E(n[1])}"><i>${n[2] || HW.ic('package', 18)}</i><span class="t">${n[1]}</span></a>`).join('')}`).join('')}<div class="sep"><span>Shop tools</span></div>${SHOP.map(([l, h]) => `<a href="${h}" title="${E(l)}"><i>${HW.ic('external', 16)}</i><span class="t">${l}</span></a>`).join('')}<div class="hw-promo"><span class="ic">${HW.ic('rocket', 34)}</span><p>Customer at the counter?<br>Start a sale in one tap.</p><a href="#/counter">New sale!</a></div></nav>
+      <div class="hw-foot"><div class="fu"><b>${E(HW.S.user && HW.S.user.name || '')}</b><small>${E(HW.human(HW.S.user && HW.S.user.role))}</small></div><a id="out" title="Sign out"><i>${HW.ic('logout', 17)}</i><span class="t">Sign out</span></a></div></aside>
+      <main class="hw-main"><div class="hw-top"><button class="hw-btn hw-burger s" id="burger">${HW.ic('menu', 20)}</button><h1 id="ttl"></h1><div class="hw-search" id="gwrap">${ic('search', 18, 2)}<input id="gsearch" placeholder="Search products, pages, customers…" autocomplete="off" aria-label="Search" role="combobox" aria-expanded="false"><kbd>/</kbd></div>${HW.S.branches.length > 1 ? `<select id="brSel" title="Branch">${HW.S.branches.map(([id, n]) => `<option value="${id}" ${id === HW.S.branch ? 'selected' : ''}>${E(n)}</option>`).join('')}</select>` : ''}<span class="u" id="upd"></span><span class="hw-bellwrap" id="bellwrap"><button class="hw-ico" id="bell" type="button" title="Notifications" aria-label="Notifications" aria-haspopup="true">${ic('bell', 20, 1.8) || HW.ic('bell', 20)}<b class="dot" hidden></b></button></span><span class="hw-ico av" title="${E(HW.S.user && HW.S.user.name || '')}">${E(UI.initials ? UI.initials(HW.S.user && HW.S.user.name || 'U') : 'U')}</span></div><div class="hw-pg" id="pg"></div></main>`;
     $('#out').onclick = () => { Storage.clearSession(); location.href = '../login.html'; };
     $('#burger').onclick = () => $('#rail').classList.toggle('open');
-    $('#gsearch').addEventListener('keydown', (e) => { if (e.key !== 'Enter') return; const t = e.target.value.trim(); if (!t) return; HW.S.pending = t; e.target.value = ''; if (location.hash.startsWith('#/counter')) HW.refresh(); else HW.go('counter'); });
+    $('#gsearch').addEventListener('keydown', (e) => { if (e.key !== 'Enter' || HW.searchPro) return; const t = e.target.value.trim(); if (!t) return; HW.S.pending = t; e.target.value = ''; if (location.hash.startsWith('#/counter')) HW.refresh(); else HW.go('counter'); });
     const sel = $('#brSel'); if (sel) sel.onchange = () => { HW.S.branch = sel.value; Storage.setActiveBranchId(sel.value); route(); };
   }
   function route() {
@@ -172,7 +172,7 @@
     $$('.hw-nav a').forEach((a) => a.classList.toggle('on', a.dataset.id === nav[0])); { const t = $('#ttl'); if (nav[0] === 'home') { const h = new Date().getHours(); t.innerHTML = `${h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'}, <b>${E(((HW.S.user && HW.S.user.name) || '').split(' ')[0] || 'there')}</b>!`; } else t.textContent = nav[1]; }
     const pg = $('#pg');
     if (!HW.canAny(nav[3])) { pg.innerHTML = HW.empty('No access', 'Ask the owner to give you this permission.'); return; }
-    pg.innerHTML = '<p style="color:#667080">Loading…</p>';
+    pg.innerHTML = HW.skeleton ? HW.skeleton() : '<p style="color:#667080">Loading…</p>';
     const go = async (quiet) => { const y = window.scrollY; try { await fn(pg, arg); if (quiet) window.scrollTo(0, y); $('#upd').textContent = 'Updated ' + new Date().toLocaleTimeString(); } catch (e) { pg.innerHTML = HW.empty('Could not load', e.message || 'Try again'); } };
     go(); if (fn && fn.live) HW.S.timer = setInterval(() => { if (!document.querySelector('.hw-modal') && !document.hidden) go(true); }, fn.live);
   }

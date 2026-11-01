@@ -86,36 +86,38 @@
   /* ===================== COUNTER TILL ===================== */
   let TILL = null;
   HW.V.counter = async (el) => {
-    el.innerHTML = `<div class="hw-till"><div><div class="hw-card hz"><h3>Find product <span class="sp"></span><small style="font-weight:400;color:#667080">Scan a barcode or type a name / SKU</small></h3><input data-q placeholder="Scan or search…" style="width:100%;font-size:18px;min-height:50px"><div class="hw-prods" data-res></div></div></div>
+    el.innerHTML = `<div data-shiftbar></div><div class="hw-till"><div><div class="hw-card hz"><h3>Find product <span class="sp"></span><small style="font-weight:400;color:#667080">Scan a barcode or type a name / SKU</small></h3><input data-q placeholder="Scan or search…" style="width:100%;font-size:18px;min-height:50px"><div class="hw-prods" data-res></div></div></div>
       <div class="hw-card hw-cart hz"><h3>Current sale</h3>
         <div style="margin-bottom:10px">${HW.pickHtml('customerId', 'Customer (needed for credit & contractor prices)')}</div>
         <div data-cart></div><div data-tot></div>
-        <div style="margin:10px 0"><b style="font-size:13px">PAYMENT</b><div data-pays></div><div class="hw-bar"><button class="hw-btn s" data-addpay>+ Split payment</button><span class="sp"></span><button class="hw-btn s" data-fill>Full amount</button></div><small data-due style="color:#667080"></small></div>
+        <div style="margin:10px 0"><b style="font-size:13px">PAYMENT</b><div data-pays></div><div class="hw-bar"><button class="hw-btn s" data-addpay>+ Split payment</button><span class="sp"></span><button class="hw-btn s" data-fill title="Reset to one payment for the full total">Full amount</button></div><small data-due style="color:#667080"></small></div>
         <button class="hw-btn p big" data-done>Complete sale</button>
         <div class="hw-bar" style="margin-top:8px"><button class="hw-btn" data-quote style="flex:1">Save as quotation</button><button class="hw-btn x" data-clear>Clear</button></div></div></div>`;
     let cust = null;
-    const cart = HW.Cart(el, { getCustomer: () => cust, onChange: totals });
-    const pays = HW.payRows(el); pays.add({ method: 'CASH' });
-    function totals() { const t = cart.total(); $('[data-tot]', el).innerHTML = `<div class="hw-tot"><span>Items</span><span>${cart.lines().length}</span></div><div class="hw-tot big"><span>TOTAL</span><span>${M(t)}</span></div><small style="color:#667080">Tax and discounts are applied when the sale is saved.</small>`; const due = t - pays.sum(); $('[data-due]', el).textContent = !cust && due > 0.005 && pays.sum() > 0 ? 'Short payment needs a customer (credit).' : (due > 0.005 && pays.sum() > 0 ? `${M(due)} will go on credit` : ''); }
+    const cart = HW.Cart(el, { getCustomer: () => cust, onChange: totals }); HW.S.cart = cart;
+    const pays = HW.payRows(el); pays.add({ method: 'CASH' }); let auto = true; /* the first payment follows the sale total until the cashier types an amount */
+    function totals() { const t = cart.total(); if (auto) { const f = $('[data-p=amount]', el); if (f) f.value = t > 0 ? (Math.round(t * 100) / 100).toFixed(2) : ''; } $('[data-tot]', el).innerHTML = `<div class="hw-tot"><span>Items</span><span>${cart.lines().length}</span></div><div class="hw-tot big"><span>TOTAL</span><span>${M(t)}</span></div><small style="color:#667080">Tax and discounts are applied when the sale is saved.</small>`; const due = t - pays.sum(); $('[data-due]', el).textContent = !cust && due > 0.005 && pays.sum() > 0 ? 'Short payment needs a customer (credit).' : (due > 0.005 && pays.sum() > 0 ? `${M(due)} will go on credit` : ''); }
     HW.bindCustomer(el, 'customerId', (c) => { cust = HW.id(c); cart.reprice(); });
     $('[name=customerId]', el).previousElementSibling.addEventListener('input', () => { cust = null; });
     HW.productFinder(el, (p, u) => cart.add(p, u));
-    el.addEventListener('input', (e) => { if (e.target.matches('[data-p]')) totals(); });
-    $('[data-addpay]', el).onclick = () => pays.add({});
-    $('[data-fill]', el).onclick = () => { const f = $('[data-p=amount]', el); if (f) { f.value = cart.total().toFixed(2); totals(); } };
+    el.addEventListener('input', (e) => { if (e.target.matches('[data-p]')) { if (e.target.matches('[data-p=amount]')) auto = false; totals(); } });
+    $('[data-addpay]', el).onclick = () => { auto = false; pays.add({}); };
+    $('[data-fill]', el).onclick = () => { const m = ($('[data-p=method]', el) || {}).value || 'CASH'; pays.clear(); pays.add({ method: m }); auto = true; totals(); };
     $('[data-clear]', el).onclick = () => { cart.clear(); };
     $('[data-quote]', el).onclick = () => { if (!cart.lines().length) return HW.err('Add items first'); HW.quoteForm({ customerId: cust, customerName: $('.hw-pick input[type=text]', el).value, lines: cart.st.lines }); };
     $('[data-done]', el).onclick = async () => {
       const lines = cart.lines(); if (!lines.length) return HW.err('Add items first');
       const payments = pays.get(); const paid = payments.reduce((s, p) => s + p.amount, 0); const t = cart.total();
       if (paid < t - 0.005 && !cust) return HW.err('Pick a customer to put the balance on credit, or take full payment.');
+      if (HW.shift && !(await HW.shift.guard())) return; /* a cash shift must be open before money is taken */
       const body = { branchId: br(), channel: 'RETAIL', customerId: cust || undefined, items: lines.map((l) => ({ productId: l.productId, unitId: l.unitId || undefined, quantity: Number(l.qty), overridePrice: l.override !== null ? l.override : undefined })), payments };
       const r = await HW.run(async () => (await Api.post('/sales', body)).data); if (!r) return;
       const sale = r.sale || r; const cname = $('.hw-pick input[type=text]', el).value;
-      cart.clear(); pays.clear(); pays.add({ method: 'CASH' }); totals();
+      cart.clear(); pays.clear(); pays.add({ method: 'CASH' }); auto = true; totals(); if (HW.shift) HW.shift.refresh();
       HW.modal({ title: 'Sale complete', body: `<div class="hw-note ok"><b>${E(sale.receiptNumber || sale.invoiceNumber || 'Saved')}</b> · Total ${M(sale.total)}${sale.change ? ' · Change ' + M(sale.change) : ''}</div><p>Next: does this customer need the goods delivered?</p>`, actions: [{ label: 'Done' }, { label: 'Schedule delivery', cls: 'p', fn: () => { HW.deliveryForm({ saleId: sale._id || sale.id, customerId: cust, customerName: cname }); } }] });
     };
-    totals();
+    totals(); if (HW.shift) HW.shift.bar($('[data-shiftbar]', el));
+    if (HW.S.pendingAdd) { cart.add(HW.S.pendingAdd); HW.S.pendingAdd = null; }
     if (HW.S.pending) { const q = $('[data-q]', el); q.value = HW.S.pending; HW.S.pending = ''; q.dispatchEvent(new Event('input')); }
   };
 
