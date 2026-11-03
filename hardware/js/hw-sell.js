@@ -57,7 +57,7 @@
     const tryCode = async (code) => {
       try { const { data } = await Api.get(`/hardware/barcode/${encodeURIComponent(code)}`); const r = await Api.get(`/products/${data.productId}`, { branchId: br() }); const p = r.data.product || r.data; onAdd(p, data.matchedOn !== 'BARCODE' ? data.unitName : null); inp.value = ''; return true; } catch (e) { return false; }
     };
-    inp.addEventListener('input', window.UI.debounce(() => { const t = inp.value.trim(); if (t.length >= 2) find(t).catch((e) => HW.err(e.message)); else if (!t) out.innerHTML = ''; }, 300));
+    inp.addEventListener('input', window.UI.debounce(() => { const t = inp.value.trim(); if (t.length >= 2) find(t).catch((e) => HW.err(e.message)); else if (!t) out.innerHTML = ''; }, 120));
     inp.addEventListener('keydown', async (e) => { if (e.key !== 'Enter') return; e.preventDefault(); const t = inp.value.trim(); if (t.length >= 3 && /^[\w-]+$/.test(t) && await tryCode(t)) return; if (t) find(t).catch((x) => HW.err(x.message)); });
     inp.focus();
   };

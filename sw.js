@@ -4,9 +4,9 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.0.2-excel-import';
+const VERSION = 'v5.0.3-fast-search';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
- *  Edit this list together with VERSION on every deploy. */
+ *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
   'Hardware workspace now works offline: sell, scan and print receipts with no internet',
   'Offline sales are saved on this till and sync by themselves when the internet returns',
@@ -44,7 +44,7 @@ const PRECACHE = [
   'css/variables.css', 'css/base.css', 'css/components.css', 'css/layout.css', 'css/pos.css', 'css/reports.css',
   'css/tour.css', 'css/announcements.css', 'css/billing.css', 'css/crm.css',
 
-  'js/core/config.js', 'js/core/icons.js', 'js/core/storage.js', 'js/core/api.js', 'js/core/connectivity.js',
+  'js/core/config.js', 'js/core/icons.js', 'js/core/storage.js', 'js/core/api.js', 'js/core/fast-search.js', 'js/core/connectivity.js',
   'js/core/offline-db.js', 'js/core/offline-sync.js', 'js/core/offline-shifts.js', 'js/core/offline-auth.js',
   'js/core/offline-sale.js', 'js/core/wholesale.js', 'js/core/password-toggle.js', 'js/core/offline-ui.js', 'js/core/offline-settings.js',
   'js/core/permissions.js', 'js/core/ui.js', 'js/core/ui-polish.js', 'js/core/notification-types.js', 'js/core/notifications.js',

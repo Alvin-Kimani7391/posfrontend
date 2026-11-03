@@ -342,6 +342,12 @@
     if (isWs() && !ws.ready) ensureWsReady().then(() => { if (isWs() && state.view === 'new-sale') renderNewSaleView(); });
   }
 
+  // Retail product list kept on the device (js/core/fast-search.js): typing answers instantly instead of waiting on the server.
+  const retailIndex = window.FastSearch.create({
+    params: () => ({ status: 'active', channel: 'retail', branchId: (window.AppShell && window.AppShell.getActiveBranchId && window.AppShell.getActiveBranchId()) || undefined }),
+    ttl: 20000,
+  });
+  const lookupLocal = (t) => retailIndex.search(t, 15); // array, or null when the server has to answer
   const lookupSearch = (t) => (window.Offline && window.Offline.lookup
     ? window.Offline.lookup.search(t)
     : window.Api.get('/products', { search: t, limit: 15, status: 'active', channel: 'retail', branchId: window.AppShell.getActiveBranchId() || undefined }).then((r) => r.data.items || []));
@@ -1222,6 +1228,7 @@
     `;
 
     bindProductSearch();
+    retailIndex.load(); // download the product list in the background so searching is instant
     bindScanButton();
     bindTicketEvents();
     renderCart();
@@ -1383,20 +1390,26 @@
       input.focus();
     }
 
+    function fillRows(found, wsOn) {
+      rows = [];
+      if (wsOn) found.forEach((item) => rows.push({ ws: true, item }));
+      else found.forEach((product) => {
+        if (product.variants?.length) product.variants.forEach((v) => rows.push({ product, variant: v }));
+        else rows.push({ product, variant: null });
+      });
+      active = 0;
+    }
+
     async function runSearch(term) {
       const my = ++seq;
+      const wsOn = isWs();
+      const quick = wsOn ? null : lookupLocal(term);
+      if (quick) { fillRows(quick, false); render(term, false); return rows; } // instant: no "Searching..." flash
       render(term, true);
       try {
-        const wsOn = isWs();
         const found = await (wsOn ? wsSearch(term) : lookupSearch(term));
         if (my !== seq) return rows;
-        rows = [];
-        if (wsOn) found.forEach((item) => rows.push({ ws: true, item }));
-        else found.forEach((product) => {
-          if (product.variants?.length) product.variants.forEach((v) => rows.push({ product, variant: v }));
-          else rows.push({ product, variant: null });
-        });
-        active = 0;
+        fillRows(found, wsOn);
         render(term, false);
       } catch (err) {
         if (my !== seq) return rows;
@@ -1407,11 +1420,11 @@
       return rows;
     }
 
-    const debounced = window.UI.debounce((term) => runSearch(term), 250);
+    const debounced = window.UI.debounce((term) => runSearch(term), 150);
     input.addEventListener('input', (e) => {
       const term = e.target.value.trim();
       if (!term) { seq += 1; close(); return; }
-      debounced(term);
+      if (!isWs() && retailIndex.isReady()) runSearch(term); else debounced(term);
     });
 
     input.addEventListener('keydown', async (e) => {
@@ -2783,8 +2796,10 @@
       if (document.querySelector('.modal-backdrop')) window.UI.closeModal();
       window.UI.toast.success(data.offline ? `Sale ${data.sale.receiptNumber} saved on this till` : `Sale ${data.sale.receiptNumber} completed${onCredit ? ' (balance on credit)' : ''}`);
       if (change > 0 && !drawerDriven) window.UI.toast.success(`Give change: ${fm(change)}`);
+      retailIndex.invalidate(); // stock changed: reload the device copy
       resetCart();
       loadShift();
+      retailIndex.load();
       try {
         // Wholesale sales open the professional invoice (receipt is one tap away); retail keeps the auto-printing receipt.
         if (payload.channel === 'WHOLESALE' && !data.offline && data.sale && data.sale._id && window.InvoiceView) {

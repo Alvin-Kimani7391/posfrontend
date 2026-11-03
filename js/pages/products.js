@@ -17,6 +17,7 @@
  */
 (function () {
   const state = { page: 1, limit: 10, search: '', categoryId: '', status: '' };
+  const productIndex = window.FastSearch.create({ params: () => ({}), ttl: 60000 }); // all products, searched on the device
   const selected = new Map(); // product id -> name, kept across pages for "print selected stickers"
   let usedBarcodes = null;    // Set of every barcode already in the catalog (lazy, for auto-generation)
   let contentEl;
@@ -227,24 +228,41 @@
     window.AppShell.runUrlAction?.('add-product-btn'); // opened from the setup guide
     document.getElementById('manage-categories-btn').addEventListener('click', openCategoriesModal);
 
-    document.getElementById('search-input').addEventListener('input', window.UI.debounce((e) => {
+    // Instant when the product list is already on the device (js/core/fast-search.js); otherwise a short debounce + server.
+    const searchLater = window.UI.debounce(() => fetchAndRender({ local: true }), 250);
+    document.getElementById('search-input').addEventListener('input', (e) => {
       state.search = e.target.value.trim();
       state.page = 1;
-      fetchAndRender();
-    }));
+      if (productIndex.isReady()) fetchAndRender({ local: true }); else searchLater();
+    });
 
     document.getElementById('category-filter').addEventListener('change', (e) => {
       state.categoryId = e.target.value;
       state.page = 1;
-      fetchAndRender();
+      fetchAndRender({ local: true });
     });
   }
 
   /* ------------------------------------------------------------------ *
    * List + table
    * ------------------------------------------------------------------ */
-  async function fetchAndRender() {
+  async function fetchAndRender(opts) {
     const tbody = document.getElementById('products-tbody');
+    const local = !!(opts && opts.local);
+    if (!local) productIndex.invalidate(); // something changed (or first load): the device copy must reload
+
+    if (local) {
+      // Search / filter / page change answered from the in-memory list: no skeleton, no waiting.
+      const res = productIndex.query({ search: state.search, categoryId: state.categoryId, page: state.page, limit: state.limit });
+      if (res) {
+        state.page = res.page;
+        renderRows(res.items);
+        window.UI.renderPagination(document.getElementById('pagination'), res, (p) => { state.page = p; fetchAndRender({ local: true }); });
+        window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+        return;
+      }
+    }
+
     tbody.innerHTML = window.UI.skeletonRows(7, 4);
 
     try {
@@ -253,8 +271,9 @@
         page: state.page, limit: state.limit, search: state.search, categoryId: state.categoryId,
       });
       renderRows(data.items);
-      window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; fetchAndRender(); });
+      window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; fetchAndRender({ local: true }); });
       window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+      productIndex.load(); // warm the device copy so the next search is instant
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
     }

@@ -107,7 +107,7 @@
       $$('[data-spec]', b).forEach((x) => x.onclick = () => { const r = rows.find((y) => y._id === x.dataset.spec); HW.profileForm(r._id, r.name); });
       $$('[data-pg]', b).forEach((x) => x.onclick = () => { st.page += Number(x.dataset.pg); draw(); window.scrollTo({ top: 0 }); });
     };
-    let t; $('[data-s]', el).oninput = (e) => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; draw(); }, 280); };
+    let t; $('[data-s]', el).oninput = (e) => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; draw(); }, 120); };
     $('[data-c]', el).onchange = (e) => { st.cat = e.target.value; st.page = 1; draw(); };
     const xl = $('[data-xl]', el); if (xl) xl.onclick = () => window.ProductImport.open({ onDone: () => { HW.loadProducts && (HW.productIndex.dirty = true); draw(); } });
     const nw = $('[data-new]', el); if (nw) nw.onclick = () => productModal(null, () => { HW.loadProducts && (HW.productIndex.dirty = true); draw(); });
