@@ -4,10 +4,13 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.0.4-mobile-app';
+const VERSION = 'v5.1.0-fast';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
+  'Pages and content now open much faster: menu pages load instantly from the saved copy',
+  'Phone menu: Reports now sits between Products and Inventory; Employees removed from the bottom bar',
+  'Phone top bar is cleaner: branch picker and offline set-up button removed',
   'Hardware workspace now works offline: sell, scan and print receipts with no internet',
   'Offline sales are saved on this till and sync by themselves when the internet returns',
   'Update prompt and offline status now use the hardware Navy & Lime theme',
@@ -170,6 +173,20 @@ async function cacheFirst(event) {
   } catch (e) { return new Response('', { status: 504, statusText: 'Offline' }); }
 }
 
+/** Own pages, scripts and styles: open the saved copy INSTANTLY, refresh it quietly for the next visit. First visit / not saved yet: network. */
+async function fastLocal(event, isNavigation, shell) {
+  const request = event.request;
+  const cache = await caches.open(CACHE);
+  const cached = await matchCached(cache, request);
+  if (!cached) return networkFirst(event, isNavigation, shell);
+  const refresh = fetch(request).then((res) => {
+    if (res && res.ok && res.type === 'basic') { cleanResponse(res.clone()).then((clean) => cache.put(request, clean)).catch(() => {}); }
+    return res;
+  });
+  event.waitUntil(refresh.catch(() => {}));
+  return cached;
+}
+
 /** CDN files: serve the saved copy at once, refresh it in the background (opaque responses are fine to store). */
 async function staleWhileRevalidate(event) {
   const cache = await caches.open(CACHE);
@@ -207,9 +224,9 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/s/') || url.pathname === '/s' || url.pathname.startsWith('/q/') || url.pathname === '/q' || url.pathname === '/q.html') return; // guest QR menu: always straight from the network
   if (url.pathname.endsWith('/sw.js')) return;
 
-  if (req.mode === 'navigate') { event.respondWith(networkFirst(event, true, url.pathname.startsWith('/hardware') ? 'hardware/index.html' : '')); return; }
+  if (req.mode === 'navigate') { event.respondWith(fastLocal(event, true, url.pathname.startsWith('/hardware') ? 'hardware/index.html' : '')); return; }
   if (/\.(?:png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf)$/i.test(url.pathname)) { event.respondWith(cacheFirst(event)); return; }
-  event.respondWith(networkFirst(event, false));
+  event.respondWith(fastLocal(event, false));
 });
 
 // ---- Web Push: "Your rider is 100 m away" (customer) and "New delivery" (rider). Needs VAPID keys on the server.

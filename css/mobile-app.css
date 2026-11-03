@@ -24,6 +24,8 @@ html, body { max-width: 100%; }
   .topbar-title { font-size: 1.02rem; font-weight: 700; }
   .topbar-right { gap: 2px; flex: 0 0 auto; }
   #lang-switch-wrap, #country-flag, #drawer-chip-wrap { display: none !important; }
+  /* phones: no branch picker and no "Set up offline" button in the top bar */
+  #branch-switcher-wrap, #ofl-top-btn { display: none !important; }
   .topbar .btn-icon, .menu-btn { width: 40px; height: 40px; }
 
   /* ---- bottom nav: app tab bar ---- */
@@ -212,4 +214,24 @@ html, body { max-width: 100%; }
 @media (min-width: 560px) and (max-width: 720px) {
   table.table.mc tr { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .as tbody { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+}
+
+
+/* ==========================================================================
+   Loading placeholder (shown by the shell until the page draws its content)
+   ========================================================================== */
+.shell-skel { display: flex; flex-direction: column; gap: 14px; padding: 4px 0; }
+.shell-skel-title { height: 26px; width: 42%; border-radius: 8px; }
+.shell-skel-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.shell-skel-row .skeleton { height: 74px; border-radius: 14px; }
+.shell-skel-block { height: 120px; border-radius: 16px; }
+@media (max-width: 720px) { .shell-skel-row { grid-template-columns: repeat(2, 1fr); } .shell-skel-row .skeleton:nth-child(3) { display: none; } }
+
+/* ==========================================================================
+   Installed app feel (home-screen / standalone mode on phones)
+   ========================================================================== */
+html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+a, button, .bottom-nav-item, .sidebar-link { touch-action: manipulation; }
+@media (display-mode: standalone) {
+  html, body { overscroll-behavior-y: none; }
 }

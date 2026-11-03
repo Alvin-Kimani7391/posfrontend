@@ -181,22 +181,72 @@
     return text;
   }
 
+  /* ------------------------------------------------------------------ *
+   * Speed layer for reads
+   *  1. The same GET asked twice at the same moment is sent ONCE (the shell and the page both ask for branches, etc.).
+   *  2. Slow-changing lists (branches, categories...) are kept for this browser session: they come back instantly and
+   *     are refreshed quietly in the background, so the next page already has the newest copy.
+   *  3. Any change (POST / PUT / PATCH / DELETE) clears the saved copies, so you never see your own edit missing.
+   * Live data (sales, stock, reports, notifications...) is never served from the saved copy.
+   * ------------------------------------------------------------------ */
+  const inflight = new Map();
+  const SAVED_OK = /^\/(branches|categories|brands|units|settings\/integrations\/flags|shop\/promotions\/active)(\?|$)/;
+  const SAVED_MAX_AGE_MS = 10 * 60 * 1000;
+  const clone = (v) => { try { return window.structuredClone ? window.structuredClone(v) : JSON.parse(JSON.stringify(v)); } catch { return v; } };
+  const tokenTag = () => (window.Storage.getAccessToken() || '').slice(-12);
+
+  function savedKey(path, query) { return `pos.api.${tokenTag() ? '' : 'x'}${buildUrl(path, query)}`; }
+  function readSaved(key) {
+    try { const v = JSON.parse(sessionStorage.getItem(key) || 'null'); return v && Date.now() - v.t < SAVED_MAX_AGE_MS ? v.p : null; } catch { return null; }
+  }
+  function writeSaved(key, payload) { try { sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), p: payload })); } catch { /* storage full or blocked */ } }
+  function clearSaved() {
+    try {
+      const dead = [];
+      for (let i = 0; i < sessionStorage.length; i += 1) { const k = sessionStorage.key(i); if (k && k.startsWith('pos.api.')) dead.push(k); }
+      dead.forEach((k) => sessionStorage.removeItem(k));
+    } catch { /* ignore */ }
+  }
+
+  function smartGet(path, query, opts) {
+    if (opts && (opts.fresh || opts.background || opts.headers)) return request('GET', path, { query, ...withOpts(opts) });
+    const key = `${tokenTag()}|${buildUrl(path, query)}`;
+    const sKey = SAVED_OK.test(path) ? savedKey(path, query) : null;
+    if (sKey) {
+      const hit = readSaved(sKey);
+      if (hit) { // instant answer now, quiet refresh for next time
+        if (!inflight.has(key)) {
+          const bg = request('GET', path, { query, background: true }).then((r) => { writeSaved(sKey, r); return r; }).catch(() => {}).finally(() => inflight.delete(key));
+          inflight.set(key, bg);
+        }
+        return Promise.resolve(clone(hit));
+      }
+    }
+    if (inflight.has(key)) return inflight.get(key).then((r) => (r ? clone(r) : request('GET', path, { query, ...withOpts(opts) })));
+    const p = request('GET', path, { query, ...withOpts(opts) }).then((r) => { if (sKey) writeSaved(sKey, r); return r; }).finally(() => inflight.delete(key));
+    inflight.set(key, p);
+    return p.then(clone);
+  }
+
   const withOpts = (o = {}) => ({ headers: o.headers, background: o.background, timeoutMs: o.timeoutMs });
+
+  /** Clear the saved read copies as soon as a change is sent, and again when it succeeds. */
+  function clearSavedThen(promise) { clearSaved(); promise.then(clearSaved, () => {}); return promise; }
 
   window.Api = {
     ApiError,
     newIdempotencyKey,
     getText: requestText,
-    get: (path, query, opts) => request('GET', path, { query, ...withOpts(opts) }),
-    post: (path, body, opts) => request('POST', path, {
+    get: (path, query, opts) => smartGet(path, query, opts),
+    post: (path, body, opts) => clearSavedThen(request('POST', path, {
       body,
       ...withOpts(opts),
       headers: { ...(opts?.headers || {}), ...(opts?.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : {}) },
-    }),
-    put: (path, body, opts) => request('PUT', path, { body, ...withOpts(opts) }),
-    patch: (path, body, opts) => request('PATCH', path, { body, ...withOpts(opts) }),
-    delete: (path, opts) => request('DELETE', path, withOpts(opts)),
+    })),
+    put: (path, body, opts) => clearSavedThen(request('PUT', path, { body, ...withOpts(opts) })),
+    patch: (path, body, opts) => clearSavedThen(request('PATCH', path, { body, ...withOpts(opts) })),
+    delete: (path, opts) => clearSavedThen(request('DELETE', path, withOpts(opts))),
     /** multipart upload (screenshots). `formData` is a FormData instance. */
-    upload: (path, formData, method = 'POST') => request(method, path, { formData }),
+    upload: (path, formData, method = 'POST') => clearSavedThen(request(method, path, { formData })),
   };
 })(window);

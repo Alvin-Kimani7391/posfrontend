@@ -125,7 +125,7 @@
   ];
 
   // Items shown in the mobile bottom nav (kept short - 5 max is the mobile UX norm).
-  const BOTTOM_NAV_KEYS = ['dashboard', 'products', 'inventory', 'branches', 'employees'];
+  const BOTTOM_NAV_KEYS = ['dashboard', 'products', 'reports', 'inventory', 'branches'];
 
   function requireAuthOrRedirect() {
     if (!window.Storage.isAuthenticated()) {
@@ -198,6 +198,22 @@
     return '';
   }
 
+  const branchesKey = () => { const u = getUser(); return `pos.branches.${(u && (u._id || u.id)) || 'x'}`; };
+  function readSavedBranches() {
+    try { const v = JSON.parse(sessionStorage.getItem(branchesKey()) || 'null'); return Array.isArray(v) && v.length ? v : null; } catch { return null; }
+  }
+  function saveBranches(list) { try { sessionStorage.setItem(branchesKey(), JSON.stringify(list || [])); } catch { /* storage blocked */ } }
+  function refreshBranchesQuietly() {
+    window.Api.get('/branches', { page: 1, limit: 100, status: 'active' }, { background: true }).then(({ data }) => {
+      const next = data.items || [];
+      if (JSON.stringify(next) === JSON.stringify(branchesCache)) return;
+      branchesCache = next; saveBranches(next);
+      const wrap = document.getElementById('branch-switcher-wrap');
+      const id = getActiveBranchId();
+      if (wrap && id && next.length) renderBranchSwitcher(wrap, id);
+    }).catch(() => { /* offline: the saved copy stays */ });
+  }
+
   async function loadBranchSwitcher() {
     const wrap = document.getElementById('branch-switcher-wrap');
     if (!wrap) return;
@@ -212,8 +228,13 @@
 
     try {
       if (!branchesCache) {
-        const { data } = await window.Api.get('/branches', { page: 1, limit: 100, status: 'active' });
-        branchesCache = data.items;
+        const saved = readSavedBranches();
+        if (saved) { branchesCache = saved; refreshBranchesQuietly(); } // instant: draw from the saved copy, update in the background
+        else {
+          const { data } = await window.Api.get('/branches', { page: 1, limit: 100, status: 'active' });
+          branchesCache = data.items;
+          saveBranches(branchesCache);
+        }
       }
     } catch {
       // Likely a role without branches.view (e.g. CASHIER). That's fine -
@@ -626,7 +647,7 @@
   function bottomNavKeys() {
     if (!isHospitality()) return BOTTOM_NAV_KEYS;
     const user = getUser();
-    const want = ['dashboard', 'hx-manager', 'hx-cashier', 'hx-floor', 'hx-kitchen', 'hx-desk', 'hx-rooms', 'hx-bills', 'hx-stays', 'hx-housekeeping', 'hx-delivery', 'hx-guest', 'employees'];
+    const want = ['dashboard', 'hx-manager', 'hx-cashier', 'hx-floor', 'hx-kitchen', 'hx-desk', 'hx-rooms', 'hx-bills', 'hx-stays', 'hx-housekeeping', 'hx-delivery', 'hx-guest'];
     return want.filter((k) => { const it = NAV_ITEMS.find((n) => n.key === k); return it && itemAllowed(it, user) && (!it.permission || window.Permissions.can(user, it.permission)); }).slice(0, 5);
   }
 
@@ -637,7 +658,9 @@
       return tabs.filter((t) => hwCan(t[4])).map((t) => `<button class="bottom-nav-item ${t[0] === activePage ? 'active' : ''}" data-href="${t[3]}"><span class="icon">${window.Icons.get(t[2])}</span><span>${t[1]}</span></button>`).join('');
     }
     const keys = bottomNavKeys();
-    return keys.map((k) => NAV_ITEMS.find((n) => n.key === k)).filter(Boolean).map((item) => `
+    const navUser = getUser();
+    return keys.map((k) => NAV_ITEMS.find((n) => n.key === k)).filter(Boolean)
+      .filter((item) => item.key !== 'reports' || !item.permission || window.Permissions.can(navUser, item.permission)).map((item) => `
       <button class="bottom-nav-item ${item.key === activePage ? 'active' : ''}"
               data-href="${item.disabled ? '' : hrefFor(item)}"
               ${item.disabled ? 'style="opacity:.45"' : ''}>
@@ -936,6 +959,34 @@
    * browser tab title ("<page> · Six Star Pos"), and returns the #page-content
    * element for the page script to render into.
    */
+  /** Run non-urgent work after the page has drawn, so it never competes with the page's own data. */
+  function whenIdle(fn, ms = 1200) {
+    try { if (window.requestIdleCallback) { window.requestIdleCallback(fn, { timeout: ms }); return; } } catch { /* fall through */ }
+    setTimeout(fn, 250);
+  }
+
+  /** Light placeholder shown the instant the shell appears; each page replaces it with its own content. */
+  function shellSkeletonHtml() {
+    return '<div class="shell-skel" aria-hidden="true"><div class="skeleton shell-skel-title"></div>'
+      + '<div class="shell-skel-row"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>'
+      + '<div class="skeleton shell-skel-block"></div><div class="skeleton shell-skel-block"></div></div>';
+  }
+
+  /** Tap/hover on a menu link starts loading that page early, so the page opens almost instantly. */
+  function warmNavigation() {
+    const done = new Set();
+    const warm = (e) => {
+      const a = e.target && e.target.closest && e.target.closest('.sidebar-link, .bottom-nav-item');
+      if (!a) return;
+      const href = a.getAttribute('href') || a.dataset.href;
+      if (!href || href === '#' || done.has(href) || /^(https?:)?\/\//.test(href)) return;
+      done.add(href);
+      try { const l = document.createElement('link'); l.rel = 'prefetch'; l.href = href; l.as = 'document'; document.head.appendChild(l); } catch { /* ignore */ }
+    };
+    document.addEventListener('touchstart', warm, { passive: true });
+    document.addEventListener('mouseover', warm, { passive: true });
+  }
+
   function mount({ title = '' } = {}) {
     if (!requireAuthOrRedirect()) return null;
 
@@ -959,16 +1010,21 @@
     loadBusinessProfile();
     loadBranchSwitcher(); // async, fills in the dropdown once branches load - doesn't block the page. getActiveBranchId() itself does NOT depend on this.
     window.NotificationCenter?.mount(document.getElementById('notif-bell-wrap'), user);
-    loadTour();
-    loadAnnouncements();
-    loadBillingBanner();
     loadCountryFlag(user);
-    loadBusinessSetup(user);
-    if (window.Permissions.can(user, 'sales.view')) {
-      loadCashDrawer().then((drawer) => { if (drawer) mountDrawerChip(drawer); });
-    }
     const contentEl = document.getElementById('page-content');
+    if (contentEl && !contentEl.firstElementChild) contentEl.innerHTML = shellSkeletonHtml();
     mountSetupReturnBar(contentEl);
+    warmNavigation();
+    // Everything below is not needed to draw the page: it waits until the browser is idle.
+    whenIdle(() => {
+      loadTour();
+      loadAnnouncements();
+      loadBillingBanner();
+      loadBusinessSetup(user);
+      if (window.Permissions.can(user, 'sales.view')) {
+        loadCashDrawer().then((drawer) => { if (drawer) mountDrawerChip(drawer); });
+      }
+    });
     return contentEl;
   }
 

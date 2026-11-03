@@ -43,7 +43,7 @@
     faviconUrl: 'icons/favicon-32.png',
     dismissKey: 'pos.pwa.installDismissedAt',
     dismissDays: 14,
-    bannerDelayMs: 6000,
+    bannerDelayMs: 1500,
     updateCheckMs: 30 * 60 * 1000,
     // Anything matching this means the cashier is busy; do not pop up over it.
     busySelector: '.modal-backdrop, .scanner-overlay, .pwa-sheet-backdrop',
