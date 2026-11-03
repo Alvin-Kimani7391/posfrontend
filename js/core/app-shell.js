@@ -1,3 +1,14 @@
+/* Mobile app layer: loaded once from here so no HTML page needs editing. */
+(function () {
+  try {
+    if (!document.querySelector('link[href$="css/mobile-app.css"]')) {
+      var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'css/mobile-app.css'; document.head.appendChild(l);
+    }
+    if (!document.querySelector('script[src$="js/core/mobile-tables.js"]')) {
+      var sc = document.createElement('script'); sc.src = 'js/core/mobile-tables.js'; sc.defer = true; document.head.appendChild(sc);
+    }
+  } catch (e) { /* cosmetic only */ }
+})();
 /**
  * app-shell.js (merged: original shell + pharmacy till integration)
  * Every authenticated page (dashboard.html, branches.html, employees.html, ...)
