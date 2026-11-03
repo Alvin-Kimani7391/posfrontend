@@ -232,3 +232,15 @@ html.nav-leaving .page-content { opacity: .55; transition: opacity .15s; pointer
   .topbar { padding-top: env(safe-area-inset-top, 0px); }
 }
 @media (prefers-reduced-motion: reduce) { .page-content, .signout-spin { animation: none; } #nav-progress.run { transition: none; } }
+
+/* Notification dropdown on phones: a clean sheet under the top bar, never floating mid-screen */
+@media (max-width: 720px) {
+  .dropdown-menu.notif-dropdown {
+    position: fixed !important; top: calc(var(--topbar-height, 56px) + env(safe-area-inset-top, 0px) + 6px) !important;
+    left: 10px !important; right: 10px !important; bottom: auto !important; width: auto !important; max-width: none !important;
+    margin: 0 !important; transform: none !important; border-radius: 16px; overflow: hidden; z-index: 1300;
+    box-shadow: 0 16px 40px rgba(15,23,42,.22); animation: pg-in .16s ease-out;
+  }
+  .notif-dropdown .notif-dropdown-list { max-height: calc(100dvh - var(--topbar-height, 56px) - var(--bottom-nav-height, 60px) - 170px - env(safe-area-inset-top, 0px)); -webkit-overflow-scrolling: touch; }
+  .notif-dropdown .notif-item { padding: 12px 14px; }
+}

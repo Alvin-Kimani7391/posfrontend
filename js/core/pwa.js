@@ -86,9 +86,9 @@
   }
 
   function dismissedRecently() {
-    var at = Number(ls.get(CFG.dismissKey) || 0);
-    return at && Date.now() - at < CFG.dismissDays * 24 * 60 * 60 * 1000;
+    try { return window.sessionStorage.getItem(CFG.dismissKey) === '1'; } catch (e) { return false; }
   }
+  function rememberInstalled() { ls.set('pos.pwa.installed', '1'); }
 
   function toast(kind, message) {
     try {
@@ -131,7 +131,7 @@
 
   function canInstall() {
     if (isStandalone() || installedNow) return false;
-    return !!deferredPrompt || isIos() || isPhone();
+    return !!deferredPrompt || ((isIos() || isPhone()) && ls.get('pos.pwa.installed') !== '1');
   }
 
   function emitChange() {
@@ -263,7 +263,7 @@
   }
 
   function dismissBanner(remember) {
-    if (remember) ls.set(CFG.dismissKey, String(Date.now()));
+    if (remember) { try { window.sessionStorage.setItem(CFG.dismissKey, '1'); } catch (e) { /* ignore */ } }
     if (bannerEl) { bannerEl.remove(); bannerEl = null; }
   }
 
@@ -452,6 +452,7 @@
 
   window.addEventListener('appinstalled', function () {
     installedNow = true;
+    rememberInstalled();
     deferredPrompt = null;
     dismissBanner(false);
     if (sheetEl) { sheetEl.remove(); sheetEl = null; }
@@ -491,7 +492,7 @@
 
   // Head tags and the service worker do not need the DOM to be ready.
   ensureHeadTags();
-  if (isStandalone()) document.documentElement.classList.add('is-pwa');
+  if (isStandalone()) { document.documentElement.classList.add('is-pwa'); rememberInstalled(); }
   registerServiceWorker();
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onReady);
