@@ -24,14 +24,17 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
+          "value": "public, max-age=300, stale-while-revalidate=86400"
         }
       ]
     },
     {
       "source": "/icons/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=2592000, immutable" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=2592000, immutable"
+        }
       ]
     },
     {
@@ -39,7 +42,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
+          "value": "public, max-age=300, stale-while-revalidate=86400"
         }
       ]
     }

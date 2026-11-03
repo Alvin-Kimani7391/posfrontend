@@ -190,7 +190,7 @@
    * Live data (sales, stock, reports, notifications...) is never served from the saved copy.
    * ------------------------------------------------------------------ */
   const inflight = new Map();
-  const SAVED_OK = /^\/(branches|categories|brands|units|settings\/integrations\/flags|shop\/promotions\/active)(\?|$)/;
+  const SAVED_OK = /^\/(branches|categories|brands|units|suppliers|settings\/integrations\/flags|shop\/promotions\/active)(\?|$)/;
   const SAVED_MAX_AGE_MS = 10 * 60 * 1000;
   const clone = (v) => { try { return window.structuredClone ? window.structuredClone(v) : JSON.parse(JSON.stringify(v)); } catch { return v; } };
   const tokenTag = () => (window.Storage.getAccessToken() || '').slice(-12);
@@ -233,8 +233,32 @@
   /** Clear the saved read copies as soon as a change is sent, and again when it succeeds. */
   function clearSavedThen(promise) { clearSaved(); promise.then(clearSaved, () => {}); return promise; }
 
+  /** Sign-out that never waits: the server call is sent in the background (keepalive survives the page change). */
+  function logoutFast() {
+    try {
+      const token = window.Storage.getAccessToken();
+      if (!token) return;
+      fetch(`${window.APP_CONFIG.API_BASE_URL}/auth/logout`, {
+        method: 'POST', keepalive: true,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...langHeader() },
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  }
+
+  /** The backend sleeps when idle (hosting free tier), which makes the first screens slow. Wake it as soon as any page opens and keep it awake while the app is in use. */
+  function wakeBackend() {
+    try {
+      const ping = () => { if (!document.hidden && navigator.onLine !== false) fetch(`${window.APP_CONFIG.API_BASE_URL}/health`, { mode: 'no-cors', cache: 'no-store', keepalive: true }).catch(() => {}); };
+      ping();
+      setInterval(ping, 4 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) ping(); });
+    } catch { /* ignore */ }
+  }
+  wakeBackend();
+
   window.Api = {
     ApiError,
+    logoutFast,
     newIdempotencyKey,
     getText: requestText,
     get: (path, query, opts) => smartGet(path, query, opts),

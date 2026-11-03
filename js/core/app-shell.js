@@ -733,14 +733,52 @@
       danger: true,
     });
     if (!ok) return;
+    // Instant: show the sign-out screen, tell the server in the background, clear this device and go.
     try {
-      await window.Api.post('/auth/logout');
-    } catch {
-      // Even if the network call fails, still clear local session.
-    }
-    try { if (window.Offline && window.Offline.context.get()?.device?.mode === 'SHARED') await window.Offline.auth.clearUserData(); } catch { /* ignore */ }
+      const veil = document.createElement('div');
+      veil.className = 'signout-veil';
+      veil.innerHTML = '<div class="signout-card"><span class="signout-spin"></span><b>Signing out…</b></div>';
+      document.body.appendChild(veil);
+    } catch { /* cosmetic */ }
+    window.Api.logoutFast();
+    try {
+      if (window.Offline && window.Offline.context.get()?.device?.mode === 'SHARED') {
+        await Promise.race([window.Offline.auth.clearUserData().catch(() => {}), new Promise((r) => setTimeout(r, 350))]);
+      }
+    } catch { /* ignore */ }
     window.Storage.clearSession();
-    window.location.href = 'login.html';
+    window.location.replace('login.html');
+  }
+
+  /** Tapping a menu item reacts at once: the item lights up, a thin progress bar runs and the page dims slightly until the next one appears. */
+  function installNavFeedback() {
+    if (window.__navFx || !document.body) return;
+    window.__navFx = true;
+    const bar = document.createElement('div');
+    bar.id = 'nav-progress';
+    document.body.appendChild(bar);
+    const reset = () => { document.documentElement.classList.remove('nav-leaving'); bar.classList.remove('run'); };
+    const go = () => { document.documentElement.classList.add('nav-leaving'); bar.classList.add('run'); setTimeout(reset, 8000); };
+    document.addEventListener('click', (e) => {
+      if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || !e.target.closest) return;
+      const b = e.target.closest('.bottom-nav-item[data-href]');
+      if (b) {
+        document.querySelectorAll('.bottom-nav-item.active').forEach((x) => x.classList.remove('active'));
+        b.classList.add('active');
+        go();
+        return;
+      }
+      const a = e.target.closest('a[href]');
+      if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+      const h = a.getAttribute('href');
+      if (!h || h[0] === '#' || /^(javascript|mailto|tel|sms):/i.test(h)) return;
+      try {
+        const u = new URL(a.href, window.location.href);
+        if (u.origin !== window.location.origin || (u.pathname === window.location.pathname && u.search === window.location.search)) return;
+      } catch { return; }
+      go();
+    });
+    window.addEventListener('pageshow', reset);
   }
 
   function bindShellEvents() {
@@ -1015,6 +1053,7 @@
     if (contentEl && !contentEl.firstElementChild) contentEl.innerHTML = shellSkeletonHtml();
     mountSetupReturnBar(contentEl);
     warmNavigation();
+    installNavFeedback();
     // Everything below is not needed to draw the page: it waits until the browser is idle.
     whenIdle(() => {
       loadTour();

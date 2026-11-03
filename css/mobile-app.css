@@ -158,40 +158,10 @@ html, body { max-width: 100%; }
   table.table.mc tfoot tr { background: var(--color-primary-50); border-color: transparent; }
   table.table.mc td .mini-bar { display: block; margin-bottom: 4px; }
 
-  /* =====================================================================
-     ALL SALES (reports) - proper sale cards
-     ===================================================================== */
-  .as { gap: 10px; }
-  .as-wrap { border: 0 !important; background: transparent !important; overflow: visible !important; }
-  .as table, .as tbody { display: block; width: 100%; }
-  .as thead { display: none; }
-  .as tbody { display: flex; flex-direction: column; gap: 10px; }
-  .as tbody tr {
-    display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: start;
-    background: #fff; border: 1px solid var(--color-border) !important; border-left: 4px solid var(--color-success) !important;
-    border-radius: 14px; padding: 12px 14px !important; box-shadow: 0 1px 2px rgba(16,24,40,.05);
-  }
-  .as tbody tr:active { background: var(--color-primary-50); }
-  .as tbody tr.is-cancelled { border-left-color: var(--color-danger) !important; }
-  .as td { display: block !important; padding: 0 !important; border: 0 !important; min-height: 0 !important; width: auto !important; font-size: 13px; text-align: left; position: static !important; overflow-wrap: anywhere; }
-  .as td::before { display: none !important; }
-  .as td small { display: block; font-size: 11.5px; color: var(--color-text-secondary); margin-top: 1px; }
-  .as td[data-l="Receipt"] { grid-column: 1; grid-row: 1; }
-  .as td[data-l="Receipt"] .rc { font-size: 14.5px; }
-  .as td[data-l="Total"] { grid-column: 2; grid-row: 1; text-align: right !important; font-size: 15px; white-space: nowrap; }
-  .as td[data-l="Total"] b { font-size: 16px; }
-  .as td[data-l="Customer"] { grid-column: 1 / -1; grid-row: 2; font-weight: 600; margin-top: 6px; }
-  .as td[data-l="Items"] { grid-column: 1 / -1; grid-row: 3; color: var(--color-text-secondary); }
-  .as td[data-l="Branch"] { grid-column: 1 / -1; grid-row: 4; font-size: 12px; color: var(--color-text-secondary); }
-  .as td[data-l="Profit"] { grid-column: 1; grid-row: 5; font-size: 12px; color: var(--color-success); padding-top: 8px !important; border-top: 1px dashed var(--color-border) !important; }
-  .as td[data-l="Profit"]::before { display: inline !important; content: 'Profit '; color: var(--color-text-muted); }
-  .as td[data-l="Payment"] { grid-column: 1; grid-row: 6; padding-top: 8px !important; border-top: 1px dashed var(--color-border) !important; }
-  .as td[data-l="Status"] { grid-column: 2; grid-row: 6; text-align: right !important; padding-top: 8px !important; border-top: 1px dashed var(--color-border) !important; }
+  /* ALL SALES cards: styled and expandable inside js/pages/reports-allsales.js */
   .as-bar .input { flex: 1 1 100%; }
   .as-filters { grid-template-columns: 1fr 1fr; }
   .as-pager { justify-content: center; }
-  .as-det .kv { grid-template-columns: 100px 1fr; }
-  .as-det .table-wrap { padding: 0; }
 
   /* ---- generic helper blocks ---- */
   .empty-state { padding: 36px 16px; }
@@ -213,7 +183,6 @@ html, body { max-width: 100%; }
 /* ---- big phones / small tablets 481-720: 3 KPI-friendly cards, 2-col sale list ---- */
 @media (min-width: 560px) and (max-width: 720px) {
   table.table.mc tr { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .as tbody { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 }
 
 
@@ -235,3 +204,31 @@ a, button, .bottom-nav-item, .sidebar-link { touch-action: manipulation; }
 @media (display-mode: standalone) {
   html, body { overscroll-behavior-y: none; }
 }
+
+/* ==========================================================================
+   Turbo / real-app feel
+   ========================================================================== */
+#nav-progress { position: fixed; top: 0; left: 0; height: 3px; width: 0; z-index: 3000; background: var(--color-primary, #0f766e); opacity: 0; pointer-events: none; }
+#nav-progress.run { opacity: 1; width: 85%; transition: width 6s cubic-bezier(.1,.8,.2,1); }
+html.nav-leaving .page-content { opacity: .55; transition: opacity .15s; pointer-events: none; }
+.page-content { animation: pg-in .16s ease-out; }
+@keyframes pg-in { from { opacity: .0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.signout-veil { position: fixed; inset: 0; z-index: 5000; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.92); backdrop-filter: blur(3px); }
+.signout-card { display: flex; align-items: center; gap: 12px; padding: 14px 22px; border-radius: 14px; background: #fff; box-shadow: 0 10px 30px rgba(15,23,42,.16); font-size: 15px; }
+.signout-spin { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--color-border, #e2e8f0); border-top-color: var(--color-primary, #0f766e); animation: so-spin .7s linear infinite; }
+@keyframes so-spin { to { transform: rotate(360deg); } }
+@media (max-width: 720px) {
+  html, body { overscroll-behavior-y: contain; scroll-behavior: auto; }
+  body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  input, textarea, select, [contenteditable], .selectable, td, .receipt, pre { -webkit-user-select: text; user-select: text; }
+  input, select, textarea { font-size: 16px !important; } /* no zoom-in when a field is tapped */
+  .btn, .bottom-nav-item, .sidebar-link, .card[data-id], tr[data-id] { transition: transform .1s ease, background-color .15s; }
+  .btn:active, .bottom-nav-item:active { transform: scale(.95); }
+  .bottom-nav { padding-bottom: env(safe-area-inset-bottom, 0px); box-shadow: 0 -4px 18px rgba(15,23,42,.07); }
+  .page-content { padding-bottom: calc(var(--bottom-nav-height, 60px) + 24px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (display-mode: standalone) {
+  body { padding-top: 0; }
+  .topbar { padding-top: env(safe-area-inset-top, 0px); }
+}
+@media (prefers-reduced-motion: reduce) { .page-content, .signout-spin { animation: none; } #nav-progress.run { transition: none; } }

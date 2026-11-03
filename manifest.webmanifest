@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Kenya POS",
-  "short_name": "Kenya POS",
+  "name": "Six Star POS",
+  "short_name": "Six Star POS",
   "description": "Point of sale for Kenyan shops: sales, stock, customers and reports.",
   "lang": "en-KE",
   "dir": "ltr",
@@ -9,7 +9,7 @@
   "scope": "./",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
-  "orientation": "any",
+  "orientation": "portrait-primary",
   "background_color": "#ffffff",
   "theme_color": "#0f766e",
   "categories": ["business", "finance", "productivity"],

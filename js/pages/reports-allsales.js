@@ -51,12 +51,33 @@
 .as-det .ln{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--color-border);font-size:var(--text-sm)}
 .as-det .tot{display:flex;justify-content:space-between;font-weight:700;font-size:1.05rem;padding-top:8px}
 .as-det .warn{background:var(--color-warning-bg);border-radius:8px;padding:8px 10px;font-size:var(--text-sm);margin-bottom:8px}
+.as td.as-more{display:none}
 @media (max-width:720px){
-  .as table,.as thead,.as tbody,.as tr,.as td{display:block;width:100%}.as thead{display:none}
-  .as tbody tr{border-bottom:8px solid var(--color-bg);padding:8px 4px}
-  .as td{border:0;padding:4px 10px 4px 104px;position:relative;text-align:left;min-height:24px}
-  .as td::before{content:attr(data-l);position:absolute;left:10px;top:6px;width:88px;color:var(--color-text-secondary);font-size:var(--text-xs)}
-  .as td.num{text-align:left}.as-det .kv{grid-template-columns:100px 1fr}
+  .as-wrap{border:0;background:transparent;overflow:visible}
+  .as table,.as tbody{display:block;width:100%}.as thead{display:none}
+  .as tbody{display:flex;flex-direction:column;gap:10px}
+  .as tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;align-items:start;background:var(--color-surface,#fff);border:1px solid var(--color-border);border-left:4px solid var(--color-success);border-radius:14px;padding:12px 14px 6px;box-shadow:0 1px 2px rgba(16,24,40,.06);-webkit-tap-highlight-color:transparent;transition:box-shadow .2s,transform .12s}
+  .as tbody tr:active{transform:scale(.985)}
+  .as tbody tr.is-cancelled{border-left-color:var(--color-danger)}
+  .as td{display:block;border:0;padding:0;min-height:0;width:auto;position:static;text-align:left;font-size:13px;overflow-wrap:anywhere}
+  .as td::before{display:none}
+  .as td.num{text-align:right}
+  .as td[data-l="Receipt"]{grid-column:1;order:1}.as td[data-l="Receipt"] .rc{font-size:14.5px}
+  .as td[data-l="Total"]{grid-column:2;order:2;text-align:right;white-space:nowrap}.as td[data-l="Total"] b{font-size:16px}
+  .as td[data-l="Customer"]{grid-column:1;order:3;font-weight:600;margin-top:4px}
+  .as td[data-l="Payment"]{grid-column:2;order:4;text-align:right;margin-top:4px}.as td[data-l="Payment"] small{display:none}
+  .as td[data-l="Items"],.as td[data-l="Branch"],.as td[data-l="Profit"],.as td[data-l="Status"],.as td.as-more{display:none;grid-column:1/-1}
+  .as tr::after{content:"Details ▾";grid-column:1/-1;order:99;text-align:center;font-size:11.5px;font-weight:600;color:var(--color-text-muted,#64748b);padding:6px 0 4px}
+  .as tr.open{box-shadow:0 8px 22px rgba(16,24,40,.12);border-color:var(--color-primary,#0f766e);border-left-width:4px}
+  .as tr.open::after{content:"Hide ▴"}
+  .as tr.open td[data-l="Items"]{display:block;order:5;margin-top:8px;padding-top:8px;border-top:1px dashed var(--color-border);animation:asin .18s ease-out}
+  .as tr.open td[data-l="Branch"]{display:block;order:6;font-size:12px;color:var(--color-text-secondary)}
+  .as tr.open td[data-l="Profit"]{display:block;order:7;font-size:12.5px;color:var(--color-success)}.as tr.open td[data-l="Profit"]::before{display:inline;content:"Profit ";color:var(--color-text-muted)}
+  .as tr.open td[data-l="Status"]{display:block;order:8;margin-top:2px}
+  .as tr.open td[data-l="Payment"] small{display:block}
+  .as tr.open td.as-more{display:block;order:9;margin-top:8px}
+  @keyframes asin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .as-det .kv{grid-template-columns:100px 1fr}
 }`;
     document.head.appendChild(s);
   }
@@ -144,7 +165,8 @@
         <td class="num" data-l="Total"><b>${fm(s.total)}</b>${s.discount ? `<small>Disc ${fm(s.discount)}</small>` : ''}${s.refunded ? `<small style="color:var(--color-danger)">Refunded ${fm(s.refunded)}</small>` : ''}</td>
         ${canProfit ? `<td class="num" data-l="Profit">${s.profit !== undefined ? fm(s.profit) : '-'}</td>` : ''}
         <td data-l="Payment"><span class="badge ${PAY_BADGE[s.paymentStatus] || 'badge-neutral'}">${esc(nice(s.paymentStatus))}</span><small>${esc(s.methods.map(method).join(', '))}</small>${s.balance > 0 ? `<small style="color:var(--color-warning)">Owes ${fm(s.balance)}</small>` : ''}</td>
-        <td data-l="Status">${cancelled ? '<span class="badge badge-danger">Cancelled</span>' : '<span class="badge badge-success">Completed</span>'}${s.isOffline ? '<small>Offline sale</small>' : ''}${s.flagged ? '<small style="color:var(--color-warning)">Flagged</small>' : ''}${cancelled && s.cancelReason ? `<small>${esc(s.cancelReason)}</small>` : ''}</td></tr>`;
+        <td data-l="Status">${cancelled ? '<span class="badge badge-danger">Cancelled</span>' : '<span class="badge badge-success">Completed</span>'}${s.isOffline ? '<small>Offline sale</small>' : ''}${s.flagged ? '<small style="color:var(--color-warning)">Flagged</small>' : ''}${cancelled && s.cancelReason ? `<small>${esc(s.cancelReason)}</small>` : ''}</td>
+        <td class="as-more"><button type="button" class="btn btn-primary" data-det style="width:100%">View full details</button></td></tr>`;
     }
     function table(d) {
       const rows = d.items || [];
@@ -152,7 +174,11 @@
       const pages = d.pages || 1;
       $('#as-res').innerHTML = `<div class="as-wrap"><table><thead><tr><th>Receipt</th><th>Branch / cashier</th><th>Customer</th><th>Items</th><th class="num">Total</th>${canProfit ? '<th class="num">Profit</th>' : ''}<th>Payment</th><th>Status</th></tr></thead><tbody>${rows.map(row).join('')}</tbody></table></div>
         <div class="as-pager"><span class="text-sm text-muted">${n0(d.total)} sale${d.total === 1 ? '' : 's'} · page ${d.page} of ${pages}</span><span class="as-bar"><select class="select" id="as-pl" aria-label="Rows per page">${[25, 50, 100, 200].map((n) => `<option value="${n}" ${n === S.limit ? 'selected' : ''}>${n} per page</option>`).join('')}</select><button class="btn btn-secondary" id="as-pv" ${d.page <= 1 ? 'disabled' : ''}>Previous</button><button class="btn btn-secondary" id="as-nx" ${d.page >= pages ? 'disabled' : ''}>Next</button></span></div>`;
-      $('#as-res').querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () => openDetail(tr.dataset.id)));
+      const phone = () => window.matchMedia('(max-width:720px)').matches;
+      $('#as-res').querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', (e) => {
+        if (e.target.closest('[data-det]') || !phone()) return openDetail(tr.dataset.id);
+        tr.classList.toggle('open');
+      }));
       $('#as-pv').onclick = () => { S.page = Math.max(1, S.page - 1); run(); }; $('#as-nx').onclick = () => { S.page += 1; run(); };
       $('#as-pl').onchange = (e) => { S.limit = Number(e.target.value); S.page = 1; run(); };
     }

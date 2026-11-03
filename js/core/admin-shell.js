@@ -98,9 +98,9 @@ function loadSmsBadge() {
   async function logout() {
     const ok = await window.UI.confirmDialog({ title: 'Log out?', message: 'You will need to sign in again.', confirmText: 'Log out', danger: true });
     if (!ok) return;
-    try { await window.Api.post('/auth/logout'); } catch { /* clear locally anyway */ }
+    window.Api.logoutFast(); // background, never waits
     window.Storage.clearSession();
-    window.location.href = 'admin-login.html';
+    window.location.replace('admin-login.html');
   }
 
   function mount({ title = '' } = {}) {

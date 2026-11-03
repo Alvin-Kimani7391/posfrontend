@@ -55,6 +55,11 @@
 
     clearSession() {
       Object.values(KEYS).forEach((k) => localStorage.removeItem(k));
+      try { // never leave the last person's saved lists for the next person
+        const dead = [];
+        for (let i = 0; i < sessionStorage.length; i += 1) { const k = sessionStorage.key(i); if (k && (k.startsWith('pos.api.') || k.startsWith('pos.branches.'))) dead.push(k); }
+        dead.forEach((k) => sessionStorage.removeItem(k));
+      } catch { /* ignore */ }
     },
 
     isAuthenticated() {

@@ -4,10 +4,13 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.1.0-fast';
+const VERSION = 'v5.2.0-turbo';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
+  'Much faster: pages open instantly and stop re-downloading files on every tap',
+  'Log out is now instant',
+  'Phone app feel: install prompt, smooth taps, and expandable sale cards in Reports > All sales',
   'Pages and content now open much faster: menu pages load instantly from the saved copy',
   'Phone menu: Reports now sits between Products and Inventory; Employees removed from the bottom bar',
   'Phone top bar is cleaner: branch picker and offline set-up button removed',
@@ -75,6 +78,17 @@ async function cleanResponse(res) {
   if (!res.redirected) return res;
   const body = await res.blob();
   return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+}
+
+/** Re-check a saved file with the network at most once every few minutes (a new release re-saves everything anyway). Before, EVERY tap re-downloaded ~45 files and slowed the page's own data. */
+const lastRefresh = new Map();
+const REFRESH_EVERY_MS = 5 * 60 * 1000;
+function shouldRefresh(url) {
+  const k = url.split('?')[0];
+  const t = lastRefresh.get(k) || 0;
+  if (Date.now() - t < REFRESH_EVERY_MS) return false;
+  lastRefresh.set(k, Date.now());
+  return true;
 }
 
 function withTimeout(promise, ms) {
@@ -179,6 +193,7 @@ async function fastLocal(event, isNavigation, shell) {
   const cache = await caches.open(CACHE);
   const cached = await matchCached(cache, request);
   if (!cached) return networkFirst(event, isNavigation, shell);
+  if (!shouldRefresh(request.url)) return cached;
   const refresh = fetch(request).then((res) => {
     if (res && res.ok && res.type === 'basic') { cleanResponse(res.clone()).then((clean) => cache.put(request, clean)).catch(() => {}); }
     return res;
@@ -191,6 +206,7 @@ async function fastLocal(event, isNavigation, shell) {
 async function staleWhileRevalidate(event) {
   const cache = await caches.open(CACHE);
   const cached = await cache.match(event.request);
+  if (cached && !shouldRefresh(event.request.url)) return cached;
   const refresh = fetch(event.request).then((res) => {
     if (res && (res.ok || res.type === 'opaque')) cache.put(event.request, res.clone()).catch(() => {});
     return res;

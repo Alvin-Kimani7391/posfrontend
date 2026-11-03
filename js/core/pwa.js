@@ -34,7 +34,7 @@
   'use strict';
 
   var CFG = {
-    appName: 'Kenya POS',
+    appName: 'Six Star POS',
     swUrl: 'sw.js',
     manifestUrl: 'manifest.webmanifest',
     themeColor: '#0f766e',
@@ -42,8 +42,8 @@
     appleIconUrl: 'icons/apple-touch-icon.png',
     faviconUrl: 'icons/favicon-32.png',
     dismissKey: 'pos.pwa.installDismissedAt',
-    dismissDays: 14,
-    bannerDelayMs: 1500,
+    dismissDays: 2,
+    bannerDelayMs: 900,
     updateCheckMs: 30 * 60 * 1000,
     // Anything matching this means the cashier is busy; do not pop up over it.
     busySelector: '.modal-backdrop, .scanner-overlay, .pwa-sheet-backdrop',
@@ -125,9 +125,13 @@
   var wasOffline = false;
   var listeners = [];
 
+  function isPhone() {
+    try { return /android|iphone|ipod|mobile/i.test(window.navigator.userAgent || '') || (window.matchMedia('(pointer:coarse)').matches && window.innerWidth < 820); } catch (e) { return false; }
+  }
+
   function canInstall() {
     if (isStandalone() || installedNow) return false;
-    return !!deferredPrompt || isIos();
+    return !!deferredPrompt || isIos() || isPhone();
   }
 
   function emitChange() {
@@ -237,7 +241,7 @@
       scheduleBanner(5000);
       return;
     }
-    var ios = isIos() && !deferredPrompt;
+    var ios = (isIos() || !deferredPrompt) && !deferredPrompt;
     bannerEl = document.createElement('section');
     bannerEl.className = 'pwa-float pwa-install';
     bannerEl.setAttribute('role', 'region');
@@ -245,7 +249,7 @@
     bannerEl.innerHTML =
       '<img class="pwa-float-icon" src="' + CFG.iconUrl + '" alt="" width="36" height="36">' +
       '<div class="pwa-copy"><strong>Install ' + CFG.appName + '</strong>' +
-      '<span>' + (ios ? 'Add it to your home screen.' : 'Open it like an app, full screen.') + '</span></div>' +
+      '<span>' + (ios ? 'Add it to your home screen. Works like a real app.' : 'Open it like a real app, full screen and fast.') + '</span></div>' +
       '<button type="button" class="btn btn-primary btn-sm" data-pwa-act="install">' + (ios ? 'How' : 'Install') + '</button>' +
       '<button type="button" class="pwa-close" data-pwa-act="dismiss" aria-label="Not now" title="Not now">' + CLOSE_ICON + '</button>';
     bannerEl.addEventListener('click', function (e) {
@@ -288,6 +292,23 @@
     document.body.appendChild(sheetEl);
   }
 
+  function showManualGuide() {
+    if (sheetEl || !document.body) return;
+    sheetEl = document.createElement('div');
+    sheetEl.className = 'pwa-sheet-backdrop';
+    sheetEl.innerHTML =
+      '<div class="pwa-sheet" role="dialog" aria-modal="true" aria-label="Install ' + CFG.appName + '">' +
+      '<h3>Install ' + CFG.appName + ' on your phone</h3>' +
+      '<p>Open it like a real app, full screen.</p>' +
+      '<ol><li>Tap the <strong>menu</strong> button of your browser (the three dots).</li>' +
+      '<li>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>' +
+      '<li>Tap <strong>Install</strong>. Open it from your home screen.</li></ol>' +
+      '<button type="button" class="btn btn-primary" data-pwa-act="close">Got it</button></div>';
+    function close() { if (sheetEl) { sheetEl.remove(); sheetEl = null; } dismissBanner(true); }
+    sheetEl.addEventListener('click', function (e) { if (e.target === sheetEl || e.target.closest('[data-pwa-act="close"]')) close(); });
+    document.body.appendChild(sheetEl);
+  }
+
   /** Runs the real install flow. Safe to call from any button. */
   function install() {
     if (isStandalone() || installedNow) return Promise.resolve('installed');
@@ -309,8 +330,8 @@
       return Promise.resolve('ios-guide');
     }
 
-    toast('info', 'To install, open your browser menu and choose Install app or Add to Home Screen.');
-    return Promise.resolve('unsupported');
+    showManualGuide();
+    return Promise.resolve('ios-guide');
   }
 
   /* ------------------------------------------------------------------ *
@@ -465,6 +486,7 @@
     watchTriggers();
     updateConnectionUi();
     if (isIos()) scheduleBanner(CFG.bannerDelayMs * 2);
+    else if (isPhone()) setTimeout(function () { if (!bannerEl) scheduleBanner(0); }, 3500); // no prompt event arrived: show the how-to card
   }
 
   // Head tags and the service worker do not need the DOM to be ready.
