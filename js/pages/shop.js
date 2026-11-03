@@ -69,7 +69,7 @@
     let csv = '', lastOpts = {};
     body.innerHTML = card(`<h3 style="margin:0 0 var(--space-2)">Import products from a spreadsheet</h3>
       <p class="text-sm text-secondary">Save your Excel sheet as CSV. We always check first (nothing is saved) and show what would happen. Existing SKUs / barcodes are skipped, or updated in "Update existing" mode.</p>
-      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-3)"><button class="btn btn-secondary" id="im-tpl">Download template</button><button class="btn btn-secondary" id="im-exp">Export current products</button></div>
+      <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-3)"><button class="btn btn-primary" id="im-xl">Import from Excel (.xlsx)</button><button class="btn btn-secondary" id="im-tpl">Download CSV template</button><button class="btn btn-secondary" id="im-exp">Export current products</button></div>
       <div class="field"><label>CSV file</label><input type="file" id="im-file" accept=".csv,text/csv,text/plain" class="input" /></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--space-3)">
         <div class="field"><label>Mode</label><select class="select" id="im-mode"><option value="CREATE_ONLY">Add new only</option><option value="UPSERT">Add new + update existing</option></select></div>
@@ -78,6 +78,7 @@
       <div class="text-xs text-muted" style="margin-bottom:var(--space-3)">Opening stock goes onto NEW products in the branch selected at the top.</div>
       <button class="btn btn-primary" id="im-check" disabled>Check file</button> <button class="btn btn-success hidden" id="im-go">Import now</button>`) + '<div id="im-out"></div>';
     const $ = (s) => body.querySelector(s);
+    $('#im-xl').addEventListener('click', () => window.ProductImport.open());
     $('#im-tpl').addEventListener('click', () => saveCsv('/shop/import/template', 'products-template.csv').catch(err));
     $('#im-exp').addEventListener('click', () => saveCsv('/shop/export', 'products.csv', { branchId: branch() }).catch(err));
     $('#im-file').addEventListener('change', (e) => {

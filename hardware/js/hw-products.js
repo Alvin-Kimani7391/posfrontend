@@ -84,7 +84,7 @@
     const canNew = HW.can('products.create'), canEdit = HW.can('products.update'), canSpec = HW.can('hardware.profile');
     const st = { q: '', cat: '', page: 1, limit: 40 }; let profs = {}, loaded = false, seq = 0;
     const cats = await HW.opt.categories().catch(() => []);
-    el.innerHTML = `<div class="hw-bar"><input data-s type="search" placeholder="Search name, SKU, barcode, brand…" style="min-width:260px;flex:1;max-width:420px"><select data-c><option value="">All categories</option>${cats.map(([id, n]) => `<option value="${E(id)}">${E(n)}</option>`).join('')}</select><span class="sp"></span><button class="hw-btn d" data-lookup>Barcode lookup</button>${canNew ? '<button class="hw-btn p" data-new>+ New product</button>' : ''}</div><div data-b><p class="hw-muted">Loading products…</p></div>`;
+    el.innerHTML = `<div class="hw-bar"><input data-s type="search" placeholder="Search name, SKU, barcode, brand…" style="min-width:260px;flex:1;max-width:420px"><select data-c><option value="">All categories</option>${cats.map(([id, n]) => `<option value="${E(id)}">${E(n)}</option>`).join('')}</select><span class="sp"></span><button class="hw-btn d" data-lookup>Barcode lookup</button>${canNew ? '<button class="hw-btn d" data-xl>Import from Excel</button><button class="hw-btn p" data-new>+ New product</button>' : ''}</div><div data-b><p class="hw-muted">Loading products…</p></div>`;
     const b = $('[data-b]', el);
     const draw = async () => {
       const my = ++seq; b.classList.add('busy');
@@ -109,6 +109,7 @@
     };
     let t; $('[data-s]', el).oninput = (e) => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; draw(); }, 280); };
     $('[data-c]', el).onchange = (e) => { st.cat = e.target.value; st.page = 1; draw(); };
+    const xl = $('[data-xl]', el); if (xl) xl.onclick = () => window.ProductImport.open({ onDone: () => { HW.loadProducts && (HW.productIndex.dirty = true); draw(); } });
     const nw = $('[data-new]', el); if (nw) nw.onclick = () => productModal(null, () => { HW.loadProducts && (HW.productIndex.dirty = true); draw(); });
     $('[data-lookup]', el).onclick = () => HW.formModal({ title: 'Barcode lookup', label: 'Find', fields: [{ n: 'code', l: 'Scan or type barcode', req: 1 }], onSave: async (v) => { const { data: r } = await Api.get(`/hardware/barcode/${encodeURIComponent(v.code)}`); HW.modal({ title: 'Match found', body: HW.dl([['Product', E(r.name)], ['Matched on', E(HW.human(r.matchedOn))], ['Unit', E(r.unitName)], ['Unit factor', r.unitFactor]]), actions: [{ label: 'Close' }, ...(canSpec ? [{ label: 'Open details', cls: 'p', fn: () => HW.profileForm(r.productId, r.name) }] : [])] }); } });
     await draw();

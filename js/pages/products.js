@@ -52,6 +52,9 @@
           <a class="btn btn-secondary" id="shelf-labels-link" href="shelf-labels.html" data-requires-permission="products.view">
             ${window.Icons.get('printer')} Shelf labels
           </a>
+          <button class="btn btn-secondary" id="import-excel-btn" data-requires-permission="products.create" title="Add many products from an Excel sheet">
+            ${window.Icons.get('table')} Import from Excel
+          </button>
           <button class="btn btn-primary" id="add-product-btn" data-requires-permission="products.create">
             ${window.Icons.get('plus')} Add product
           </button>
@@ -212,6 +215,7 @@
       updateSelectionBar();
     });
 
+    document.getElementById('import-excel-btn')?.addEventListener('click', () => window.ProductImport.open({ onDone: () => window.location.reload() }));
     document.getElementById('add-product-btn').addEventListener('click', () => {
       // Pharmacies add medicines through their own form (drug details + opening batch); other goods use the normal form.
       // Wines & spirits add drinks through their own form (category, ABV, size, photo, packs, empties, opening stock).
