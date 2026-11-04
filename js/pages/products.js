@@ -10,6 +10,9 @@
  * wholesale too: fields wholesaleEnabled, moq (minimum order quantity, in the product's unit) and wholesalePrice
  * (KES per unit once the sale holds >= moq). Variants may carry their own wholesalePrice. The sales screen switches
  * price automatically; the backend enforces the rules (FEATURE_DISABLED / INVALID_WHOLESALE_CONFIG).
+ * In the product form the wholesale fields only appear after the "Also sell wholesale" box is ticked.
+ *
+ * COPY NAME -> SKU: a small copy icon sits inside the Product name box; one click puts the name into the SKU box.
  *
  * DISCOUNT PER UNIT: each product can carry a standing per-unit discount
  * (field "defaultDiscount", KES). The sales screen pre-fills it on the
@@ -549,12 +552,17 @@
     return window.AppShell.hasFeature('wholesalePricing') || t === 'supermarket' || t === 'general_shop' || !!(product && product.wholesaleEnabled);
   }
 
+  /**
+   * "Also sell wholesale" checkbox is always shown; the wholesale fields (MOQ, price, pack)
+   * are revealed only while the box is ticked (see the wsToggle handler in openProductModal).
+   */
   function wholesaleSectionHtml(product) {
     const on = !!(product && product.wholesaleEnabled);
     const hasVariants = !!(product && product.hasVariants);
     return `
         <div class="field" id="wholesale-section" style="border:1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3)">
           <label class="checkbox-row"><input type="checkbox" name="wholesaleEnabled" id="p-wholesale-on" ${on ? 'checked' : ''} /> <span class="text-sm font-semibold">Also sell wholesale</span></label>
+          <div id="wholesale-fields" style="${on ? '' : 'display:none;'}">
           <span class="field-hint">Once a sale holds at least the minimum order quantity (MOQ) of this product, the till charges the wholesale price automatically. Below it, the normal selling price applies.</span>
           <div class="form-row" style="margin-top: var(--space-2)">
             <div class="field" style="margin-bottom: var(--space-2)">
@@ -578,6 +586,7 @@
             </div>
           </div>
           <span class="field-hint">Lets you buy, stock and sell by the pack as well as by single items.</span>` : ''}
+          </div>
         </div>`;
   }
 
@@ -632,6 +641,9 @@
     try { return !!window.Permissions.can(window.AppShell.getUser(), 'inventory.receive'); } catch { return false; }
   }
 
+  /** Small inline "copy" icon (used inside the Product name box). */
+  const COPY_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+
   function openProductModal(product) {
     const isEdit = !!product;
     variantRowCount = 0;
@@ -644,7 +656,12 @@
       <form id="product-form">
         <div class="field">
           <label for="p-name">Product name</label>
-          <input class="input" id="p-name" name="name" required value="${isEdit ? window.UI.escapeHtml(product.name) : ''}" placeholder="Samsung 43&quot; Smart TV" />
+          <div style="position:relative">
+            <input class="input" id="p-name" name="name" required value="${isEdit ? window.UI.escapeHtml(product.name) : ''}" placeholder="Samsung 43&quot; Smart TV" style="padding-right:44px" />
+            <button type="button" id="p-name-copy-btn" title="Copy product name to SKU" aria-label="Copy product name to SKU"
+              style="position:absolute; right:6px; top:50%; transform:translateY(-50%); display:flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--color-text-muted, #6b7280); cursor:pointer">${COPY_ICON_SVG}</button>
+          </div>
+          <span class="field-hint">Tap the copy icon to put this name into the SKU box.</span>
         </div>
         <div class="form-row">
           <div class="field">
@@ -784,6 +801,25 @@
 
     modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
 
+    // Copy icon inside the Product name box: puts the name straight into the SKU box (and onto the clipboard too).
+    const nameCopyBtn = modal.querySelector('#p-name-copy-btn');
+    if (nameCopyBtn) {
+      nameCopyBtn.addEventListener('click', () => {
+        const nameInput = modal.querySelector('#p-name');
+        const skuInput = modal.querySelector('#p-sku');
+        const text = nameInput ? nameInput.value.trim() : '';
+        if (!text) { window.UI.toast.error('Type the product name first'); if (nameInput) nameInput.focus(); return; }
+        if (skuInput) {
+          skuInput.value = text;
+          skuInput.dispatchEvent(new Event('input', { bubbles: true }));
+          skuInput.focus();
+          skuInput.select();
+        }
+        try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {}); } catch { /* clipboard is optional */ }
+        window.UI.toast.success('Name copied to SKU');
+      });
+    }
+
     // An expiry date is stored on a batch, so tracking expiry always means tracking batches too.
     const expiryBox = modal.querySelector('input[name="trackExpiry"]');
     const batchBox = modal.querySelector('input[name="trackBatch"]');
@@ -825,14 +861,20 @@
 
     if (wf) window.WholesaleProductForm.bind(modal, { product: isEdit ? product : null });
 
+    // "Also sell wholesale": the wholesale fields appear only while this box is ticked.
     const wsToggle = modal.querySelector('#p-wholesale-on');
     if (wsToggle) {
+      const wsFields = modal.querySelector('#wholesale-fields');
+      const syncWholesale = () => {
+        const on = wsToggle.checked;
+        if (wsFields) wsFields.style.display = on ? '' : 'none';
+        ['#p-moq', '#p-wprice', '#p-wu-name', '#p-wu-factor'].forEach((q) => { const el = modal.querySelector(q); if (el) el.disabled = !on; });
+      };
       wsToggle.addEventListener('change', () => {
-        modal.querySelector('#p-moq').disabled = !wsToggle.checked;
-        modal.querySelector('#p-wprice').disabled = !wsToggle.checked;
-        ['#p-wu-name', '#p-wu-factor'].forEach((q) => { const el = modal.querySelector(q); if (el) el.disabled = !wsToggle.checked; });
+        syncWholesale();
         if (wsToggle.checked) modal.querySelector('#p-moq').focus();
       });
+      syncWholesale();
     }
 
     // The variants block does not exist in the wholesale-first form: a missing button must never abort the setup
