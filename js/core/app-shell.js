@@ -1,3 +1,5 @@
+/* Keep the browser's install offer safe even if it fires before pwa.js loads */
+window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); window.__bip = e; });
 /* Mobile app layer: loaded once from here so no HTML page needs editing. */
 (function () {
   try {

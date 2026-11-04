@@ -303,6 +303,7 @@
       '<ol><li>Tap the <strong>menu</strong> button of your browser (the three dots).</li>' +
       '<li>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>' +
       '<li>Tap <strong>Install</strong>. Open it from your home screen.</li></ol>' +
+      '<p>Tip: open this site in <strong>Chrome</strong> for the one-tap install button.</p>' +
       '<button type="button" class="btn btn-primary" data-pwa-act="close">Got it</button></div>';
     function close() { if (sheetEl) { sheetEl.remove(); sheetEl = null; } dismissBanner(true); }
     sheetEl.addEventListener('click', function (e) { if (e.target === sheetEl || e.target.closest('[data-pwa-act="close"]')) close(); });
@@ -316,6 +317,7 @@
     if (deferredPrompt) {
       var promptEvent = deferredPrompt;
       deferredPrompt = null; // a prompt event can only be used once
+      window.__bip = null;
       promptEvent.prompt();
       return promptEvent.userChoice.then(function (choice) {
         var accepted = !!(choice && choice.outcome === 'accepted');
@@ -446,9 +448,15 @@
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();      // we show our own, better-timed prompt
     deferredPrompt = e;
+    window.__bip = e;
+    // If the plain "how to install" card is already showing, swap it for the real one-tap Install card.
+    if (bannerEl) { bannerEl.remove(); bannerEl = null; }
     emitChange();
-    scheduleBanner(CFG.bannerDelayMs);
+    scheduleBanner(bannerEl ? 0 : 300);
   });
+
+  // The browser may have offered the install before this script loaded (app-shell.js keeps it safe in window.__bip).
+  if (window.__bip && !deferredPrompt) { deferredPrompt = window.__bip; scheduleBanner(CFG.bannerDelayMs); }
 
   window.addEventListener('appinstalled', function () {
     installedNow = true;
@@ -487,7 +495,7 @@
     watchTriggers();
     updateConnectionUi();
     if (isIos()) scheduleBanner(CFG.bannerDelayMs * 2);
-    else if (isPhone()) setTimeout(function () { if (!bannerEl) scheduleBanner(0); }, 3500); // no prompt event arrived: show the how-to card
+    else if (isPhone()) setTimeout(function () { if (!bannerEl && !deferredPrompt) scheduleBanner(0); }, 9000); // no prompt event arrived: show the how-to card
   }
 
   // Head tags and the service worker do not need the DOM to be ready.
