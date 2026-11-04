@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.2.3-turbo';
+const VERSION = 'v5.2.4-turbo';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
@@ -14,12 +14,7 @@ const NOTES = [
   'Pages and content now open much faster: menu pages load instantly from the saved copy',
   'Phone menu: Reports now sits between Products and Inventory; Employees removed from the bottom bar',
   'Phone top bar is cleaner: branch picker and offline set-up button removed',
-  'Hardware workspace now works offline: sell, scan and print receipts with no internet',
-  'Offline sales are saved on this till and sync by themselves when the internet returns',
-  'Update prompt and offline status now use the hardware Navy & Lime theme',
-  'Choosing the hardware business type opens the hardware workspace straight away',
-  'Install-as-app prompt and the POS icon on every hardware page',
-  'Shop tools pages keep the hardware menu; Billing and Business settings added',
+ 
 ];
 const META_CACHE = 'kenya-pos-meta';
 const CACHE = `kenya-pos-${VERSION}`;
