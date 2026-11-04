@@ -351,6 +351,19 @@
   const lookupSearch = (t) => (window.Offline && window.Offline.lookup
     ? window.Offline.lookup.search(t)
     : window.Api.get('/products', { search: t, limit: 15, status: 'active', channel: 'retail', branchId: window.AppShell.getActiveBranchId() || undefined }).then((r) => r.data.items || []));
+  /** Exact barcode/SKU match from the device copy: instant, no server round trip. Returns { product, variant } or null. */
+  function localBarcode(code) {
+    const t = String(code || '').trim().toLowerCase();
+    const hits = t ? retailIndex.search(t, 8) : null;
+    if (!hits) return null;
+    for (const p of hits) {
+      if (p._pending) continue;
+      if (String(p.barcode || '').toLowerCase() === t || String(p.sku || '').toLowerCase() === t) return { product: p, variant: null };
+      const v = (p.variants || []).find((x) => String(x.barcode || '').toLowerCase() === t || String(x.sku || '').toLowerCase() === t);
+      if (v) return { product: p, variant: v };
+    }
+    return null;
+  }
   const lookupBarcode = (c) => (window.Offline && window.Offline.lookup
     ? window.Offline.lookup.barcode(c)
     : window.Api.get(`/products/barcode/${encodeURIComponent(c.trim())}`).then((r) => r.data));
@@ -374,6 +387,7 @@
   let outsideHandler = null;
   let clockTimer = null;
   let lastScan = { code: '', at: 0 };
+  let boostWired = false;
 
   // cash drawer
   let drawerUi = null;
@@ -847,10 +861,11 @@
     try {
       if (isWs()) await addWholesaleByCode(code);
       else {
-        const data = await lookupBarcode(code);
+        const data = localBarcode(code) || await lookupBarcode(code);
         if (await ensureRetailStock(data.product, data.variant)) addToCart(data.product, data.variant);
       }
     } catch (err) {
+      if (err.code === 'BARCODE_NOT_FOUND' && !isWs()) { openQuickAdd({ barcode: code }); return; }
       window.UI.toast.error(err.code === 'BARCODE_NOT_FOUND' ? `No product found for barcode "${code}"` : err.message);
     }
     clearSearch();
@@ -1178,6 +1193,7 @@
             <button type="button" class="btn btn-primary pz-scan-btn" id="pos-scan-btn">
               ${window.BarcodeScanner.cameraIconSvg} <span class="pz-scan-label">Scan barcode</span>
             </button>` : ''}
+          ${window.PosBoost ? `<label class="pb-switch" title="Print the receipt automatically after each sale"><input type="checkbox" id="pb-autoprint" ${window.PosBoost.autoPrint.get() ? 'checked' : ''} /><span>Auto-print receipt</span></label>` : ''}
           <div class="pz-keys" aria-hidden="true">
             <span><kbd class="kbd">F2</kbd> search</span>
             <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> pick</span>
@@ -1270,6 +1286,15 @@
     if (window.PharmacyDesk && !wsOn) window.PharmacyDesk.bind(pharmacyHost);
 
     attachHardwareScanner();
+    $('pb-autoprint')?.addEventListener('change', (e) => {
+      window.PosBoost.autoPrint.set(e.target.checked);
+      window.UI.toast.success(e.target.checked ? 'Receipts will print automatically after each sale' : 'Auto-print off: the receipt opens on screen, tap Print when needed');
+    });
+    if (window.PosBoost && !boostWired) {
+      boostWired = true;
+      window.PosBoost.keepScannerReady(() => (state.view === 'new-sale' ? $('pos-search') : null)); // scanner always typing into the search box
+      window.PosBoost.onChange(() => { retailIndex.invalidate(); retailIndex.load(); });
+    }
     fitRoot();
     if (!drawerLocked()) $('pos-search')?.focus();
   }
@@ -1349,6 +1374,10 @@
           <div class="pz-dd-msg" style="padding-top:0">${esc(o.name)}: ${esc(String(o.quantity))} in <b>${esc(o.warehouseName)}</b>${o.allowSales
             ? ` - <button type="button" class="pz-linkbtn" data-switch-wh="${esc(String(o.warehouseId))}">Sell from ${esc(o.warehouseName)}</button>`
             : ' (storage only: switch on "Can sell" for that warehouse, or move the stock to a selling warehouse)'}</div>`).join('');
+        if (!isWs() && window.PosBoost) {
+          dd.insertAdjacentHTML('beforeend', `<button type="button" class="pz-dd-add" id="pz-dd-add"><i class="fa-solid fa-circle-plus" aria-hidden="true"></i> Add “${esc(term)}” as a new product</button>`);
+          $('pz-dd-add').addEventListener('click', () => openQuickAdd(/^\d{6,}$/.test(term) ? { barcode: term } : { name: term }));
+        }
         dd.querySelectorAll('[data-switch-wh]').forEach((b) => b.addEventListener('click', () => {
           const sel = $('pz-wh');
           if (!sel) return;
@@ -1438,6 +1467,7 @@
       // A long all-digit entry is a barcode (typed or wedge-scanned): same lookup as the scanner.
       if (/^\d{6,}$/.test(term)) { handleScannedCode(term); return; }
       if (!rows.length || dd.querySelector('.pz-dd-msg')) await runSearch(term);
+      if (!rows.length && !isWs() && window.PosBoost) { openQuickAdd(/^\d{6,}$/.test(term) ? { barcode: term } : { name: term }); return; }
       pick(active);
     });
 
@@ -1445,6 +1475,21 @@
     if (outsideHandler) document.removeEventListener('click', outsideHandler);
     outsideHandler = (e) => { if (!e.target.closest('#pz-searchwrap')) close(); };
     document.addEventListener('click', outsideHandler);
+  }
+
+  /** Product not in the catalog: small window to add it right now, then it goes straight into the cart. */
+  function openQuickAdd(opts) {
+    if (!window.PosBoost) { window.UI.toast.error('Product not found'); return; }
+    clearSearch();
+    window.PosBoost.quickAdd(Object.assign({}, opts, {
+      onAdded: (product) => {
+        retailIndex.invalidate(); retailIndex.load();
+        if (product._pending || String(product._id || '').startsWith('tmp_')) {
+          window.UI.toast.info('Saved offline. It can be sold as soon as the internet is back and it has uploaded.');
+        } else addToCart(product, null);
+        $('pos-search')?.focus();
+      },
+    }));
   }
 
   /* ---- Cart operations ---- */
@@ -1599,7 +1644,9 @@
           ? 'wholesale price'
           : (info.wholesale !== null && info.moq ? `wholesale ${fm(info.wholesale)} from ${info.moq}` : '');
         const priceHint = item.overridePriceEnabled ? 'price changed' : (info.priceType === 'WHOLESALE' ? 'wholesale price' : (item.autoDiscount ? 'product discount' : wholesaleHint));
-        priceCell = `@ ${fm(unit)}${priceHint ? `<small>${priceHint}</small>` : ''}`;
+        priceCell = canOverride
+          ? `<input type="number" class="pb-priceinp ${item.overridePriceEnabled ? 'changed' : ''}" data-action="price" data-idx="${i}" inputmode="decimal" step="0.01" min="0" value="${unit}" aria-label="Selling price" title="Tap to change the selling price for this sale" />${priceHint ? `<small>${priceHint}</small>` : ''}`
+          : `@ ${fm(unit)}${priceHint ? `<small>${priceHint}</small>` : ''}`;
       }
       return `
         <div class="pz-tr ${cls}" data-idx="${i}" data-key="${esc(k)}">
@@ -1678,6 +1725,20 @@
         if (line) { line.unitId = sel.value || null; syncAutoDiscount(line); renderCart(); }
         return;
       }
+      const pinp = e.target.closest('input[data-action="price"]');
+      if (pinp) {
+        const line = state.cart[Number(pinp.dataset.idx)];
+        const v = Number(pinp.value);
+        if (line && pinp.value !== '' && Number.isFinite(v) && v >= 0) {
+          const base = priceInfoOf(Object.assign({}, line, { overridePriceEnabled: false, overridePrice: null })).unit;
+          if (Math.abs(v - base) < 0.005) { line.overridePriceEnabled = false; line.overridePrice = null; }
+          else { line.overridePriceEnabled = true; line.overridePrice = round2(v); }
+          syncAutoDiscount(line);
+        }
+        renderCart();
+        setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) $('pos-search')?.focus(); }, 0);
+        return;
+      }
       const inp = e.target.closest('input[data-action="qty"]');
       if (!inp) return;
       const idx = Number(inp.dataset.idx);
@@ -1695,11 +1756,11 @@
     });
 
     el.addEventListener('focusin', (e) => {
-      if (e.target.matches('input[data-action="qty"]')) e.target.select();
+      if (e.target.matches('input[data-action="qty"], input[data-action="price"]')) e.target.select();
     });
 
     el.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.target.matches('input[data-action="qty"]')) {
+      if (e.key === 'Enter' && e.target.matches('input[data-action="qty"], input[data-action="price"]')) {
         e.preventDefault();
         e.target.blur(); // fires "change", which re-renders and refocuses the search box
         $('pos-search')?.focus();
@@ -1742,6 +1803,7 @@
     const user = window.AppShell.getUser();
     const canOverride = window.Permissions.can(user, 'sales.price_override');
     const perUnit = unitDiscountOf(item.product);
+    const canEditProduct = window.Permissions.can(user, 'products.update') && !String(item.product._id || '').startsWith('tmp_');
 
     const modal = window.UI.openModal({
       title: `Adjust - ${item.product.name}`,
@@ -1759,6 +1821,11 @@
             </div>
             <div class="field"><label>Override price (KES)</label><input class="input" name="overridePrice" type="number" step="0.01" min="0" value="${item.overridePrice || ''}" ${item.overridePriceEnabled ? '' : 'disabled'} /></div>
           ` : '<p class="text-xs text-muted">You do not have permission to override prices.</p>'}
+          ${canEditProduct && !item.ws ? `
+            <hr style="border:0;border-top:1px solid var(--color-border);margin:var(--space-3) 0" />
+            <div class="field"><label>Product cost price (KES)</label><input class="input" name="newCost" type="number" step="0.01" min="0" value="${Number(item.variant ? (item.variant.costPrice || 0) : (item.product.costPrice || 0))}" /></div>
+            <label class="checkbox-row"><input type="checkbox" name="savePrice" /> <span class="text-sm">Also save this price (and cost) on the product permanently</span></label>
+          ` : ''}
         </form>
       `,
       footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="save">Apply</button>`,
@@ -1795,6 +1862,23 @@
 
       item.overridePriceEnabled = overrideEnabled;
       item.overridePrice = overridePrice;
+
+      if (canEditProduct && !item.ws && raw.savePrice) {
+        const body = {};
+        const newCost = Number(raw.newCost);
+        if (raw.newCost !== '' && Number.isFinite(newCost) && newCost >= 0) body.costPrice = newCost;
+        if (overrideEnabled && overridePrice != null) body.sellingPrice = overridePrice;
+        if (Object.keys(body).length && !item.variant) {
+          window.Api.put(`/products/${item.product._id}`, body)
+            .then(() => {
+              Object.assign(item.product, body);
+              if (body.sellingPrice != null) { item.overridePriceEnabled = false; item.overridePrice = null; syncAutoDiscount(item); }
+              retailIndex.invalidate(); retailIndex.load(); renderCart();
+              window.UI.toast.success('Product price updated');
+            })
+            .catch((err) => window.UI.toast.error(err.message));
+        } else if (item.variant) window.UI.toast.info('Variant prices are changed on the Products page');
+      }
 
       if (newDiscount === prevDiscount) {
         // Discount field untouched: a preset line follows the (possibly new) price.
@@ -2804,7 +2888,7 @@
         // Wholesale sales open the professional invoice (receipt is one tap away); retail keeps the auto-printing receipt.
         if (payload.channel === 'WHOLESALE' && !data.offline && data.sale && data.sale._id && window.InvoiceView) {
           window.InvoiceView.open(data.sale._id, { receipt: data.receipt, title: `Invoice ${data.sale.invoiceNumber || data.sale.receiptNumber}` });
-        } else window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: true });
+        } else window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: window.PosBoost ? window.PosBoost.autoPrint.get() : true });
       } catch (receiptErr) {
         window.UI.toast.error(`Sale saved, but the receipt could not be shown: ${receiptErr.message}`);
       }

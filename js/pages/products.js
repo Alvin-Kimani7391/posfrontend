@@ -14,6 +14,9 @@
  * DISCOUNT PER UNIT: each product can carry a standing per-unit discount
  * (field "defaultDiscount", KES). The sales screen pre-fills it on the
  * cart line whenever the product is scanned or searched (x quantity).
+ *
+ * POS BOOST (js/core/pos-boost.js): the barcode scanner is always listening on this page, the list and
+ * search work offline from the copy saved on the device, and adding / editing products offline is queued.
  */
 (function () {
   const state = { page: 1, limit: 10, search: '', categoryId: '', status: '' };
@@ -33,7 +36,52 @@
     await getCategories(); // warm the cache before first render so filters/forms have data
     populateCategoryFilter();
     bindToolbar();
+    bindAlwaysOnScanner();
     await fetchAndRender();
+  }
+
+  /** Full product from the server; with no internet, the copy saved on this device (so prices can still be changed). */
+  async function getProductForEdit(id) {
+    try { return (await window.Api.get(`/products/${id}`)).data; }
+    catch (err) {
+      const local = (productIndex.query({ search: '', page: 1, limit: 100000 }) || { items: [] }).items.find((p) => p._id === id);
+      if (local) return { product: local };
+      window.UI.toast.error(err.message);
+      return null;
+    }
+  }
+
+  /** Barcode scanner is ALWAYS listening on this page: a scan fills the search box and filters the list at once. */
+  function bindAlwaysOnScanner() {
+    const input = document.getElementById('search-input');
+    const run = (code) => {
+      if (document.querySelector('.modal-backdrop')) return; // a form is open: its own barcode field gets the scan
+      input.value = code; state.search = code; state.page = 1;
+      fetchAndRender({ local: true }).then(() => {
+        const rows = document.querySelectorAll('#products-tbody tr[data-id]');
+        if (!rows.length && window.PosBoost) {
+          window.UI.toast.info(`No product with barcode ${code}`);
+          window.PosBoost.quickAdd({ barcode: code, onAdded: () => { productIndex.invalidate(); fetchAndRender(); } });
+        } else if (rows.length === 1) rows[0].classList.add('pb-hit');
+      });
+      input.select();
+    };
+    if (window.BarcodeScanner) window.BarcodeScanner.listenHardwareScanner(run, { minLength: 4 });
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const term = input.value.trim();
+      if (!term) return;
+      e.preventDefault();
+      if (/^\d{6,}$/.test(term)) run(term);
+      else if (!document.querySelector('#products-tbody tr[data-id]') && window.PosBoost) {
+        window.PosBoost.quickAdd({ name: term, onAdded: () => { productIndex.invalidate(); fetchAndRender(); } });
+      }
+    });
+    if (window.PosBoost) {
+      window.PosBoost.keepScannerReady(() => input);
+      window.PosBoost.onChange(() => { productIndex.invalidate(); productIndex.load().then(() => fetchAndRender({ local: true })); });
+    }
+    input.focus();
   }
 
   function pageSkeleton() {
@@ -66,7 +114,7 @@
         <div class="toolbar">
           <div class="toolbar-search input-group">
             <span class="input-group-icon">${window.Icons.get('search')}</span>
-            <input class="input" id="search-input" type="text" placeholder="Search by name, SKU, or barcode" />
+            <input class="input" id="search-input" type="text" autocomplete="off" placeholder="Scan a barcode or search by name, SKU, or barcode" />
           </div>
           <select class="select" id="category-filter" style="max-width: 220px">
             <option value="">All categories</option>
@@ -275,6 +323,17 @@
       window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
       productIndex.load(); // warm the device copy so the next search is instant
     } catch (err) {
+      // No internet / server down: show the copy saved on this device (plus anything waiting to upload).
+      await productIndex.load();
+      const res = productIndex.query({ search: state.search, categoryId: state.categoryId, page: state.page, limit: state.limit });
+      if (res) {
+        state.page = res.page;
+        renderRows(res.items);
+        window.UI.renderPagination(document.getElementById('pagination'), res, (p) => { state.page = p; fetchAndRender({ local: true }); });
+        window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+        window.UI.toast.info('Offline: showing products saved on this device');
+        return;
+      }
       tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
     }
   }
@@ -318,7 +377,7 @@
       <tr data-id="${p._id}">
         <td class="bl-sel-col"><input type="checkbox" data-select="${p._id}" ${selected.has(p._id) ? 'checked' : ''} /></td>
         <td>
-          ${liquorCell(p) || `<div class="cell-primary">${window.UI.escapeHtml(p.name)}</div>`}
+          ${liquorCell(p) || `<div class="cell-primary">${window.UI.escapeHtml(p.name)}${p._pending ? '<span class="pb-pending">waiting to upload</span>' : ''}</div>`}
           ${p.hasVariants ? `<div class="text-xs text-muted">${p.variants.length} variant${p.variants.length === 1 ? '' : 's'}</div>` : ''}
         </td>
         <td>
@@ -359,7 +418,8 @@
     tbody.querySelectorAll('[data-action="edit"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const id = btn.closest('tr').dataset.id;
-        const { data } = await window.Api.get(`/products/${id}`);
+        const data = await getProductForEdit(id);
+        if (!data) return;
         if (window.LiquorProductForm && window.LiquorProductForm.applies()) { window.LiquorProductForm.open({ product: data.product, onDone: () => fetchAndRender() }); return; }
         openProductModal(data.product);
       });
@@ -484,7 +544,9 @@
 
   /** Wholesale section is offered only when the business has the feature, or the product already uses it. */
   function wholesaleAllowed(product) {
-    return window.AppShell.hasFeature('wholesalePricing') || !!(product && product.wholesaleEnabled);
+    const t = window.AppShell.getBusinessProfile?.()?.businessType;
+    // Shops and supermarkets always get the option (the server switches the feature on the first time it is used).
+    return window.AppShell.hasFeature('wholesalePricing') || t === 'supermarket' || t === 'general_shop' || !!(product && product.wholesaleEnabled);
   }
 
   function wholesaleSectionHtml(product) {
@@ -504,6 +566,18 @@
               <input class="input" id="p-wprice" name="wholesalePrice" type="number" step="0.01" min="0" inputmode="decimal" value="${product && product.wholesalePrice ? product.wholesalePrice : ''}" placeholder="Lower than the selling price" ${on ? '' : 'disabled'} />
             </div>
           </div>
+          ${!product || !(product.units && product.units.length) ? `
+          <div class="form-row" style="margin-top: var(--space-1)">
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label for="p-wu-name">Wholesale pack <span class="text-muted">(optional, e.g. Carton)</span></label>
+              <input class="input" id="p-wu-name" name="wuName" placeholder="Carton, Dozen, Bale" maxlength="30" ${on ? '' : 'disabled'} />
+            </div>
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label for="p-wu-factor">Items in one pack</label>
+              <input class="input" id="p-wu-factor" name="wuFactor" type="number" step="any" min="0" inputmode="decimal" placeholder="e.g. 24" ${on ? '' : 'disabled'} />
+            </div>
+          </div>
+          <span class="field-hint">Lets you buy, stock and sell by the pack as well as by single items.</span>` : ''}
         </div>`;
   }
 
@@ -756,6 +830,7 @@
       wsToggle.addEventListener('change', () => {
         modal.querySelector('#p-moq').disabled = !wsToggle.checked;
         modal.querySelector('#p-wprice').disabled = !wsToggle.checked;
+        ['#p-wu-name', '#p-wu-factor'].forEach((q) => { const el = modal.querySelector(q); if (el) el.disabled = !wsToggle.checked; });
         if (wsToggle.checked) modal.querySelector('#p-moq').focus();
       });
     }
@@ -851,6 +926,14 @@
         if (isEdit) delete payload.defaultDiscount;
         Object.assign(payload, wfRes.payload);
       }
+      if (wsToggle && wholesaleOn && !isEdit) {
+        const wuName = (raw.wuName || '').trim();
+        const wuFactor = Number(raw.wuFactor) || 0;
+        if (wuName || wuFactor) {
+          if (!wuName || !(wuFactor > 1)) { window.UI.toast.error('Enter the pack name and how many items it holds (more than 1)'); modal.querySelector('#p-wu-name').focus(); return; }
+          payload.units = [{ name: wuName, factor: wuFactor, isWholesaleDefault: true }];
+        }
+      }
       if (wsToggle) {
         payload.wholesaleEnabled = wholesaleOn;
         // When on: null clears an emptied price (e.g. variants carry their own). When off the saved values are left untouched.
@@ -900,13 +983,17 @@
           const created = await createProductWithRetry(payload, generated);
           window.UI.toast.success('Product added');
           if (stockReq) {
-            try {
-              const pid = created?.data?.product?._id || created?.data?._id;
-              if (!pid) throw new Error('product id missing');
-              await window.Api.post('/inventory/receive', { ...stockReq, productId: pid, costPrice: (wfRes ? undefined : raw.costPrice) || undefined });
-              window.UI.toast.success('Stock received');
-            } catch (stockErr) {
-              window.UI.toast.warning(`Product saved, but the stock was not added (${stockErr.message}). Use Inventory > Receive stock.`);
+            if (created && created.queued) {
+              window.UI.toast.warning('Saved offline. Add its stock from Inventory > Receive stock once it has uploaded.');
+            } else {
+              try {
+                const pid = created?.data?.product?._id || created?.data?._id;
+                if (!pid) throw new Error('product id missing');
+                await window.Api.post('/inventory/receive', { ...stockReq, productId: pid, costPrice: (wfRes ? undefined : raw.costPrice) || undefined });
+                window.UI.toast.success('Stock received');
+              } catch (stockErr) {
+                window.UI.toast.warning(`Product saved, but the stock was not added (${stockErr.message}). Use Inventory > Receive stock.`);
+              }
             }
           }
           const printBox = modal.querySelector('#p-print-sticker');

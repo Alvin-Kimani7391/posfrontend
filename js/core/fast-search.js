@@ -19,6 +19,23 @@
   const PAGE = 100;
   const MAX_PAGES = 30; // 3000 products on the device; bigger catalogs keep using the server
 
+  /* Device copy of the product list (IndexedDB), so search still works right after a reload with no internet. */
+  const idb = {
+    open() {
+      if (this._p) return this._p;
+      this._p = new Promise((res, rej) => {
+        if (!window.indexedDB) return rej(new Error('no idb'));
+        const r = indexedDB.open('pos-fastsearch', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('rows');
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      });
+      return this._p;
+    },
+    async get(k) { const db = await this.open(); return new Promise((res) => { const q = db.transaction('rows').objectStore('rows').get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); },
+    async set(k, v) { try { const db = await this.open(); db.transaction('rows', 'readwrite').objectStore('rows').put(v, k); } catch { /* ignore */ } },
+  };
+  const overlay = (rows) => (window.PosBoost && window.PosBoost.overlay ? window.PosBoost.overlay(rows) : rows);
+
   function create(opts) {
     const o = Object.assign({ params: () => ({}), ttl: 30000 }, opts || {});
     const st = { rows: [], full: false, key: '', at: 0, dirty: true, loading: null };
@@ -46,12 +63,23 @@
         rest.forEach((r) => { rows = rows.concat(r); });
       }
       st.rows = rows; st.full = pages <= MAX_PAGES; st.key = key; st.at = Date.now(); st.dirty = false;
+      if (st.full) idb.set(key, { rows, at: st.at });
+    }
+
+    /** No internet / server error: fall back to the copy saved on this device so search never goes dead. */
+    async function restore() {
+      const key = keyOf();
+      if (!st.rows.length) {
+        const saved = await idb.get(key).catch(() => null);
+        if (saved && saved.rows && saved.rows.length) { st.rows = saved.rows; st.full = true; }
+      }
+      if (st.rows.length) { st.key = key; st.dirty = false; st.at = Date.now() - o.ttl + 8000; } // serve it, retry the server in ~8 s
     }
 
     function load(force) {
       if (st.loading) return st.loading;
       if (!force && !st.dirty && st.key === keyOf() && Date.now() - st.at < o.ttl) return Promise.resolve(st.rows);
-      st.loading = download().catch(() => { /* offline or error: keep what we had, the server path still works */ }).then(() => { st.loading = null; return st.rows; });
+      st.loading = download().catch(() => restore()).then(() => { st.loading = null; return st.rows; });
       return st.loading;
     }
 
@@ -66,10 +94,11 @@
 
     function match(term) {
       const t = low(term).trim();
-      if (!t) return st.rows;
+      const all = overlay(st.rows);
+      if (!t) return all;
       const words = t.split(/\s+/);
       const out = [];
-      for (const p of st.rows) {
+      for (const p of all) {
         if (!words.every((w) => hay(p).includes(w))) continue;
         const name = low(p.name);
         const rank = (low(p.sku) === t || low(p.barcode) === t) ? 0 : name.startsWith(t) ? 1 : name.split(/[\s\-_/]+/).some((w) => w.startsWith(words[0])) ? 2 : 3;

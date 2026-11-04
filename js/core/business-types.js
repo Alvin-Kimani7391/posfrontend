@@ -68,13 +68,13 @@
 
   // Mirrors backend BUSINESS_FEATURE_DEFAULTS / LOCKED_ON.
   const DEFAULTS = {
-    supermarket: ['expiryTracking', 'batchTracking', 'unitConversions', 'loyaltyProgram', 'heldSales', 'promotions'],
+    supermarket: ['wholesalePricing', 'expiryTracking', 'batchTracking', 'unitConversions', 'loyaltyProgram', 'heldSales', 'promotions'],
     electronics: ['serialNumberTracking', 'warrantyManagement', 'repairManagement', 'heldSales', 'promotions'],
     clothing: ['productVariants', 'loyaltyProgram', 'heldSales', 'promotions'],
     hardware: ['unitConversions', 'quotationManagement', 'deliveryManagement', 'heldSales', 'promotions'],
     cosmetics: ['expiryTracking', 'batchTracking', 'productVariants', 'loyaltyProgram', 'quarantineManagement', 'recallManagement', 'heldSales', 'promotions'],
     restaurant: ['restaurantOrdering', 'tableManagement', 'kitchenDisplay', 'recipeManagement', 'reservations', 'guestQrOrdering', 'batchTracking'],
-    general_shop: ['layaway', 'heldSales', 'promotions', 'customerCredit'],
+    general_shop: ['wholesalePricing', 'unitConversions', 'layaway', 'heldSales', 'promotions', 'customerCredit'],
     wines_spirits: ['liquorCompliance', 'ageVerification', 'emptiesTracking', 'totSales', 'unitConversions', 'batchTracking', 'loyaltyProgram', 'heldSales', 'promotions', 'wholesalePricing'],
     wholesale: ['wholesalePricing', 'unitConversions', 'quotationManagement', 'deliveryManagement', 'multiWarehouse', 'customerCredit'],
     garage: ['vehicleManagement', 'jobCards', 'quotationManagement'],
