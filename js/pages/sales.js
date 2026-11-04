@@ -169,6 +169,24 @@
   const fm = (n) => window.UI.formatMoney(n);
   const $ = (id) => document.getElementById(id);
 
+  /* Auto-print receipt switch: remembered on this device (PosBoost's setting when it exists, otherwise our own). */
+  const AUTOPRINT_KEY = 'pos.autoPrintReceipt';
+  function autoPrintGet() {
+    try { if (window.PosBoost && window.PosBoost.autoPrint) return !!window.PosBoost.autoPrint.get(); } catch { /* fall through */ }
+    try { const v = localStorage.getItem(AUTOPRINT_KEY); return v === null ? true : v === '1'; } catch { return true; }
+  }
+  function autoPrintSet(on) {
+    try { if (window.PosBoost && window.PosBoost.autoPrint) window.PosBoost.autoPrint.set(!!on); } catch { /* ignore */ }
+    try { localStorage.setItem(AUTOPRINT_KEY, on ? '1' : '0'); } catch { /* private mode */ }
+  }
+  function paintAutoPrint() {
+    const on = autoPrintGet();
+    const cb = $('pb-autoprint'); if (cb) cb.checked = on;
+    const track = $('pz-ap-track'); const knob = $('pz-ap-knob');
+    if (track) track.style.background = on ? 'var(--color-success,#16a34a)' : '#cbd5e1';
+    if (knob) knob.style.left = on ? '16px' : '2px';
+  }
+
   /* ================================================================== *
    * HYBRID: retail + wholesale on one screen
    * ================================================================== */
@@ -1207,8 +1225,11 @@
             <button type="button" class="btn btn-primary pz-scan-btn" id="pos-scan-btn">
               ${window.BarcodeScanner.cameraIconSvg} <span class="pz-scan-label">Scan barcode</span>
             </button>` : ''}
-          ${!wsOn && canHeld() ? `<button type="button" class="btn btn-secondary" id="held-top-btn" title="View all held sales (F6)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Held sales <span class="pz-count held-count" style="display:none">0</span></button>` : ''}
-          ${window.PosBoost ? `<label class="pb-switch" title="Print the receipt automatically after each sale"><input type="checkbox" id="pb-autoprint" ${window.PosBoost.autoPrint.get() ? 'checked' : ''} /><span>Auto-print receipt</span></label>` : ''}
+          <label class="pz-autoprint" id="pz-autoprint-wrap" title="Print the receipt automatically after each sale. When off, the receipt opens on screen and you tap Print." style="display:inline-flex;align-items:center;gap:8px;padding:0 12px;height:40px;border:1px solid var(--color-border);border-radius:var(--radius-md,10px);background:var(--color-surface,#fff);cursor:pointer;white-space:nowrap;font-size:13px;font-weight:600;user-select:none">
+            <input type="checkbox" id="pb-autoprint" ${autoPrintGet() ? 'checked' : ''} style="position:absolute;opacity:0;width:0;height:0" />
+            <span id="pz-ap-track" style="position:relative;width:34px;height:20px;border-radius:999px;flex:none;transition:background .15s"><span id="pz-ap-knob" style="position:absolute;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:left .15s"></span></span>
+            <span>Auto-print receipt</span>
+          </label>
           <div class="pz-keys" aria-hidden="true">
             <span><kbd class="kbd">F2</kbd> search</span>
             <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> pick</span>
@@ -1267,8 +1288,7 @@
 
     $('park-btn')?.addEventListener('click', parkSale);
     $('recall-btn')?.addEventListener('click', recallSale);
-    $('held-top-btn')?.addEventListener('click', recallSale);
-    refreshHeldCount(); if (!heldTimer) heldTimer = setInterval(refreshHeldCount, 30000);
+        refreshHeldCount(); if (!heldTimer) heldTimer = setInterval(refreshHeldCount, 30000);
     $('offers-btn')?.addEventListener('click', () => {
       if (!state.cart.length) return window.UI.toast.error('The cart is empty');
       schedulePromoQuote(true);
@@ -1304,8 +1324,10 @@
     if (window.PharmacyDesk && !wsOn) window.PharmacyDesk.bind(pharmacyHost);
 
     attachHardwareScanner();
+    paintAutoPrint();
     $('pb-autoprint')?.addEventListener('change', (e) => {
-      window.PosBoost.autoPrint.set(e.target.checked);
+      autoPrintSet(e.target.checked);
+      paintAutoPrint();
       window.UI.toast.success(e.target.checked ? 'Receipts will print automatically after each sale' : 'Auto-print off: the receipt opens on screen, tap Print when needed');
     });
     if (window.PosBoost && !boostWired) {
@@ -1385,7 +1407,7 @@
     /** "Add as new product" footer: shown under the results AND when nothing matches (retail and wholesale). */
     function addBtnHtml(term) {
       if (!term) return '';
-      return `<button type="button" class="pz-dd-add" id="pz-dd-add"><i class="fa-solid fa-circle-plus" aria-hidden="true"></i> ${rows.length ? 'Not here? ' : ''}Add “${esc(term)}” as a new product</button>`;
+      return `<button type="button" class="pz-dd-add" id="pz-dd-add" style="display:flex;align-items:center;justify-content:center;gap:8px;width:calc(100% - 16px);margin:8px;padding:10px 14px;border:1.5px dashed var(--color-primary,#2563eb);border-radius:var(--radius-md,10px);background:rgba(37,99,235,.07);color:var(--color-primary,#2563eb);font-size:14px;font-weight:600;line-height:1.3;text-align:center;cursor:pointer;word-break:break-word"><i class="fa-solid fa-circle-plus" aria-hidden="true"></i> ${rows.length ? 'Not here? ' : ''}Add “${esc(term)}” as a new product</button>`;
     }
     function bindAddBtn(term) {
       $('pz-dd-add')?.addEventListener('click', () => openQuickAdd(/^\d{6,}$/.test(term) ? { barcode: term } : { name: term }));
@@ -3133,7 +3155,7 @@
         // Wholesale sales open the professional invoice (receipt is one tap away); retail keeps the auto-printing receipt.
         if (payload.channel === 'WHOLESALE' && !data.offline && data.sale && data.sale._id && window.InvoiceView) {
           window.InvoiceView.open(data.sale._id, { receipt: data.receipt, title: `Invoice ${data.sale.invoiceNumber || data.sale.receiptNumber}` });
-        } else window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: window.PosBoost ? window.PosBoost.autoPrint.get() : true });
+        } else window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: autoPrintGet() });
       } catch (receiptErr) {
         window.UI.toast.error(`Sale saved, but the receipt could not be shown: ${receiptErr.message}`);
       }
