@@ -751,6 +751,28 @@
   }
 
   /** Tapping a menu item reacts at once: the item lights up, a thin progress bar runs and the page dims slightly until the next one appears. */
+  /** Keeps big figures as large as possible: only a number that would be cut off is made just small enough to fit. */
+  function installKpiFit() {
+    if (window.__kpiFit || !document.body) return;
+    window.__kpiFit = true;
+    const fit = (el) => {
+      el.style.removeProperty('font-size');
+      if (!el.clientWidth) return;
+      let fs = parseFloat(window.getComputedStyle(el).fontSize) || 24;
+      let guard = 0;
+      while (el.scrollWidth > el.clientWidth + 1 && fs > 11 && guard < 40) {
+        fs -= 0.5; guard += 1;
+        el.style.setProperty('font-size', `${fs}px`, 'important');
+      }
+    };
+    let queued = false;
+    const run = () => { queued = false; document.querySelectorAll('.kpi-value, .stat-value').forEach(fit); };
+    const sched = () => { if (!queued) { queued = true; window.requestAnimationFrame(run); } };
+    new MutationObserver(sched).observe(document.body, { childList: true, subtree: true, characterData: true });
+    window.addEventListener('resize', sched);
+    sched();
+  }
+
   function installNavFeedback() {
     if (window.__navFx || !document.body) return;
     window.__navFx = true;
@@ -1054,6 +1076,7 @@
     mountSetupReturnBar(contentEl);
     warmNavigation();
     installNavFeedback();
+    installKpiFit();
     // Everything below is not needed to draw the page: it waits until the browser is idle.
     whenIdle(() => {
       loadTour();
