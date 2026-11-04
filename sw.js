@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.2.5-turbo';
+const VERSION = 'v5.2.7-turbo';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
@@ -14,6 +14,9 @@ const NOTES = [
   'Pages and content now open much faster: menu pages load instantly from the saved copy',
   'Phone menu: Reports now sits between Products and Inventory; Employees removed from the bottom bar',
   'Phone top bar is cleaner: branch picker and offline set-up button removed',
+
+
+
  
 ];
 const META_CACHE = 'kenya-pos-meta';

@@ -323,6 +323,7 @@
         </td>
         <td>
           <div class="text-sm">${window.UI.escapeHtml(p.sku)}</div>
+          ${p.unitValue > 0 ? `<div class="text-xs text-muted">${window.UI.escapeHtml(`${p.unitValue}${/^(g|kg|ml|l|litre)$/.test(p.unit || '') ? '' : ' '}${p.unit === 'litre' ? 'L' : (p.unit || '')}`)} per item</div>` : ''}
           ${p.barcode ? `<div class="text-xs text-muted">${window.UI.escapeHtml(p.barcode)}</div>` : (p.hasVariants ? '' : '<div class="text-xs"><span class="badge badge-warning">No barcode</span></div>')}
         </td>
         <td class="text-sm">${p.categoryId ? window.UI.escapeHtml(p.categoryId.name) : '<span class="text-muted">Uncategorized</span>'}</td>
@@ -553,6 +554,10 @@
     return attrs;
   }
 
+  function canReceiveStock() {
+    try { return !!window.Permissions.can(window.AppShell.getUser(), 'inventory.receive'); } catch { return false; }
+  }
+
   function openProductModal(product) {
     const isEdit = !!product;
     variantRowCount = 0;
@@ -645,6 +650,10 @@
             </select>
           </div>`}
         </div>
+        ${wf ? '' : `<div class="field">
+          <label for="p-unitvalue">Size per item <span class="text-muted">(optional, in the unit above - e.g. 200 for a 200g pack)</span></label>
+          <input class="input" id="p-unitvalue" name="unitValue" type="number" min="0" step="any" inputmode="decimal" value="${isEdit && product.unitValue > 0 ? product.unitValue : ''}" placeholder="e.g. 200" style="max-width: 200px" />
+        </div>`}
 
         <div class="field">
           <label for="p-lowstock">Low stock threshold</label>
@@ -660,6 +669,19 @@
             ${trackingOption('trackExpiry', 'Expiry dates', 'expiryTracking', isEdit && product.trackExpiry)}
           </div>
         </div>
+
+        ${!isEdit && canReceiveStock() ? `
+        <div class="field" id="p-stock-section" style="border:1px solid var(--color-border, #e5e7eb);border-radius:var(--radius-md, 10px);padding:var(--space-3, 12px)">
+          <label class="checkbox-row"><input type="checkbox" id="p-add-stock" /> <span class="text-sm"><strong>Add inventory now</strong> <span class="text-muted">(stock received)</span></span></label>
+          <div id="p-stock-fields" style="display:none;margin-top:var(--space-3, 12px)">
+            <div class="form-row">
+              <div class="field"><label for="p-stock-qty">Quantity received</label><input class="input" id="p-stock-qty" type="number" min="1" step="any" inputmode="decimal" /></div>
+              <div class="field"><label for="p-stock-batch">Batch number <span class="text-muted" id="p-stock-batch-opt">(optional)</span></label><input class="input" id="p-stock-batch" autocomplete="off" /></div>
+            </div>
+            <div class="field"><label for="p-stock-expiry">Expiry date <span class="text-muted" id="p-stock-exp-opt">(optional)</span></label><input class="input" id="p-stock-expiry" type="date" style="max-width:220px" /></div>
+            <span class="field-hint" id="p-stock-hint">Stock is added to the current branch when the product is saved.</span>
+          </div>
+        </div>` : ''}
 
         <div class="field">
           <label for="p-description">Description <span class="text-muted">(optional)</span></label>
@@ -698,6 +720,30 @@
       };
       expiryBox.addEventListener('change', syncExpiryBatch);
       syncExpiryBatch();
+    }
+
+    // Optional "Add inventory now" section (new products only).
+    const stockToggle = modal.querySelector('#p-add-stock');
+    if (stockToggle) {
+      const stockFields = modal.querySelector('#p-stock-fields');
+      const stockExp = modal.querySelector('#p-stock-expiry');
+      const stockExpOpt = modal.querySelector('#p-stock-exp-opt');
+      const syncStock = () => {
+        const on = stockToggle.checked;
+        const hasVariants = modal.querySelectorAll('.variant-row').length > 0;
+        stockFields.style.display = on ? '' : 'none';
+        const expiryOn = !!(expiryBox && expiryBox.checked);
+        const tracked = !modal.querySelector('input[name="trackInventory"]') || modal.querySelector('input[name="trackInventory"]').checked;
+        stockExp.required = on && expiryOn;
+        stockExpOpt.textContent = expiryOn ? '(required)' : '(optional)';
+        modal.querySelector('#p-stock-hint').textContent = hasVariants
+          ? 'This product has variants - receive their stock from Inventory > Receive stock after saving.'
+          : (tracked ? 'Stock is added to the current branch when the product is saved.' : 'Turn on "Track inventory" below so this stock counts.');
+      };
+      stockToggle.addEventListener('change', () => { syncStock(); if (stockToggle.checked) modal.querySelector('#p-stock-qty').focus(); });
+      modal.querySelectorAll('input[name="trackExpiry"], input[name="trackBatch"], input[name="trackInventory"]').forEach((el) => el.addEventListener('change', syncStock));
+      modal.addEventListener('click', (e) => { if (e.target.closest('#add-variant-row-btn, .variant-row')) setTimeout(syncStock, 0); });
+      syncStock();
     }
 
     bindBarcodeScanButton(modal.querySelector('#p-barcode-scan-btn'), modal.querySelector('#p-barcode'));
@@ -773,12 +819,28 @@
         }
       }
 
+      // Optional opening stock (simple products only; variants are received from the Inventory page).
+      let stockReq = null;
+      const stockOn = !!modal.querySelector('#p-add-stock')?.checked && modal.querySelectorAll('.variant-row').length === 0;
+      if (stockOn) {
+        const qty = Number(modal.querySelector('#p-stock-qty').value);
+        const batchNo = modal.querySelector('#p-stock-batch').value.trim();
+        const expiry = modal.querySelector('#p-stock-expiry').value;
+        if (!(qty > 0)) { window.UI.toast.error('Enter the quantity received'); modal.querySelector('#p-stock-qty').focus(); return; }
+        if (raw.trackExpiry && !expiry) { window.UI.toast.error('Enter the expiry date for this product'); modal.querySelector('#p-stock-expiry').focus(); return; }
+        if (raw.trackSerialNumber) { window.UI.toast.error('Serial-numbered products: receive stock from Inventory > Receive stock so each serial can be entered'); return; }
+        if (!raw.trackInventory) { window.UI.toast.error('Turn on "Track inventory" to add stock'); return; }
+        const branchId = window.AppShell.getActiveBranchId();
+        if (!branchId) { window.UI.toast.error('Select a branch first'); return; }
+        stockReq = { branchId, quantity: qty, batchNumber: batchNo || undefined, expiryDate: expiry || undefined, reason: 'Initial stock' };
+      }
+
       const payload = {
         name: raw.name, sku: raw.sku, barcode: raw.barcode, categoryId: raw.categoryId || undefined,
         brand: raw.brand, costPrice: raw.costPrice, sellingPrice: raw.sellingPrice,
         // Always sent (0 when empty) so that clearing the box on an existing product removes the discount.
         defaultDiscount: discountValue,
-        taxRate: raw.taxRate, unit: raw.unit, lowStockThreshold: raw.lowStockThreshold,
+        taxRate: raw.taxRate, unit: raw.unit, ...(wf ? {} : { unitValue: Number(raw.unitValue) || 0 }), lowStockThreshold: raw.lowStockThreshold,
         description: raw.description,
         trackInventory: !!raw.trackInventory, trackSerialNumber: !!raw.trackSerialNumber,
         trackBatch: !!raw.trackBatch || !!raw.trackExpiry, trackExpiry: !!raw.trackExpiry,
@@ -835,8 +897,18 @@
           await window.Api.put(`/products/${product._id}`, payload);
           window.UI.toast.success('Product updated');
         } else {
-          await createProductWithRetry(payload, generated);
+          const created = await createProductWithRetry(payload, generated);
           window.UI.toast.success('Product added');
+          if (stockReq) {
+            try {
+              const pid = created?.data?.product?._id || created?.data?._id;
+              if (!pid) throw new Error('product id missing');
+              await window.Api.post('/inventory/receive', { ...stockReq, productId: pid, costPrice: (wfRes ? undefined : raw.costPrice) || undefined });
+              window.UI.toast.success('Stock received');
+            } catch (stockErr) {
+              window.UI.toast.warning(`Product saved, but the stock was not added (${stockErr.message}). Use Inventory > Receive stock.`);
+            }
+          }
           const printBox = modal.querySelector('#p-print-sticker');
           window.Storage.setPref('printStickerOnAdd', !!(printBox && printBox.checked));
           if (printBox && printBox.checked) {
