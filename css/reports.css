@@ -527,3 +527,13 @@ tr.log-row { cursor: pointer; }
   .chart-card-body { min-height: 220px; }
   .ch-tick, .ch-val { font-size: 11px; }
 }
+
+/* Big numbers always fit their tile (nothing is cut off): the figure scales with the tile's own width */
+.kpi { container-type: inline-size; }
+.kpi .kpi-value {
+  white-space: nowrap; word-break: normal; overflow: visible;
+  font-size: var(--text-xl, 1.25rem);
+  font-size: clamp(.82rem, 8.4cqw, var(--text-2xl));
+  line-height: 1.15;
+}
+.kpi .kpi-foot, .kpi .kpi-label { min-width: 0; }

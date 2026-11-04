@@ -4,7 +4,7 @@
  * To move to a different server, change PRODUCTION_API_URL below and redeploy the frontend.
  */
 (function (window) {
-  const PRODUCTION_API_URL = 'https://posbackend-5jaq.onrender.com/api/v1';
+  const PRODUCTION_API_URL = 'https://pos-api.sixstarsuppliers.com/api/v1';
 
   // Remove any backend address saved by an older version (a leftover "pos.apiBase" used to override this file).
   try { localStorage.removeItem('pos.apiBase'); } catch { /* storage blocked - fine */ }
