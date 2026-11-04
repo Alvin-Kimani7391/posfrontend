@@ -16,13 +16,25 @@
  *
  * LAYOUT
  *   Top bar  : tabs | shift status (open/close) | cashier + clock | view buttons
- *   Search   : scan / search bar (+ camera scan button + shortcut hints)
+ *   Search   : scan / search bar (+ camera scan button + shortcut hints + Held sales button)
  *   Ticket   : ONE scrolling grid that takes all the free space. Every row is a
  *              product, both halves on the same line:
  *                Products -> # | Barcode | Product name | Price per unit
  *                Cart     -> Quantity | Discount | Subtotal | remove
  *   Summary  : customer, cart discount, subtotal/tax, the big TOTAL and the
  *              single "Add payment to complete sale" button (also F9).
+ *
+ * ADD A PRODUCT FROM THE TILL (new)
+ *   When a search / scan finds nothing, the suggestions list ends with "Add '<term>' as a new product".
+ *   It always works now: if the PosBoost quick-add window is not loaded, a built-in "Add product" window
+ *   (name, barcode, price, cost, optional opening stock) is used. In retail the product goes straight into the cart.
+ *
+ * HELD SALES (new: always visible)
+ *   "Park" and "Held sales" buttons are always shown in retail (no longer hidden by a feature flag), the
+ *   Held sales button also sits beside the search bar with a live count, and F6 opens the manager.
+ *   The manager lists every held sale (server + this device) with: Resume | Add to cart (merge) | Items |
+ *   Rename (device) | Print slip | Discard | Discard all | Upload device ones | Park current cart.
+ *   If the server refuses to store a parked sale, it is kept on this device instead - nothing is ever lost.
  *
  * FULL VIEW (default): the workspace is pinned over the whole browser window
  * so the ticket gets every pixel. The top-bar button switches back to the
@@ -90,7 +102,7 @@
  * M-PESA confirmation code, and the backend checks it against payments PayHero
  * reported (exact amount, never used before) - a made-up code is rejected.
  *
- * SHORTCUTS (new sale view): F2 search | Up/Down pick | Enter add | F9 payment
+ * SHORTCUTS (new sale view): F2 search | Up/Down pick | Enter add | F6 held sales | F9 payment
  *   (drawer lock): F7 open drawer again | F8 drawer is closed
  */
 (function () {
@@ -388,6 +400,7 @@
   let clockTimer = null;
   let lastScan = { code: '', at: 0 };
   let boostWired = false;
+  let heldTimer = null;
 
   // cash drawer
   let drawerUi = null;
@@ -834,6 +847,7 @@
       if (state.view !== 'new-sale' || document.querySelector('.modal-backdrop') || drawerLocked()) return;
       if (e.key === 'F9') { e.preventDefault(); openPaymentModal(); }
       if (e.key === 'F2') { e.preventDefault(); $('pos-search')?.focus(); $('pos-search')?.select(); }
+      if (e.key === 'F6' && canHeld() && !isWs()) { e.preventDefault(); recallSale(); }
     };
     document.addEventListener('keydown', keyHandler);
   }
@@ -1193,11 +1207,13 @@
             <button type="button" class="btn btn-primary pz-scan-btn" id="pos-scan-btn">
               ${window.BarcodeScanner.cameraIconSvg} <span class="pz-scan-label">Scan barcode</span>
             </button>` : ''}
+          ${!wsOn && canHeld() ? `<button type="button" class="btn btn-secondary" id="held-top-btn" title="View all held sales (F6)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Held sales <span class="pz-count held-count" style="display:none">0</span></button>` : ''}
           ${window.PosBoost ? `<label class="pb-switch" title="Print the receipt automatically after each sale"><input type="checkbox" id="pb-autoprint" ${window.PosBoost.autoPrint.get() ? 'checked' : ''} /><span>Auto-print receipt</span></label>` : ''}
           <div class="pz-keys" aria-hidden="true">
             <span><kbd class="kbd">F2</kbd> search</span>
             <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> pick</span>
             <span><kbd class="kbd">Enter</kbd> add</span>
+            ${!wsOn && canHeld() ? '<span><kbd class="kbd">F6</kbd> held</span>' : ''}
             <span><kbd class="kbd">F9</kbd> payment</span>
           </div>
         </div>
@@ -1220,7 +1236,7 @@
           <div class="pz-tfoot">
             <div class="pz-tfoot-stats" id="pz-products-foot"></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-              ${!wsOn && canHeld() ? '<button class="btn btn-secondary btn-sm" id="park-btn" title="Park this cart and serve the next customer"><i class="fa-solid fa-pause" aria-hidden="true"></i> Park</button><button class="btn btn-secondary btn-sm" id="recall-btn" title="Recall a parked cart"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Recall</button>' : ''}
+              ${!wsOn && canHeld() ? '<button class="btn btn-secondary btn-sm" id="park-btn" title="Park this cart and serve the next customer"><i class="fa-solid fa-pause" aria-hidden="true"></i> Park</button><button class="btn btn-secondary btn-sm" id="recall-btn" title="View, resume, merge, print or discard held sales (F6)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Held sales <span class="pz-count held-count" style="display:none">0</span></button>' : ''}
               ${!wsOn && canPromo() ? '<button class="btn btn-secondary btn-sm" id="offers-btn" title="Check promotions for this cart"><i class="fa-solid fa-tags" aria-hidden="true"></i> Offers</button>' : ''}
               <button class="btn btn-ghost btn-sm" id="clear-cart-btn"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Clear all</button>
             </div>
@@ -1251,6 +1267,8 @@
 
     $('park-btn')?.addEventListener('click', parkSale);
     $('recall-btn')?.addEventListener('click', recallSale);
+    $('held-top-btn')?.addEventListener('click', recallSale);
+    refreshHeldCount(); if (!heldTimer) heldTimer = setInterval(refreshHeldCount, 30000);
     $('offers-btn')?.addEventListener('click', () => {
       if (!state.cart.length) return window.UI.toast.error('The cart is empty');
       schedulePromoQuote(true);
@@ -1364,6 +1382,15 @@
       dd.querySelector('.pz-dd-row.active')?.scrollIntoView({ block: 'nearest' });
     }
 
+    /** "Add as new product" footer: shown under the results AND when nothing matches (retail and wholesale). */
+    function addBtnHtml(term) {
+      if (!term) return '';
+      return `<button type="button" class="pz-dd-add" id="pz-dd-add"><i class="fa-solid fa-circle-plus" aria-hidden="true"></i> ${rows.length ? 'Not here? ' : ''}Add “${esc(term)}” as a new product</button>`;
+    }
+    function bindAddBtn(term) {
+      $('pz-dd-add')?.addEventListener('click', () => openQuickAdd(/^\d{6,}$/.test(term) ? { barcode: term } : { name: term }));
+    }
+
     function render(term, loading) {
       dd.classList.add('open');
       if (loading) { dd.innerHTML = '<div class="pz-dd-msg">Searching…</div>'; return; }
@@ -1374,10 +1401,7 @@
           <div class="pz-dd-msg" style="padding-top:0">${esc(o.name)}: ${esc(String(o.quantity))} in <b>${esc(o.warehouseName)}</b>${o.allowSales
             ? ` - <button type="button" class="pz-linkbtn" data-switch-wh="${esc(String(o.warehouseId))}">Sell from ${esc(o.warehouseName)}</button>`
             : ' (storage only: switch on "Can sell" for that warehouse, or move the stock to a selling warehouse)'}</div>`).join('');
-        if (!isWs() && window.PosBoost) {
-          dd.insertAdjacentHTML('beforeend', `<button type="button" class="pz-dd-add" id="pz-dd-add"><i class="fa-solid fa-circle-plus" aria-hidden="true"></i> Add “${esc(term)}” as a new product</button>`);
-          $('pz-dd-add').addEventListener('click', () => openQuickAdd(/^\d{6,}$/.test(term) ? { barcode: term } : { name: term }));
-        }
+        dd.insertAdjacentHTML('beforeend', addBtnHtml(term)); bindAddBtn(term);
         dd.querySelectorAll('[data-switch-wh]').forEach((b) => b.addEventListener('click', () => {
           const sel = $('pz-wh');
           if (!sel) return;
@@ -1398,7 +1422,9 @@
             <span class="pz-price">${fm(r.variant ? r.variant.sellingPrice : r.product.sellingPrice)}${off ? `<small>${fm(off)} off</small>` : ''}${wholesaleSearchHint(r)}</span>
           </div>`;
         }).join('')}
+        ${addBtnHtml(term)}
       `;
+      bindAddBtn(term);
       dd.querySelectorAll('.pz-dd-row').forEach((el) => {
         el.addEventListener('mouseenter', () => setActive(Number(el.dataset.idx)));
         el.addEventListener('click', () => pick(Number(el.dataset.idx)));
@@ -1467,7 +1493,7 @@
       // A long all-digit entry is a barcode (typed or wedge-scanned): same lookup as the scanner.
       if (/^\d{6,}$/.test(term)) { handleScannedCode(term); return; }
       if (!rows.length || dd.querySelector('.pz-dd-msg')) await runSearch(term);
-      if (!rows.length && !isWs() && window.PosBoost) { openQuickAdd(/^\d{6,}$/.test(term) ? { barcode: term } : { name: term }); return; }
+      if (!rows.length && !isWs()) { openQuickAdd(/^\d{6,}$/.test(term) ? { barcode: term } : { name: term }); return; }
       pick(active);
     });
 
@@ -1477,19 +1503,118 @@
     document.addEventListener('click', outsideHandler);
   }
 
-  /** Product not in the catalog: small window to add it right now, then it goes straight into the cart. */
+  /* ------------------------------------------------------------------ *
+   * ADD A PRODUCT FROM THE TILL
+   * Uses the PosBoost quick-add window when it is loaded; otherwise (or in wholesale mode) the built-in window below.
+   * ------------------------------------------------------------------ */
   function openQuickAdd(opts) {
-    if (!window.PosBoost) { window.UI.toast.error('Product not found'); return; }
     clearSearch();
-    window.PosBoost.quickAdd(Object.assign({}, opts, {
-      onAdded: (product) => {
+    if (!isWs() && window.PosBoost && typeof window.PosBoost.quickAdd === 'function') {
+      window.PosBoost.quickAdd(Object.assign({}, opts, {
+        onAdded: (product) => {
+          retailIndex.invalidate(); retailIndex.load();
+          if (product._pending || String(product._id || '').startsWith('tmp_')) {
+            window.UI.toast.info('Saved offline. It can be sold as soon as the internet is back and it has uploaded.');
+          } else addToCart(product, null);
+          $('pos-search')?.focus();
+        },
+      }));
+      return;
+    }
+    openBuiltinAddProduct(opts || {});
+  }
+
+  function skuFromName(name) {
+    const base = String(name || 'ITEM').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 14) || 'ITEM';
+    return `${base}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  }
+
+  function openBuiltinAddProduct(opts) {
+    const user = window.AppShell.getUser();
+    if (!window.Permissions.can(user, 'products.create')) {
+      window.UI.toast.error('You do not have permission to add products. Ask a manager.');
+      return;
+    }
+    if (isOfflineNow()) { window.UI.toast.error('Adding a product needs an internet connection.'); return; }
+    const wsOn = isWs();
+    const canStock = !wsOn && window.Permissions.can(user, 'inventory.receive');
+    const modal = window.UI.openModal({
+      title: 'Add product',
+      maxWidth: '520px',
+      bodyHtml: `
+        <form id="qa-form">
+          <div class="field"><label for="qa-name">Product name</label><input class="input" id="qa-name" name="name" required value="${esc(opts.name || '')}" /></div>
+          <div class="form-row">
+            <div class="field"><label for="qa-sku">SKU</label><input class="input" id="qa-sku" name="sku" required value="${esc(skuFromName(opts.name || ''))}" /></div>
+            <div class="field"><label for="qa-barcode">Barcode <span class="text-muted">(optional)</span></label>
+              <input class="input" id="qa-barcode" name="barcode" value="${esc(opts.barcode || '')}" placeholder="Scan or type" /></div>
+          </div>
+          <div class="form-row">
+            <div class="field"><label for="qa-price">Selling price (KES)</label><input class="input" id="qa-price" name="sellingPrice" type="number" step="0.01" min="0" inputmode="decimal" required /></div>
+            <div class="field"><label for="qa-cost">Cost price (KES)</label><input class="input" id="qa-cost" name="costPrice" type="number" step="0.01" min="0" inputmode="decimal" value="0" /></div>
+          </div>
+          <div class="form-row">
+            <div class="field"><label for="qa-tax">Tax rate (%)</label><input class="input" id="qa-tax" name="taxRate" type="number" step="0.01" min="0" max="100" value="16" /></div>
+            ${canStock ? `<div class="field"><label for="qa-qty">Opening stock <span class="text-muted">(optional)</span></label><input class="input" id="qa-qty" type="number" step="any" min="0" inputmode="decimal" placeholder="0" /></div>` : '<div></div>'}
+          </div>
+          ${wsOn ? '<p class="text-xs text-muted">The product is created without stock. Receive stock into the warehouse (Warehouses &amp; stock) before selling it wholesale.</p>' : ''}
+        </form>`,
+      footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="save" id="qa-save">${wsOn ? 'Add product' : 'Add &amp; put in cart'}</button>`,
+    });
+    const nameEl = modal.querySelector('#qa-name');
+    const skuEl = modal.querySelector('#qa-sku');
+    let skuTouched = false;
+    skuEl.addEventListener('input', () => { skuTouched = true; });
+    nameEl.addEventListener('input', () => { if (!skuTouched) skuEl.value = skuFromName(nameEl.value); });
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { window.UI.closeModal(); $('pos-search')?.focus(); });
+    setTimeout(() => (opts.name ? modal.querySelector('#qa-price') : nameEl).focus(), 50);
+
+    modal.querySelector('#qa-save').addEventListener('click', async () => {
+      const form = modal.querySelector('#qa-form');
+      if (!form.reportValidity()) return;
+      const raw = window.UI.serializeForm(form);
+      const price = Number(raw.sellingPrice);
+      if (!(price >= 0)) return window.UI.toast.error('Enter the selling price');
+      const payload = {
+        name: raw.name.trim(), sku: raw.sku.trim(), barcode: (raw.barcode || '').trim() || undefined,
+        costPrice: Number(raw.costPrice) || 0, sellingPrice: price, taxRate: Number(raw.taxRate) || 0,
+        unit: 'piece', lowStockThreshold: 5, defaultDiscount: 0, trackInventory: true,
+      };
+      if (!payload.barcode) {
+        try {
+          if (window.BarcodeLabels) {
+            const used = (await window.BarcodeLabels.loadCatalog()).used;
+            payload.barcode = window.BarcodeLabels.generateCode(used);
+          }
+        } catch { /* a barcode is optional */ }
+      }
+      const btn = modal.querySelector('#qa-save');
+      window.UI.setButtonLoading(btn, true, 'Saving…');
+      try {
+        const res = await window.Api.post('/products', payload);
+        const product = (res.data && (res.data.product || res.data)) || null;
+        const qty = Number(modal.querySelector('#qa-qty') ? modal.querySelector('#qa-qty').value : 0) || 0;
+        if (product && product._id && qty > 0) {
+          try {
+            await window.Api.post('/inventory/receive', { branchId: window.AppShell.getActiveBranchId(), productId: product._id, quantity: qty, costPrice: payload.costPrice || undefined, reason: 'Initial stock' });
+          } catch (e) { window.UI.toast.error(`Product added, but the stock was not received (${e.message}). Use Inventory > Receive stock.`); }
+        }
+        window.UI.closeModal();
         retailIndex.invalidate(); retailIndex.load();
-        if (product._pending || String(product._id || '').startsWith('tmp_')) {
-          window.UI.toast.info('Saved offline. It can be sold as soon as the internet is back and it has uploaded.');
-        } else addToCart(product, null);
+        window.UI.toast.success('Product added');
+        if (product && product._id && !wsOn) {
+          let full = product;
+          try { const { data } = await window.Api.get(`/products/${product._id}`, { branchId: window.AppShell.getActiveBranchId() || undefined }); full = data.product || product; } catch { /* use what we have */ }
+          addToCart(full, null);
+        }
         $('pos-search')?.focus();
-      },
-    }));
+      } catch (err) {
+        if (err.code === 'VALIDATION_ERROR' && err.errors && err.errors.length) window.UI.applyFormErrors(modal.querySelector('#qa-form'), err.errors);
+        else window.UI.toast.error(err.message);
+      } finally {
+        if (document.body.contains(btn)) window.UI.setButtonLoading(btn, false);
+      }
+    });
   }
 
   /* ---- Cart operations ---- */
@@ -2558,7 +2683,8 @@
    *   Offers : POST /shop/promotions/quote -> suggestedDiscount per line, applied as the line discount.
    * ================================================================== */
   const LOCAL_HELD_KEY = 'pos.heldLocal.v1';
-  const canHeld = () => !!(window.AppShell.hasFeature && window.AppShell.hasFeature('heldSales')) && window.Permissions.can(window.AppShell.getUser(), 'shop.held.use');
+  // Held sales are always available in retail: if the server refuses them, they are kept on this device instead.
+  const canHeld = () => true;
   const canPromo = () => !!(window.AppShell.hasFeature && window.AppShell.hasFeature('promotions')) && window.Permissions.can(window.AppShell.getUser(), 'shop.promotions.view');
 
   function localHeld() { try { const a = JSON.parse(localStorage.getItem(LOCAL_HELD_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }
@@ -2582,23 +2708,27 @@
     if (ans === null) return; // cancelled
     const label = ans.trim().slice(0, 60);
     let saved = false;
+    let onServer = false;
     if (!isOfflineNow()) {
       try {
         await window.Api.post('/shop/held', {
           branchId: window.AppShell.getActiveBranchId(), label: label || undefined, customerId: state.customer?._id || undefined, cartDiscount: state.cartDiscount || 0,
           items: state.cart.map((i) => ({ productId: i.product._id, variantId: i.variantId || i.variant?._id || undefined, quantity: i.quantity, discount: i.discount || 0 })),
         });
-        saved = true; window.UI.toast.success('Sale parked');
+        saved = true; onServer = true;
       } catch (e) {
-        if (!isNetErr(e)) return window.UI.toast.error(e.message || 'Could not park this sale');
+        // Server said no (feature off, no permission, temporary problem): keep the sale safe on this device instead.
       }
     }
-    if (!saved) { if (!parkLocal(label || 'Held sale')) return; window.UI.toast.success('Sale parked on this device'); }
+    if (!saved) { if (!parkLocal(label || 'Held sale')) return; }
+    window.UI.toast.success(onServer ? 'Sale parked' : 'Sale parked on this device');
     resetCart();
+    refreshHeldCount();
     $('pos-search')?.focus();
   }
 
-  async function loadRecalledCart(r, label) {
+  async function loadRecalledCart(r, label, opts) {
+    const merge = !!(opts && opts.merge);
     const lines = r.lines || [];
     const got = await Promise.all(lines.map(async (l) => {
       if (l.problems && l.problems.includes('PRODUCT_UNAVAILABLE')) return { l, skip: 'no longer available' };
@@ -2609,17 +2739,19 @@
       return { l, product, variant };
     }));
     const notes = [];
-    state.cart = [];
+    if (!merge) state.cart = [];
     got.forEach((g) => {
       if (g.skip) { notes.push(`${g.l.name}: ${g.skip}`); return; }
       const item = { product: g.product, variant: g.variant, quantity: g.l.quantity, discount: Number(g.l.discount) || 0, autoDiscount: false, promoApplied: false, overridePriceEnabled: false, overridePrice: null };
       if (item.discount > round2(unitPriceOf(item) * item.quantity)) item.discount = round2(unitPriceOf(item) * item.quantity);
-      state.cart.push(item);
+      const same = merge ? state.cart.find((x) => keyOf(x) === keyOf(item)) : null;
+      if (same) { same.quantity += item.quantity; same.discount = round2((same.discount || 0) + item.discount); same.autoDiscount = false; } else state.cart.push(item);
       if ((g.l.problems || []).includes('INSUFFICIENT_STOCK')) notes.push(`${g.l.name}: only ${g.l.available} in stock`);
     });
-    state.cartDiscount = Number(r.cartDiscount) || 0;
-    state.customer = null;
-    if (r.customerId) { try { const { data } = await window.Api.get(`/customers/${r.customerId._id || r.customerId}`); state.customer = data.customer || null; } catch { /* walk-in */ } }
+    if (merge) state.cartDiscount = round2((state.cartDiscount || 0) + (Number(r.cartDiscount) || 0));
+    else state.cartDiscount = Number(r.cartDiscount) || 0;
+    if (!merge) state.customer = null;
+    if (r.customerId && !(merge && state.customer)) { try { const { data } = await window.Api.get(`/customers/${r.customerId._id || r.customerId}`); state.customer = data.customer || null; } catch { /* walk-in */ } }
     checkoutKey = window.Api.newIdempotencyKey();
     const d = $('cart-discount-input'); if (d) d.value = state.cartDiscount || '';
     promoSig = ''; // prices may have changed since it was parked: re-check offers
@@ -2628,56 +2760,169 @@
     else window.UI.toast.success(`Recalled "${label || 'Held sale'}" at today's prices`);
   }
 
-  async function recallSale() {
-    if (isWs()) return window.UI.toast.error('Recall is for retail sales');
+  /* ------------------------------------------------------------------ *
+   * HELD SALES MANAGER: every held sale (server + this device) in one place.
+   * Actions: Resume (replace cart) | Add to cart (merge) | Items | Rename (device ones) | Print slip | Discard | Discard all
+   *          | Upload device ones to the server | Park the cart you are serving now
+   * ------------------------------------------------------------------ */
+  let heldRows = [];
+  async function fetchHeldRows() {
     let server = []; let serverErr = '';
     if (!isOfflineNow()) {
       try { const { data } = await window.Api.get('/shop/held', { branchId: window.AppShell.getActiveBranchId() || undefined, mine: true }); server = data.held || []; }
       catch (e) { serverErr = isNetErr(e) ? '' : (e.message || ''); }
     }
-    const local = localHeld();
     const rows = [
-      ...server.map((h) => ({ kind: 'S', id: h._id, label: h.label || 'Held sale', n: (h.items || []).length, at: new Date(h.createdAt).getTime() })),
-      ...local.map((h) => ({ kind: 'L', id: h.id, label: h.label || 'Held sale', n: h.cart.length, at: h.at })),
+      ...server.map((h) => ({
+        kind: 'S', id: h._id, label: h.label || 'Held sale', at: new Date(h.createdAt).getTime(),
+        customer: h.customerId && h.customerId.name ? h.customerId.name : '', cartDiscount: Number(h.cartDiscount) || 0,
+        expires: h.expiresAt ? new Date(h.expiresAt).getTime() : 0,
+        lines: (h.items || []).map((i) => ({ name: i.nameSnapshot || 'Item', quantity: i.quantity, discount: Number(i.discount) || 0 })),
+      })),
+      ...localHeld().map((h) => ({
+        kind: 'L', id: h.id, label: h.label || 'Held sale', at: h.at, customer: h.customer && h.customer.name ? h.customer.name : '',
+        cartDiscount: Number(h.cartDiscount) || 0, expires: 0,
+        lines: h.cart.map((i) => ({ name: nameOf(i.product, i.variant), quantity: i.quantity, discount: Number(i.discount) || 0, price: i.overridePriceEnabled && i.overridePrice != null ? i.overridePrice : (i.variant ? i.variant.sellingPrice : i.product.sellingPrice) })),
+      })),
     ].sort((a, b) => b.at - a.at);
+    return { rows, serverErr };
+  }
+  async function refreshHeldCount() {
+    const els = document.querySelectorAll('.held-count'); if (!els.length) return;
+    let n = localHeld().length;
+    if (!isOfflineNow()) { try { const { data } = await window.Api.get('/shop/held', { branchId: window.AppShell.getActiveBranchId() || undefined, mine: true }, { background: true }); n += (data.held || []).length; } catch { /* keep device count */ } }
+    document.querySelectorAll('.held-count').forEach((el) => { el.textContent = String(n); el.style.display = n ? '' : 'none'; });
+  }
+  const heldAgo = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} d ago`; };
+  function printHeldSlip(r) {
+    const units = r.lines.reduce((n, l) => n + Number(l.quantity || 0), 0);
+    const html = `<html><head><title>Held sale</title><style>body{font:13px monospace;width:280px;margin:8px}h3{margin:0 0 4px}hr{border:0;border-top:1px dashed #000}td{padding:1px 2px;vertical-align:top}td:last-child{text-align:right}</style></head><body>
+      <h3>HELD SALE: ${esc(r.label)}</h3><div>${esc(new Date(r.at).toLocaleString())}${r.customer ? `<br/>Customer: ${esc(r.customer)}` : ''}</div><hr/>
+      <table width="100%">${r.lines.map((l) => `<tr><td>${esc(l.name)}</td><td>x${esc(String(l.quantity))}</td></tr>`).join('')}</table><hr/>
+      <div>${r.lines.length} product(s), ${units} unit(s)${r.cartDiscount ? `<br/>Cart discount: ${esc(fm(r.cartDiscount))}` : ''}</div><div>Not a receipt. Prices are re-checked when resumed.</div></body></html>`;
+    const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+    document.body.appendChild(f); f.contentDocument.open(); f.contentDocument.write(html); f.contentDocument.close();
+    setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch { /* ignore */ } setTimeout(() => f.remove(), 2000); }, 200);
+  }
+
+  async function recallSale() {
+    if (isWs()) return window.UI.toast.error('Held sales are for retail sales');
+    if (drawerLocked()) return window.UI.toast.error('Close the cash drawer first');
+    const { rows, serverErr } = await fetchHeldRows();
+    heldRows = rows;
     const time = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const rowHtml = (r, i) => {
+      const units = r.lines.reduce((n, l) => n + Number(l.quantity || 0), 0);
+      const total = r.kind === 'L' && r.lines.every((l) => l.price != null) ? r.lines.reduce((n, l) => n + l.price * l.quantity - (l.discount || 0), 0) - r.cartDiscount : null;
+      const left = r.expires ? Math.round((r.expires - Date.now()) / 3600000) : null;
+      return `
+        <div class="pz-held-row" data-i="${i}" data-hay="${esc((r.label + ' ' + r.customer + ' ' + r.lines.map((l) => l.name).join(' ')).toLowerCase())}" style="border:1px solid var(--color-border);border-radius:10px;padding:10px;margin-bottom:8px">
+          <div style="display:flex;gap:8px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap">
+            <div style="min-width:0">
+              <strong>${esc(r.label)}</strong>${r.kind === 'L' ? ' <span class="pb-pending" style="background:#64748b">this device</span>' : ''}
+              <div class="text-xs text-muted">${r.lines.length} product${r.lines.length === 1 ? '' : 's'} · ${units} unit${units === 1 ? '' : 's'}${total != null ? ` · about ${esc(fm(Math.max(total, 0)))}` : ''} · ${esc(heldAgo(r.at))} (${esc(time(r.at))})${r.customer ? ` · ${esc(r.customer)}` : ''}${left != null && left < 12 ? ` · <span style="color:var(--color-danger)">expires in ${Math.max(left, 0)} h</span>` : ''}</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn btn-primary btn-sm" data-act="resume" data-i="${i}">Resume</button>
+              <button class="btn btn-secondary btn-sm" data-act="merge" data-i="${i}" title="Add these items to the cart you are serving now">Add to cart</button>
+              <button class="btn btn-ghost btn-sm" data-act="view" data-i="${i}">Items</button>
+              ${r.kind === 'L' ? `<button class="btn btn-ghost btn-sm" data-act="rename" data-i="${i}">Rename</button>` : ''}
+              <button class="btn btn-ghost btn-sm" data-act="print" data-i="${i}">Print</button>
+              <button class="btn btn-ghost btn-sm" data-act="drop" data-i="${i}" style="color:var(--color-danger)">Discard</button>
+            </div>
+          </div>
+          <div class="pz-held-lines text-sm" style="display:none;margin-top:8px;border-top:1px dashed var(--color-border);padding-top:6px">
+            ${r.lines.map((l) => `<div style="display:flex;justify-content:space-between;gap:8px"><span>${esc(l.name)}</span><span>× ${esc(String(l.quantity))}${l.discount ? ` <small class="text-muted">(−${esc(fm(l.discount))})</small>` : ''}</span></div>`).join('')}
+            ${r.cartDiscount ? `<div class="text-muted">Cart discount: ${esc(fm(r.cartDiscount))}</div>` : ''}
+          </div>
+        </div>`;
+    };
+    const localCount = rows.filter((r) => r.kind === 'L').length;
     const modal = window.UI.openModal({
-      title: 'Recall a held sale',
-      bodyHtml: `${serverErr ? `<p class="text-sm" style="color:var(--color-danger)">${esc(serverErr)}</p>` : ''}${rows.length ? `<div class="pz-held-list" style="display:flex;flex-direction:column;gap:8px">${rows.map((r, i) => `
-        <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 10px;border:1px solid var(--color-border);border-radius:8px">
-          <div><strong>${esc(r.label)}</strong><div class="text-xs text-muted">${r.n} item${r.n === 1 ? '' : 's'} · ${esc(time(r.at))}${r.kind === 'L' ? ' · on this device' : ''}</div></div>
-          <div style="display:flex;gap:6px"><button class="btn btn-primary btn-sm" data-act="recall" data-i="${i}">Recall</button><button class="btn btn-ghost btn-sm" data-act="drop" data-i="${i}" aria-label="Discard">Discard</button></div>
-        </div>`).join('')}</div>` : '<p class="text-sm text-secondary">No held sales.</p>'}`,
-      footerHtml: '<button class="btn btn-secondary" data-action="cancel">Close</button>',
+      title: `Held sales (${rows.length})`,
+      maxWidth: '720px',
+      bodyHtml: `${serverErr ? `<p class="text-sm" style="color:var(--color-danger)">Could not load sales held on the server: ${esc(serverErr)}. Sales held on this device are shown below.</p>` : ''}
+        ${state.cart.length ? '<div class="pz-note" style="margin-bottom:10px">You are serving a customer now. <b>Resume</b> replaces your cart; <b>Add to cart</b> merges a held sale into it; or park your current cart first.</div>' : ''}
+        ${rows.length ? `<input class="input" id="held-filter" placeholder="Search held sales by name, customer or product" style="margin-bottom:10px" />
+        <div id="held-list" style="max-height:55vh;overflow:auto">${rows.map(rowHtml).join('')}</div>` : '<p class="text-sm text-secondary">No held sales yet. Use <b>Park</b> to put the current cart aside and serve the next customer, then come back here to resume it.</p>'}`,
+      footerHtml: `${rows.length ? '<button class="btn btn-ghost" data-action="clear-all" style="color:var(--color-danger);margin-right:auto">Discard all</button>' : ''}${state.cart.length ? '<button class="btn btn-secondary" data-action="park-now">Park current cart</button>' : ''}${localCount && !isOfflineNow() ? '<button class="btn btn-secondary" data-action="upload-local">Upload device ones to server</button>' : ''}<button class="btn btn-secondary" data-action="cancel">Close</button>`,
     });
-    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => window.UI.closeModal());
+    const done = () => { refreshHeldCount(); };
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { window.UI.closeModal(); done(); $('pos-search')?.focus(); });
+    modal.querySelector('[data-action="park-now"]')?.addEventListener('click', async () => {
+      window.UI.closeModal();
+      await parkSale();
+      recallSale();
+    });
+    modal.querySelector('#held-filter')?.addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      modal.querySelectorAll('.pz-held-row').forEach((el) => { el.style.display = !q || el.dataset.hay.includes(q) ? '' : 'none'; });
+    });
+
+    const discard = async (r) => { if (r.kind === 'L') saveLocalHeld(localHeld().filter((h) => h.id !== r.id)); else await window.Api.delete(`/shop/held/${r.id}`); };
+
+    modal.querySelector('[data-action="clear-all"]')?.addEventListener('click', async () => {
+      if (!(await window.UI.confirmDialog({ title: `Discard all ${rows.length} held sales?`, message: 'This cannot be undone.', danger: true, confirmText: 'Discard all' }))) return;
+      let failed = 0;
+      for (const r of rows) { try { await discard(r); } catch { failed += 1; } }
+      window.UI.closeModal(); done();
+      if (failed) window.UI.toast.error(`${failed} could not be discarded`); else window.UI.toast.success('All held sales discarded');
+    });
+
+    modal.querySelector('[data-action="upload-local"]')?.addEventListener('click', async () => {
+      let ok = 0; let bad = 0;
+      for (const h of localHeld()) {
+        const items = h.cart.filter((i) => i.product && !String(i.product._id).startsWith('tmp_')).map((i) => ({ productId: i.product._id, variantId: (i.variant && i.variant._id) || undefined, quantity: i.quantity, discount: i.discount || 0 }));
+        if (!items.length) { bad += 1; continue; }
+        try {
+          await window.Api.post('/shop/held', { branchId: window.AppShell.getActiveBranchId(), label: h.label || undefined, customerId: (h.customer && h.customer._id) || undefined, cartDiscount: h.cartDiscount || 0, items });
+          saveLocalHeld(localHeld().filter((x) => x.id !== h.id)); ok += 1;
+        } catch { bad += 1; }
+      }
+      window.UI.closeModal(); done();
+      window.UI.toast[bad ? 'error' : 'success'](`${ok} uploaded${bad ? `, ${bad} could not be uploaded` : ''}`);
+      recallSale();
+    });
+
     modal.addEventListener('click', async (ev) => {
       const b = ev.target.closest('button[data-act]'); if (!b) return;
-      const r = rows[Number(b.dataset.i)];
-      if (b.dataset.act === 'drop') {
+      const r = heldRows[Number(b.dataset.i)]; if (!r) return;
+      const act = b.dataset.act;
+      if (act === 'view') { const box = b.closest('.pz-held-row').querySelector('.pz-held-lines'); box.style.display = box.style.display === 'none' ? '' : 'none'; return; }
+      if (act === 'print') { printHeldSlip(r); return; }
+      if (act === 'rename') {
+        const name = window.prompt('New name for this held sale:', r.label); if (name === null) return;
+        saveLocalHeld(localHeld().map((h) => (h.id === r.id ? { ...h, label: name.trim().slice(0, 60) || 'Held sale' } : h)));
+        window.UI.closeModal(); recallSale(); return;
+      }
+      if (act === 'drop') {
         if (!(await window.UI.confirmDialog({ title: `Discard "${r.label}"?`, danger: true, confirmText: 'Discard' }))) return;
-        try {
-          if (r.kind === 'L') saveLocalHeld(localHeld().filter((h) => h.id !== r.id)); else await window.Api.delete(`/shop/held/${r.id}`);
-          window.UI.closeModal(); window.UI.toast.success('Discarded'); recallSale();
-        } catch (e) { window.UI.toast.error(e.message || 'Could not discard'); }
+        try { await discard(r); window.UI.closeModal(); window.UI.toast.success('Discarded'); done(); recallSale(); } catch (e) { window.UI.toast.error(e.message || 'Could not discard'); }
         return;
       }
-      if (state.cart.length && !(await window.UI.confirmDialog({ title: 'Replace the current cart?', message: 'Park the current cart first if you want to keep it.', confirmText: 'Replace', danger: true }))) return;
-      window.UI.setButtonLoading && window.UI.setButtonLoading(b, true, 'Recalling…');
+      const merge = act === 'merge';
+      if (!merge && state.cart.length && !(await window.UI.confirmDialog({ title: 'Replace the current cart?', message: 'Use "Add to cart" to keep the current items, or Park the current cart first.', confirmText: 'Replace', danger: true }))) return;
       try {
         if (r.kind === 'L') {
           const h = localHeld().find((x) => x.id === r.id); if (!h) throw new Error('Not found');
-          state.cart = h.cart.map((i) => ({ ...i })); state.customer = h.customer || null; state.cartDiscount = h.cartDiscount || 0;
+          if (merge) {
+            h.cart.forEach((i) => {
+              const same = state.cart.find((x) => keyOf(x) === (i.variant ? i.variant._id : i.product._id));
+              if (same) { same.quantity += i.quantity; syncAutoDiscount(same); } else state.cart.push({ ...i });
+            });
+            if (!state.customer && h.customer) state.customer = h.customer;
+            state.cartDiscount = round2((state.cartDiscount || 0) + (h.cartDiscount || 0));
+          } else { state.cart = h.cart.map((i) => ({ ...i })); state.customer = h.customer || null; state.cartDiscount = h.cartDiscount || 0; }
           checkoutKey = window.Api.newIdempotencyKey(); promoSig = '';
           const d = $('cart-discount-input'); if (d) d.value = state.cartDiscount || '';
           saveLocalHeld(localHeld().filter((x) => x.id !== r.id));
-          renderCart(); window.UI.toast.success(`Recalled "${r.label}"`);
+          renderCart(); window.UI.toast.success(`${merge ? 'Added' : 'Resumed'} "${r.label}"`);
         } else {
           const { data } = await window.Api.post(`/shop/held/${r.id}/recall`, {});
-          await loadRecalledCart(data.cart, r.label);
+          await loadRecalledCart(data.cart, r.label, { merge });
         }
-        window.UI.closeModal(); $('pos-search')?.focus();
-      } catch (e) { window.UI.toast.error(e.message || 'Could not recall'); }
+        window.UI.closeModal(); done(); $('pos-search')?.focus();
+      } catch (e) { window.UI.toast.error(e.message || 'Could not open this held sale'); }
     });
   }
 
