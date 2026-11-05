@@ -116,6 +116,7 @@ window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault()
 
     { key: 'branches',      label: 'Branches',           icon: 'building',     href: 'branches.html',      permission: 'branches.view' },
     { key: 'employees', hxHide: true,     label: 'Employees',          icon: 'employees', href: 'employees.html',     permission: 'employees.view' },
+    { key: 'access-control', label: 'Access control',     icon: 'shield',    href: 'access-control.html', permission: 'employees.permissions' },
     { key: 'customers',     label: 'Customers',          icon: 'contact',      href: 'customers.html',     permission: 'customers.view' },
     { key: 'crm',           label: 'CRM',                icon: 'crm', href: 'crm.html',           permission: 'reports.view' },
     { key: 'sms',           label: 'SMS & Alerts',       icon: 'message',    href: 'sms.html',           permission: 'reports.view' },
@@ -589,7 +590,7 @@ window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault()
     ['settings', 'Settings', 'settings', ['hardware.settings', 'hardware.templates'], 'Setup'],
   ];
   // Shop tools: shared pages. [nav key, label override]
-  const HW_SHOP = [['inventory', 'Inventory'], ['purchases', 'Purchases'], ['customers', 'Customers'], ['expenses', 'Expenses'], ['cash-register', 'Cash register'], ['sales', 'Sales history'], ['refunds', 'Returns'], ['employees', 'Staff'], ['billing', 'Billing'], ['settings', 'Business settings']];
+  const HW_SHOP = [['inventory', 'Inventory'], ['purchases', 'Purchases'], ['customers', 'Customers'], ['expenses', 'Expenses'], ['cash-register', 'Cash register'], ['sales', 'Sales history'], ['refunds', 'Returns'], ['employees', 'Staff'], ['access-control', 'Access control'], ['billing', 'Billing'], ['settings', 'Business settings']];
   const HW_GRANTS = {
     CASHIER: ['hardware.quotes', 'hardware.deposits', 'sales.create', 'shifts.open', 'shifts.close', 'sales.view'], SALES_REP: ['hardware.quotes', 'sales.create', 'sales.view', 'hardware.boq', 'hardware.deposits'],
     STOREKEEPER: ['hardware.profile', 'hardware.locations', 'hardware.remnants', 'hardware.deliveries', 'hardware.repack', 'hardware.supplier'], DISPATCHER: ['hardware.deliveries', 'hardware.transport', 'hardware.transport.costs', 'hardware.locations'],
@@ -598,8 +599,10 @@ window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault()
   function hwCan(perms) {
     if (!perms || !perms.length) return true;
     const u = getUser() || {};
-    if (['OWNER', 'ADMIN', 'MANAGER'].includes(u.role)) return true;
-    return perms.some((p) => (Array.isArray(u.permissions) && u.permissions.length ? u.permissions.includes(p) : (HW_GRANTS[u.role] || []).includes(p)) || window.Permissions.can(u, p));
+    if (u.role === 'OWNER') return true;
+    if (Array.isArray(u.permissions)) return perms.some((p) => u.permissions.includes(p)); // server-computed
+    if (['ADMIN', 'MANAGER'].includes(u.role)) return true;
+    return perms.some((p) => (HW_GRANTS[u.role] || []).includes(p) || window.Permissions.can(u, p));
   }
   function buildHardwareNav(activePage) {
     const user = getUser(); let last = ''; let html = '';

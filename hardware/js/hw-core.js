@@ -16,8 +16,9 @@
   };
   HW.can = (p) => {
     const u = HW.S.user || {}, r = u.role;
-    if (['OWNER', 'ADMIN', 'MANAGER'].includes(r)) return true;
-    if (Array.isArray(u.permissions) && u.permissions.length) return u.permissions.includes(p);
+    if (r === 'OWNER') return true;
+    if (Array.isArray(u.permissions)) return u.permissions.includes(p); // server-computed (respects the owner's access settings)
+    if (['ADMIN', 'MANAGER'].includes(r)) return true;
     if ((GRANTS[r] || []).includes(p)) return true;
     try { return !!(window.Permissions && window.Permissions.can(u, p)); } catch (e) { return false; }
   };

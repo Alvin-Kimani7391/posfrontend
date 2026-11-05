@@ -178,7 +178,7 @@
       notice = `
         <div class="form-alert form-alert-success" style="margin-bottom:var(--space-4)">
           ${window.Icons.get('lock')}
-          <span>Give these details to ${esc(employee.name)} now. The ${pin ? 'PIN' : 'password'} is stored encrypted and can't be viewed again after you close this window.</span>
+          <span>${esc(employee.name)} starts with the standard ${esc(employee.role.charAt(0) + employee.role.slice(1).toLowerCase())} access (use <b>Set access</b> to change it). Give these details to ${esc(employee.name)} now. The ${pin ? 'PIN' : 'password'} is stored encrypted and can't be viewed again after you close this window.</span>
         </div>`;
     } else if (hasCode) {
       notice = `
@@ -205,6 +205,7 @@
       bodyHtml,
       footerHtml: `
         <button class="btn btn-secondary" data-action="close">Done</button>
+        ${justCreated && window.Permissions.can(window.AppShell.getUser(), 'employees.permissions') ? '<button class="btn btn-secondary" data-action="set-access">Set access</button>' : ''}
         ${canShare ? `
           <button class="btn btn-secondary" data-action="copy-message">Copy message</button>
           <button class="btn btn-primary" data-action="whatsapp">Send on WhatsApp</button>` : ''}
@@ -212,6 +213,8 @@
     });
 
     modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
+    const setAccess = modal.querySelector('[data-action="set-access"]');
+    if (setAccess) setAccess.addEventListener('click', () => { window.location.href = `access-control.html?employee=${encodeURIComponent(employee._id)}`; });
     modal.querySelectorAll('[data-copy]').forEach((btn) => {
       btn.addEventListener('click', () => copyText(btn.dataset.copy));
     });
@@ -364,7 +367,7 @@
             </div>
           </div>
         </td>
-        <td><span class="badge role-badge role-${u.role}">${u.role}</span></td>
+        <td><span class="badge role-badge role-${u.role}">${u.role}</span>${u.permissionSummary && u.permissionSummary.mode === 'custom' ? ' <span class="badge badge-info" title="This employee has custom permissions">Custom access</span>' : ''}</td>
         <td>
           <div class="text-sm">${window.UI.escapeHtml(u.phone)}</div>
           ${u.email ? `<div class="text-xs text-muted">${window.UI.escapeHtml(u.email)}</div>` : ''}
@@ -373,6 +376,7 @@
         <td><span class="badge ${STATUS_BADGE[u.status] || 'badge-neutral'}">${u.status}</span></td>
         <td class="actions">
           ${u.role === 'OWNER' ? '' : `
+            <button class="btn btn-ghost btn-sm" data-action="access" data-requires-permission="employees.permissions" title="Choose what this employee can do">Access</button>
             <button class="btn btn-ghost btn-sm" data-action="info" data-requires-permission="employees.create" title="Show login details to share">Login info</button>
             <button class="btn btn-ghost btn-sm btn-icon" data-action="edit" data-requires-permission="employees.update" title="Edit">${window.Icons.get('edit')}</button>
             <div class="dropdown">
@@ -382,6 +386,10 @@
         </td>
       </tr>
     `).join('');
+
+    tbody.querySelectorAll('[data-action="access"]').forEach((btn) => {
+      btn.addEventListener('click', () => { window.location.href = `access-control.html?employee=${encodeURIComponent(btn.closest('tr').dataset.id)}`; });
+    });
 
     tbody.querySelectorAll('[data-action="info"]').forEach((btn) => {
       btn.addEventListener('click', () => {

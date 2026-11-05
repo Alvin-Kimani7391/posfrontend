@@ -471,9 +471,16 @@
     DEFAULT_ROLE_PERMISSIONS[role] = Array.from(new Set([...(DEFAULT_ROLE_PERMISSIONS[role] || []), ...LIQUOR_GRANTS[role]]));
   });
 
+  // The server computes each user's effective permissions (system default -> owner's role template -> groups -> personal
+  // grants/denies) and sends them as user.permissions on login and /auth/me. When present that list IS the truth.
+  // The role tables above are only a fallback for sessions that predate it (and the offline till).
+  const setCache = new WeakMap();
+  function permSet(arr) { let s = setCache.get(arr); if (!s) { s = new Set(arr); setCache.set(arr, s); } return s; }
+
   function can(user, permission) {
     if (!user) return false;
     if (user.role === ROLES.OWNER) return true;
+    if (Array.isArray(user.permissions)) return permSet(user.permissions).has(permission);
     // ADMIN has everything except settings.update (same rule as the backend, so no button is shown that the server then refuses)
     if (user.role === ROLES.ADMIN) return permission !== 'settings.update' && !(user.revokedPermissions || []).includes(permission);
     if ((user.revokedPermissions || []).includes(permission)) return false;
@@ -497,5 +504,30 @@
     });
   }
 
-  window.Permissions = { ROLES, can, applyPermissionGates };
+  /**
+   * Keeps the signed-in user's permissions fresh. The owner can change access at any moment, so on every page load
+   * (at most every 20s) we ask the server for the current list; if it changed we save it and reload once so menus,
+   * buttons and gates match. Silent when offline.
+   */
+  async function sync({ force = false } = {}) {
+    try {
+      if (!window.Api || !window.Storage || !navigator.onLine) return false;
+      if (!window.Storage.getAccessToken() || window.Storage.getOfflineSession?.()) return false;
+      const last = Number(sessionStorage.getItem('pos.permsSyncedAt') || 0);
+      if (!force && Date.now() - last < 20000) return false;
+      sessionStorage.setItem('pos.permsSyncedAt', String(Date.now()));
+      const { data } = await window.Api.get('/permissions/me', undefined, { fresh: true });
+      const old = window.Storage.getUser();
+      if (!old || !data || !Array.isArray(data.permissions)) return false;
+      const same = old.role === data.role && (old.permissionMode || 'default') === data.mode
+        && JSON.stringify([...(old.permissions || [])].sort()) === JSON.stringify(data.permissions);
+      if (same) return false;
+      window.Storage.setUser({ ...old, role: data.role, permissionMode: data.mode, permissions: data.permissions });
+      location.reload();
+      return true;
+    } catch (e) { return false; }
+  }
+  if (typeof window.addEventListener === 'function') window.addEventListener('load', () => setTimeout(() => sync(), 600));
+
+  window.Permissions = { ROLES, can, applyPermissionGates, sync };
 })(window);

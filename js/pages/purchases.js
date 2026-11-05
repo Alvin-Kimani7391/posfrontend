@@ -561,13 +561,112 @@
 
   /* ---------------- create ---------------- */
 
-  async function openCreateModal() {
-    const branchId = window.AppShell.getActiveBranchId();
-    const suppliers = await getSuppliers();
-    if (!suppliers.length) {
-      window.UI.toast.error('Add a supplier first');
-      return;
+
+  const PC_CSS = `
+    .pc-top{display:grid;grid-template-columns:2fr 1.2fr 1.2fr .8fr;gap:12px;align-items:end}
+    .pc-top .field{margin-bottom:0}
+    .pc-sup-row{display:flex;gap:8px}.pc-sup-row select{flex:1;min-width:0}
+    .pc-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0 8px;padding:10px 12px;border:1px dashed var(--color-border,#cbd5e1);border-radius:10px;background:var(--color-surface-2,#f8fafc)}
+    .pc-bar .pc-hint{font-size:12px;color:var(--color-text-secondary,#64748b)}
+    .pc-table-wrap{border:1px solid var(--color-border,#e2e8f0);border-radius:10px;overflow:auto;max-height:46vh}
+    .pc-table{width:100%;border-collapse:collapse;min-width:700px;font-size:14px}
+    .pc-table th{position:sticky;top:0;background:var(--color-surface-2,#f1f5f9);text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.03em;padding:8px 10px;color:var(--color-text-secondary,#475569);z-index:1}
+    .pc-table td{padding:10px;border-top:1px solid var(--color-border,#e2e8f0);vertical-align:top}
+    .pc-table .pc-r{text-align:right;white-space:nowrap}
+    .pc-n{width:34px;color:var(--color-text-secondary,#64748b)}
+    .pc-name{font-weight:600}.pc-sku{font-size:12px;color:var(--color-text-secondary,#64748b)}
+    .pc-calc{font-size:12px;color:var(--color-text-secondary,#64748b);margin-top:4px}
+    .pc-table input.input{min-width:90px;text-align:right}
+    .pc-sub{font-size:11px;color:var(--color-text-secondary,#64748b);margin-top:3px;text-align:right}
+    .pc-row-bad td{background:#fff5f4}
+    .pc-empty{padding:28px;text-align:center;color:var(--color-text-secondary,#64748b)}
+    .pc-foot{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px}
+    .pc-totals{border:1px solid var(--color-border,#e2e8f0);border-radius:10px;padding:12px 14px;background:var(--color-surface-2,#f8fafc);font-size:14px}
+    .pc-totals div{display:flex;justify-content:space-between;padding:3px 0}
+    .pc-totals .pc-grand{border-top:1px solid var(--color-border,#cbd5e1);margin-top:6px;padding-top:8px;font-size:18px;font-weight:800}
+    .pc-vat-need select{border-color:#f0b429;box-shadow:0 0 0 3px rgba(240,180,41,.25)}
+    @media (max-width:760px){.pc-top{grid-template-columns:1fr 1fr}.pc-foot{grid-template-columns:1fr}}
+  `;
+  function ensurePcStyle() {
+    if (document.getElementById('pc-style')) return;
+    const st = document.createElement('style'); st.id = 'pc-style'; st.textContent = PC_CSS; document.head.appendChild(st);
+  }
+
+  /** "Add supplier" window that opens ON TOP of the New purchase window (which stays untouched). onSaved(supplier) */
+  function openQuickSupplier(onSaved) {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal-backdrop';
+    wrap.style.zIndex = 1300;
+    wrap.innerHTML = `
+      <div class="modal" style="max-width:480px" role="dialog" aria-modal="true">
+        <div class="modal-header"><strong>New supplier</strong></div>
+        <div class="modal-body">
+          <form id="qs-form" novalidate>
+            <div class="field"><label>Supplier name</label><input class="input" name="name" required maxlength="120" /></div>
+            <div class="form-row">
+              <div class="field"><label>Phone</label><input class="input" name="phone" inputmode="tel" /></div>
+              <div class="field"><label>Email</label><input class="input" name="email" type="email" /></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label>Contact person</label><input class="input" name="contactPerson" /></div>
+              <div class="field"><label>Payment terms</label><input class="input" name="paymentTerms" placeholder="e.g. Net 30" /></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label>Address</label><input class="input" name="address" /></div>
+              <div class="field"><label>Tax PIN</label><input class="input" name="taxPin" /></div>
+            </div>
+            <div id="qs-err" role="alert" style="display:none;padding:8px 10px;border-radius:6px;background:#fdecea;border:1px solid #d93025;color:#b3140a;font-weight:600;font-size:13px"></div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="qs-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="qs-save">Save supplier</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const form = wrap.querySelector('#qs-form');
+    const err = wrap.querySelector('#qs-err');
+    const close = () => { document.removeEventListener('keydown', onKey, true); wrap.remove(); };
+    function onKey(e) {
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); }
+      else if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') { e.stopPropagation(); e.preventDefault(); wrap.querySelector('#qs-save').click(); }
     }
+    document.addEventListener('keydown', onKey, true);
+    const showErr = (t) => { err.style.display = t ? '' : 'none'; err.textContent = t || ''; };
+    wrap.querySelector('#qs-cancel').addEventListener('click', close);
+    wrap.addEventListener('mousedown', (e) => { if (e.target === wrap) e.preventDefault(); });
+    wrap.querySelector('#qs-save').addEventListener('click', async () => {
+      const payload = window.UI.serializeForm(form);
+      payload.name = String(payload.name || '').trim();
+      if (!payload.name) { showErr('Enter the supplier name.'); form.name.focus(); return; }
+      if (payload.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(payload.email)) { showErr('That email address does not look right.'); form.email.focus(); return; }
+      const dup = (suppliersCache || []).find((x) => String(x.name || '').trim().toLowerCase() === payload.name.toLowerCase());
+      if (dup) { showErr(`A supplier named "${dup.name}" already exists. Pick it from the list instead.`); form.name.focus(); return; }
+      showErr('');
+      const btn = wrap.querySelector('#qs-save');
+      window.UI.setButtonLoading(btn, true, 'Saving…');
+      try {
+        const res = await window.Api.post('/suppliers', payload);
+        let sup = res && res.data && (res.data.supplier || (res.data._id ? res.data : null));
+        suppliersCache = null;
+        const list = await getSuppliers();
+        if (!sup || !sup._id) sup = list.find((x) => String(x.name).toLowerCase() === payload.name.toLowerCase());
+        window.UI.toast.success('Supplier added');
+        close();
+        if (sup) onSaved(sup, list);
+      } catch (e) {
+        showErr(e.message || 'Could not save the supplier');
+        window.UI.setButtonLoading(btn, false);
+      }
+    });
+    setTimeout(() => form.name.focus(), 30);
+  }
+
+  async function openCreateModal() {
+    ensurePcStyle();
+    const branchId = window.AppShell.getActiveBranchId();
+    let suppliers = [];
+    try { suppliers = await getSuppliers(); } catch (err) { window.UI.toast.error(err.message || 'Could not load suppliers'); }
 
     const money = window.UI.formatMoney;
     // { product, variant, quantity, price, priceUpdate, promptedFor }
@@ -578,19 +677,19 @@
 
     const modal = window.UI.openModal({
       title: 'New purchase',
-      maxWidth: '640px',
+      maxWidth: '1040px',
       bodyHtml: `
-        <form id="purchase-form">
-          <div class="form-row">
+        <form id="purchase-form" novalidate>
+          <div class="pc-top">
             <div class="field">
               <label>Supplier</label>
-              <select class="select" name="supplierId" required>${suppliers.map((s) => `<option value="${s._id}">${esc(s.name)}</option>`).join('')}</select>
+              <div class="pc-sup-row">
+                <select class="select" name="supplierId" id="pc-supplier" required>${suppliers.length ? suppliers.map((s) => `<option value="${s._id}">${esc(s.name)}</option>`).join('') : '<option value="">No suppliers yet - add one →</option>'}</select>
+                <button type="button" class="btn btn-secondary" id="new-supplier-btn" data-requires-permission="suppliers.create">${window.Icons.get('plus')} New supplier</button>
+              </div>
             </div>
             <div class="field"><label>Supplier invoice # <span class="text-muted">(optional)</span></label><input class="input" name="invoiceNumber" /></div>
-          </div>
-
-          <div class="form-row">
-            <div class="field">
+            <div class="field pc-vat-need" id="vat-field">
               <label>VAT on this purchase</label>
               <select class="select" id="vat-mode">
                 <option value="">Choose…</option>
@@ -599,21 +698,31 @@
                 <option value="NONE">No VAT</option>
               </select>
             </div>
-            <div class="field" id="vat-rate-field" style="display:none">
+            <div class="field" id="vat-rate-field" style="visibility:hidden">
               <label>VAT rate (%)</label>
               <input class="input" id="vat-rate" type="number" min="0" max="100" step="0.01" value="16" />
             </div>
           </div>
 
-          <div class="field">
-            <label>Items</label>
-            <div id="purchase-items"></div>
-            <button type="button" class="btn btn-secondary btn-sm" id="add-item-btn">${window.Icons.get('plus')} Add item</button>
+          <div class="pc-bar">
+            <button type="button" class="btn btn-primary" id="add-item-btn">${window.Icons.get('plus')} Add product</button>
+            <span class="pc-hint">Search by name, SKU or scan a barcode. Adding the same product again increases its quantity.</span>
           </div>
-          <div id="purchase-summary" class="text-sm" style="margin-bottom: var(--space-3)"></div>
 
-          <div class="field"><label>Supplier invoice <span class="text-muted">(optional)</span></label><div id="invoice-picker"></div></div>
-          <div class="field"><label>Notes <span class="text-muted">(optional)</span></label><textarea class="textarea" name="notes"></textarea></div>
+          <div class="pc-table-wrap">
+            <table class="pc-table">
+              <thead><tr><th>#</th><th>Product</th><th style="width:130px;text-align:right">Quantity</th><th style="width:170px;text-align:right">Unit cost</th><th style="width:130px;text-align:right">Line total</th><th style="width:44px"></th></tr></thead>
+              <tbody id="purchase-items"></tbody>
+            </table>
+          </div>
+
+          <div class="pc-foot">
+            <div>
+              <div class="field"><label>Supplier invoice <span class="text-muted">(optional)</span></label><div id="invoice-picker"></div></div>
+              <div class="field"><label>Notes <span class="text-muted">(optional)</span></label><textarea class="textarea" name="notes" rows="2"></textarea></div>
+            </div>
+            <div class="pc-totals" id="purchase-summary"></div>
+          </div>
         </form>
       `,
       footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="save" id="purchase-save-btn">Create purchase</button>`,
@@ -749,38 +858,58 @@
     function refreshCalc() {
       modal.querySelectorAll('[data-calc]').forEach((el) => { el.innerHTML = calcHtml(items[Number(el.dataset.calc)]); });
       modal.querySelectorAll('[data-pricebox]').forEach((el) => { const i = Number(el.dataset.pricebox); el.innerHTML = priceBoxHtml(items[i], i); });
-      let ex = 0; let incl = 0;
+      modal.querySelectorAll('[data-linetotal]').forEach((el) => {
+        const it = items[Number(el.dataset.linetotal)];
+        el.textContent = vat.mode ? money(splitPrice(it.price, vat.mode, vat.rate).inclVat * it.quantity) : '—';
+      });
+      let ex = 0; let incl = 0; let units = 0;
       items.forEach((it) => {
         const p = splitPrice(it.price, vat.mode, vat.rate);
-        ex += p.exVat * it.quantity; incl += p.inclVat * it.quantity;
+        ex += p.exVat * it.quantity; incl += p.inclVat * it.quantity; units += it.quantity * packOf(it);
       });
-      modal.querySelector('#purchase-summary').innerHTML = items.length && vat.mode
-        ? (vat.mode === 'NONE'
-          ? `<b>Total: ${money(incl)}</b>`
-          : `Subtotal excl. VAT: ${money(ex)} &middot; VAT: ${money(incl - ex)} &middot; <b>Total (real cost): ${money(incl)}</b>`)
-        : '';
+      modal.querySelector('#purchase-summary').innerHTML = `
+        <div><span>Products</span><b>${items.length}</b></div>
+        <div><span>Total units received</span><b>${Math.round(units * 100) / 100}</b></div>
+        ${vat.mode && vat.mode !== 'NONE' ? `<div><span>Subtotal excl. VAT</span><span>${money(ex)}</span></div><div><span>VAT (${vat.rate}%)</span><span>${money(incl - ex)}</span></div>` : ''}
+        <div class="pc-grand"><span>Total</span><span>${money(incl)}</span></div>`;
+      const sb = modal.querySelector('#purchase-save-btn');
+      if (sb && !sb.dataset.loading) sb.textContent = items.length ? `Create purchase · ${money(incl)}` : 'Create purchase';
     }
 
-    function renderItems() {
+    function renderItems(focusIdx) {
       const el = modal.querySelector('#purchase-items');
-      if (!items.length) { el.innerHTML = '<p class="text-sm text-muted">No items added yet.</p>'; refreshCalc(); return; }
-      el.innerHTML = items.map((it, i) => `
-        <div style="border:1px solid var(--color-border); border-radius:var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-2)">
-          <div class="flex items-center justify-between" style="margin-bottom: var(--space-2)">
-            <span class="text-sm font-semibold">${esc(it.product.name)}${liquor ? liquorChip(it) : ''}</span>
-            <button type="button" class="btn btn-ghost btn-sm btn-icon" data-remove="${i}">${window.Icons.get('trash')}</button>
-          </div>
-          <div class="form-row">
-            <div class="field" style="margin-bottom:0"><label class="text-xs">Quantity</label><input class="input" type="number" min="0.01" step="0.01" value="${it.quantity}" data-field="quantity" data-idx="${i}" /></div>
-            <div class="field" style="margin-bottom:0"><label class="text-xs">${priceLabel(it)}</label><input class="input" type="number" min="0" step="0.01" value="${it.price}" data-field="price" data-idx="${i}" /></div>
-          </div>
-          ${liquor ? liquorRowHtml(it, i) : ''}
-          <div class="text-xs text-secondary" style="margin-top: var(--space-2)" data-calc="${i}"></div>
-          <div data-pricebox="${i}" style="margin-top: var(--space-2)"></div>
-        </div>
-      `).join('');
+      if (!items.length) {
+        el.innerHTML = `<tr><td colspan="6"><div class="pc-empty"><b>No products added yet</b><br>Click <b>Add product</b> to search or scan the goods you received.</div></td></tr>`;
+        refreshCalc(); return;
+      }
+      el.innerHTML = items.map((it, i) => {
+        const vlabel = it.variant ? Object.values(it.variant.attributes || {}).join(', ') : '';
+        const sku = (it.variant ? it.variant.sku : it.product.sku) || '';
+        return `
+        <tr data-row="${i}">
+          <td class="pc-n">${i + 1}</td>
+          <td>
+            <div class="pc-name">${esc(it.product.name)}${vlabel ? ` <span class="text-muted">(${esc(vlabel)})</span>` : ''}${liquor ? liquorChip(it) : ''}</div>
+            ${sku ? `<div class="pc-sku">SKU: ${esc(sku)}</div>` : ''}
+            ${liquor ? liquorRowHtml(it, i) : ''}
+            <div class="pc-calc" data-calc="${i}"></div>
+            <div data-pricebox="${i}" style="margin-top:6px"></div>
+          </td>
+          <td><input class="input" type="number" min="0.01" step="0.01" value="${it.quantity}" data-field="quantity" data-idx="${i}" inputmode="decimal" aria-label="Quantity" /></td>
+          <td><input class="input" type="number" min="0" step="0.01" value="${it.price}" data-field="price" data-idx="${i}" inputmode="decimal" aria-label="Unit cost" /><div class="pc-sub">${priceLabel(it)}</div></td>
+          <td class="pc-r"><b data-linetotal="${i}"></b></td>
+          <td><button type="button" class="btn btn-ghost btn-sm btn-icon" data-remove="${i}" title="Remove" aria-label="Remove">${window.Icons.get('trash')}</button></td>
+        </tr>`;
+      }).join('');
       el.querySelectorAll('input[data-field]').forEach((input) => {
-        input.addEventListener('input', () => { items[Number(input.dataset.idx)][input.dataset.field] = Number(input.value) || 0; refreshCalc(); });
+        input.addEventListener('keydown', (e) => { if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); });
+        input.addEventListener('focus', () => input.select());
+        input.addEventListener('input', () => {
+          const it = items[Number(input.dataset.idx)];
+          it[input.dataset.field] = Number(input.value) || 0;
+          input.closest('tr').classList.remove('pc-row-bad');
+          refreshCalc();
+        });
         if (input.dataset.field === 'pack' || input.dataset.field === 'quantity') input.addEventListener('change', () => { if (liquor) renderItems(); });
         // Fires when the owner finishes typing the cost (blur / Enter) -> offer the price pop-up.
         if (input.dataset.field === 'price') {
@@ -804,32 +933,59 @@
         if (clr) { items[Number(clr.dataset.clearPrices)].priceUpdate = null; refreshCalc(); }
       };
       refreshCalc();
+      if (focusIdx != null) {
+        const q = el.querySelector(`input[data-field="quantity"][data-idx="${focusIdx}"]`);
+        if (q) { q.focus(); q.select(); q.closest('tr').scrollIntoView({ block: 'nearest' }); }
+      }
     }
     renderItems();
 
     modal.querySelector('#vat-mode').addEventListener('change', (e) => {
       vat.mode = e.target.value;
-      modal.querySelector('#vat-rate-field').style.display = vat.mode === 'INCLUSIVE' || vat.mode === 'EXCLUSIVE' ? '' : 'none';
+      modal.querySelector('#vat-rate-field').style.visibility = vat.mode === 'INCLUSIVE' || vat.mode === 'EXCLUSIVE' ? 'visible' : 'hidden';
+      modal.querySelector('#vat-field').classList.toggle('pc-vat-need', !vat.mode);
       renderItems(); // labels change with the mode
     });
     modal.querySelector('#vat-rate').addEventListener('input', (e) => { vat.rate = Number(e.target.value) || 0; refreshCalc(); });
 
     modal.querySelector('#add-item-btn').addEventListener('click', () => {
-      if (!vat.mode) return window.UI.toast.error('Choose the VAT option before adding products');
+      if (!vat.mode) { window.UI.toast.error('Choose the VAT option before adding products'); modal.querySelector('#vat-mode').focus(); return; }
       window.ProductPicker.open({
         onSelect: ({ product, variant }) => {
-          items.push({ product, variant, quantity: 1, price: variant ? variant.costPrice : product.costPrice, priceUpdate: null, promptedFor: null });
-          renderItems();
+          const same = items.findIndex((x) => x.product._id === product._id && (x.variant ? x.variant._id : '') === (variant ? variant._id : ''));
+          if (same >= 0) { items[same].quantity += 1; window.UI.toast.info(`${product.name}: quantity increased to ${items[same].quantity}`); renderItems(same); return; }
+          items.push({ product, variant, quantity: 1, price: (variant ? variant.costPrice : product.costPrice) || 0, priceUpdate: null, promptedFor: null });
+          renderItems(items.length - 1);
         },
       });
     });
+
+    const supSel = modal.querySelector('#pc-supplier');
+    const newSupBtn = modal.querySelector('#new-supplier-btn');
+    const openNewSupplier = () => openQuickSupplier((sup, list) => {
+      supSel.innerHTML = list.map((x) => `<option value="${x._id}">${esc(x.name)}</option>`).join('');
+      supSel.value = sup._id;
+    });
+    newSupBtn.addEventListener('click', openNewSupplier);
+    window.Permissions.applyPermissionGates(modal, window.AppShell.getUser());
+    if (!suppliers.length) setTimeout(openNewSupplier, 150); // nothing to pick from: go straight to adding one
 
     modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { picker.destroy(); window.UI.closeModal(); });
     modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
       if (!vat.mode) return window.UI.toast.error('Choose the VAT option first');
       if (!items.length) return window.UI.toast.error('Add at least one item');
       const form = modal.querySelector('#purchase-form');
-      if (!form.reportValidity()) return;
+      if (!supSel.value) { window.UI.toast.error('Choose a supplier, or add a new one'); supSel.focus(); return; }
+      const rows = modal.querySelectorAll('#purchase-items tr[data-row]');
+      rows.forEach((r) => r.classList.remove('pc-row-bad'));
+      const badQty = items.findIndex((it) => !(Number(it.quantity) > 0));
+      if (badQty >= 0) { rows[badQty] && rows[badQty].classList.add('pc-row-bad'); window.UI.toast.error(`Enter a quantity above 0 for ${items[badQty].product.name}`); return; }
+      const zero = items.findIndex((it) => !(Number(it.price) > 0));
+      if (zero >= 0) {
+        rows[zero] && rows[zero].classList.add('pc-row-bad');
+        const okZero = await window.UI.confirmDialog({ title: 'Cost is 0', message: `${items[zero].product.name} has a unit cost of 0. Is this free stock? Choose Cancel to enter the cost.`, confirmText: 'Yes, cost is 0' });
+        if (!okZero) return;
+      }
       const raw = window.UI.serializeForm(form);
       const rate = vat.mode === 'NONE' ? 0 : vat.rate;
 
