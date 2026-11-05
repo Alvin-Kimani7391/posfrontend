@@ -1,0 +1,394 @@
+/* ==========================================================================
+   POS MOBILE  (css/pos-mobile.css)         Phones only (<= 720px wide)
+   --------------------------------------------------------------------------
+   Loaded by sales.html AFTER pos.css. Everything is scoped to
+   body[data-page="sales"] and wrapped in a phone media query, so desktop and
+   tablet layouts are untouched.
+
+   WHAT THIS GIVES A CASHIER ON A PHONE
+     1. Top row     : [full view] [ New sale | Sales history ]   (+ shift row)
+                      cash-drawer button, clock, user name and shortcut hints removed
+     2. Search      : big search box + camera scan + auto-print icon;
+                      suggestions open as a clean card list (name + barcode | price)
+     3. Cart        : takes all free space; every product is a card
+                      (name, x, qty stepper, price, discount, subtotal)
+     4. Hold sale   : Park + Held sales merged into ONE button
+                      ("Hold sale" when nothing is held, "Held sales (n)" otherwise)
+     5. Pay bar     : customer + discount on one line, TOTAL + big Pay button pinned
+                      to the bottom
+     6. Pop-ups     : every modal on this page becomes a bottom sheet with a scrolling
+                      body and a pinned footer (payment, held sales, shift, discount...)
+   ========================================================================== */
+
+@media (max-width: 720px) {
+
+  /* ------------------------------------------------------------ frame ---- */
+  body[data-page="sales"] { overscroll-behavior: none; }
+  body[data-page="sales"] #pz-root { gap: 8px; }
+  body[data-page="sales"] #pz-root.pz-focus {
+    padding: 0 8px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: #f2f3f7;
+  }
+  body[data-page="sales"] #pz-root .card { border-radius: 16px; }
+  body[data-page="sales"] #pz-root .pz-view-pos { gap: 8px; }
+
+  /* Keyboard open (set by js/pages/sales-mobile.js): the workspace shrinks to what is visible */
+  body[data-page="sales"].pm-kb #pz-root.pz-focus {
+    bottom: auto;
+    top: var(--pz-vvt, 0px);
+    height: var(--pz-vvh, 100%);
+  }
+  /* ...and while typing in the search box, everything that is not search / cart steps aside */
+  body[data-page="sales"].pm-kb-search #pz-root .pz-shift,
+  body[data-page="sales"].pm-kb-search #pz-root .pz-sum-body,
+  body[data-page="sales"].pm-kb-search #pz-root .pz-tfoot { display: none; }
+
+  /* ------------------------------------------------------------ top bar -- */
+  body[data-page="sales"] #pz-root .pz-topbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    min-height: 0; padding: 6px 8px; border-radius: 14px;
+  }
+  body[data-page="sales"] #pz-root.pz-focus .pz-topbar {
+    margin: 0 -8px; border-radius: 0;
+    padding: calc(6px + env(safe-area-inset-top, 0px)) 8px 6px;
+  }
+  /* right-hand group dissolves so its buttons can be moved to the LEFT of the tabs */
+  body[data-page="sales"] #pz-root .pz-top-right { display: contents; }
+  body[data-page="sales"] #pz-root .pz-user,
+  body[data-page="sales"] #pz-root .pz-clock,
+  body[data-page="sales"] #pz-root #pz-drawer-btn,
+  body[data-page="sales"] #pz-root #pz-fs-btn,
+  body[data-page="sales"] #pz-root .pz-keys { display: none !important; }
+  body[data-page="sales"] #pz-root #pz-focus-btn {
+    order: -1; flex: 0 0 auto; width: 42px; height: 42px; border-radius: 12px;
+  }
+  body[data-page="sales"] #pz-root .pz-tabs {
+    order: 0; flex: 1 1 0; min-width: 0;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; border-radius: 12px;
+  }
+  body[data-page="sales"] #pz-root .pz-tab {
+    height: 36px; min-width: 0; padding: 0 6px; gap: 6px; justify-content: center;
+    font-size: 13px; border-radius: 9px;
+  }
+  body[data-page="sales"] #pz-root .pz-seg { order: 3; flex: 1 1 100%; width: 100%; }
+  body[data-page="sales"] #pz-root .pz-seg button { height: 36px; padding: 0 8px; }
+  body[data-page="sales"] #pz-root .pz-shift { order: 4; flex: 1 1 100%; }
+  body[data-page="sales"] #pz-root .pz-shift .shift-banner {
+    max-width: none; height: 36px; border-radius: 10px; font-size: 12.5px; padding: 0 6px 0 10px;
+  }
+
+  /* ------------------------------------------------------------ search --- */
+  body[data-page="sales"] #pz-root .pz-searchbar { padding: 8px; border-radius: 14px; }
+  body[data-page="sales"] #pz-root .pz-search-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  body[data-page="sales"] #pz-root .pz-searchwrap { flex: 1 1 0; min-width: 0; }
+  body[data-page="sales"] #pz-root .pz-searchwrap .input { height: 48px; font-size: 16px; border-radius: 14px; }
+  body[data-page="sales"] #pz-root .pz-scan-btn {
+    flex: 0 0 48px; width: 48px; height: 48px; padding: 0; border-radius: 14px; justify-content: center;
+  }
+  body[data-page="sales"] #pz-root .pz-scan-btn .pz-scan-label { display: none; }
+  body[data-page="sales"] #pz-root .pz-wh { order: 3; flex: 1 1 100%; max-width: none; height: 46px; }
+  body[data-page="sales"] #pz-root .pz-wh select { max-width: none; flex: 1; height: 42px; font-size: 16px; }
+
+  /* auto-print: a single printer icon instead of a wide switch */
+  body[data-page="sales"] #pz-root .pz-autoprint {
+    position: relative; flex: 0 0 48px; width: 48px; height: 48px !important;
+    padding: 0 !important; gap: 0 !important; justify-content: center; border-radius: 14px !important;
+  }
+  body[data-page="sales"] #pz-root .pz-autoprint > span { display: none !important; }
+  body[data-page="sales"] #pz-root .pz-autoprint::before {
+    content: "\f02f"; font-family: "Font Awesome 6 Free"; font-weight: 900; font-size: 17px; color: #8a92a8;
+  }
+  body[data-page="sales"] #pz-root .pz-autoprint:has(input:checked) {
+    background: var(--color-primary-50) !important; border-color: var(--color-primary) !important;
+  }
+  body[data-page="sales"] #pz-root .pz-autoprint:has(input:checked)::before { color: var(--color-primary); }
+
+  /* suggestions: a floating card list under the search bar (position is set by sales-mobile.js) */
+  body[data-page="sales"] #pz-root .pz-dd {
+    position: fixed; left: 8px; right: 8px; top: 128px; bottom: auto;
+    max-height: 55vh; border-radius: 16px; z-index: 80;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  }
+  body[data-page="sales"] #pz-root .pz-dd-head { display: none; }
+  body[data-page="sales"] #pz-root .pz-dd-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "name price" "bc price";
+    gap: 2px 12px; align-items: center;
+    min-height: 60px; padding: 10px 14px;
+  }
+  body[data-page="sales"] #pz-root .pz-dd-row .pz-name  { grid-area: name; font-size: 15px; line-height: 1.25; }
+  body[data-page="sales"] #pz-root .pz-dd-row .pz-mono  { grid-area: bc; font-size: 12px; color: var(--color-text-muted); }
+  body[data-page="sales"] #pz-root .pz-dd-row .pz-price { grid-area: price; font-size: 15px; align-self: center; }
+  body[data-page="sales"] #pz-root .pz-dd-row:active { background: var(--color-primary-50); box-shadow: inset 3px 0 0 var(--color-primary); }
+  body[data-page="sales"] #pz-root .pz-dd-msg { padding: 22px 14px; }
+  body[data-page="sales"] #pz-root .pz-dd-add { margin: 8px !important; width: calc(100% - 16px) !important; min-height: 48px; }
+
+  /* ------------------------------------------------------------ cart ----- */
+  body[data-page="sales"] #pz-root .pz-main {
+    display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0;
+  }
+  body[data-page="sales"] #pz-root .pz-ticketwrap { flex: 1 1 auto; min-height: 0; border-radius: 16px; }
+  body[data-page="sales"] #pz-root .pz-hgroup,
+  body[data-page="sales"] #pz-root .pz-hlabels { display: none; }
+
+  /* action strip (stats | Hold | Offers | Clear) sits ABOVE the list */
+  body[data-page="sales"] #pz-root .pz-tfoot {
+    order: -1; min-height: 0; padding: 8px 10px; gap: 8px; flex-wrap: nowrap;
+    border-top: 0; border-bottom: 1px solid var(--pz-hair); background: #fafbfd;
+  }
+  body[data-page="sales"] #pz-root .pz-tfoot-stats {
+    flex: 1 1 auto; min-width: 0; font-size: 13px; gap: 8px;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  body[data-page="sales"] #pz-root #pz-products-foot span:first-child:not(:last-child) { display: none; }
+  body[data-page="sales"] #pz-root .pz-tfoot > div:last-child { flex: 0 0 auto; flex-wrap: nowrap !important; gap: 6px !important; }
+  body[data-page="sales"] #pz-root .pz-tfoot .btn { height: 40px; min-height: 40px; border-radius: 12px; padding: 0 12px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+  body[data-page="sales"] #pz-root #park-btn { display: none !important; }            /* merged into #recall-btn */
+  body[data-page="sales"] #pz-root #recall-btn { background: var(--color-primary-50); border-color: var(--color-primary); color: var(--color-primary-dark); gap: 6px; }
+  body[data-page="sales"] #pz-root #recall-btn .pz-count { height: 20px; min-width: 20px; padding: 0 6px; font-size: 11px; }
+  body[data-page="sales"] #pz-root #offers-btn,
+  body[data-page="sales"] #pz-root #clear-cart-btn { width: 40px; padding: 0; font-size: 0; gap: 0; justify-content: center; }
+  body[data-page="sales"] #pz-root #offers-btn i,
+  body[data-page="sales"] #pz-root #clear-cart-btn i { font-size: 15px; }
+  body[data-page="sales"] #pz-root #clear-cart-btn { color: var(--color-danger); }
+  body[data-page="sales"] #pz-root #clear-cart-btn:disabled { opacity: .35; }
+
+  body[data-page="sales"] #pz-root .pz-tbody {
+    padding: 8px; background: #f4f5f9; display: flex; flex-direction: column; gap: 8px;
+    scroll-behavior: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  }
+  body[data-page="sales"] #pz-root .pz-empty { margin: auto; padding: 24px 18px; }
+  body[data-page="sales"] #pz-root .pz-empty i { width: 64px; height: 64px; font-size: 1.6rem; margin-bottom: 12px; }
+  body[data-page="sales"] #pz-root .pz-empty strong { font-size: 1.05rem; }
+
+  /* one product = one card:   name .......... disc  x
+                               [- qty +]  price  subtotal           */
+  body[data-page="sales"] #pz-root .pz-tr {
+    display: grid; height: auto; min-height: 0; flex: 0 0 auto;   /* never squash a card inside the scrolling list */
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "name name disc x" "qty price sub sub";
+    gap: 8px; align-items: center;
+    padding: 10px 6px 10px 12px;
+    background: #fff; border: 1px solid var(--pz-hair); border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, .05);
+    overflow: hidden;
+  }
+  body[data-page="sales"] #pz-root[data-mode="WHOLESALE"] .pz-tr {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "name name disc x" "qty price sub sub" "unit unit unit unit";
+  }
+  body[data-page="sales"] #pz-root .pz-tr.latest { border-color: color-mix(in srgb, var(--color-success) 45%, #fff); }
+  body[data-page="sales"] #pz-root .pz-tr .pz-left,
+  body[data-page="sales"] #pz-root .pz-tr .pz-rgt { display: contents; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-c-no,
+  body[data-page="sales"] #pz-root .pz-tr .pz-c-bc { display: none; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-c-name  { grid-area: name; padding: 0; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-c-price { grid-area: price; text-align: left; font-size: 13px; min-width: 0; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-c-qty   { grid-area: qty; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-c-unit  { grid-area: unit; width: 100%; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-c-disc  { grid-area: disc; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-c-sub   { grid-area: sub; justify-self: end; font-size: 16px; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-c-x     { grid-area: x; width: 36px; height: 36px; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-name { font-size: 15px; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-nm { -webkit-line-clamp: 2; line-height: 1.25; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-name-bc { display: block !important; font-size: 11.5px; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-price .pz-per { display: inline; }
+  body[data-page="sales"] #pz-root .pz-tr .pz-price small { font-size: 11px; }
+  body[data-page="sales"] #pz-root .pz-tr .pb-priceinp { width: 5.6em; max-width: 100%; height: 36px; font-size: 16px; border-radius: 10px; }
+  body[data-page="sales"] #pz-root .pz-stepper { border-radius: 12px; }
+  body[data-page="sales"] #pz-root .pz-stepper button { width: 38px; height: 42px; font-size: 1.3rem; }
+  body[data-page="sales"] #pz-root .pz-stepper input { width: 44px; height: 42px; font-size: 16px; }
+  body[data-page="sales"] #pz-root .pz-disc {
+    width: auto; min-width: 54px; height: 34px; padding: 0 10px; border-radius: 10px; font-size: 13px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  }
+  body[data-page="sales"] #pz-root .pz-disc::before {
+    content: "\f02b"; font-family: "Font Awesome 6 Free"; font-weight: 900; font-size: 11px; opacity: .65;
+  }
+  body[data-page="sales"] #pz-root .pz-unit { height: 42px; font-size: 16px; }
+
+  /* ------------------------------------------------- customer + pay bar -- */
+  body[data-page="sales"] #pz-root .pz-summary { flex: 0 0 auto; overflow: visible; border-radius: 16px; }
+  body[data-page="sales"] #pz-root .pz-sum-head,
+  body[data-page="sales"] #pz-root .pz-sum-lines,
+  body[data-page="sales"] #pz-root .pz-sum-hint { display: none; }
+  body[data-page="sales"] #pz-root .pz-sum-body {
+    flex: 0 0 auto; display: flex; flex-direction: row; align-items: center; gap: 8px;
+    padding: 8px 10px; overflow: visible;
+  }
+  body[data-page="sales"] #pz-root .pz-sum-body .pz-cust-btn {
+    flex: 1 1 0; min-width: 0; height: 44px; padding: 0 12px; font-size: 13.5px; white-space: nowrap;
+  }
+  body[data-page="sales"] #pz-root .pz-sum-body .field { flex: 0 0 116px; margin: 0; }
+  body[data-page="sales"] #pz-root .pz-sum-body .field label {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  body[data-page="sales"] #pz-root .pz-sum-body .input { height: 44px; font-size: 16px; }
+
+  body[data-page="sales"] #pz-root .pz-cart-foot {
+    display: grid; grid-template-columns: minmax(0, 1fr) 116px; gap: 8px; align-items: stretch;
+    padding: 8px 10px 10px; border-top: 1px solid var(--pz-hair);
+  }
+  body[data-page="sales"] #pz-root .pz-total {
+    margin: 0; min-width: 0; padding: 8px 12px; border-radius: 14px;
+    flex: none; flex-direction: column;
+    align-items: flex-start; text-align: left; justify-content: center;
+    container-type: inline-size;
+  }
+  body[data-page="sales"] #pz-root .pz-total-label {
+    align-self: stretch; flex: none; justify-content: flex-start; gap: 8px; font-size: 11.5px; white-space: nowrap;
+  }
+  body[data-page="sales"] #pz-root .pz-total-amount {
+    font-size: clamp(1.15rem, 7vw, 1.75rem); white-space: nowrap; overflow-wrap: normal; max-width: 100%;
+  }
+  @supports (font-size: 1cqw) {
+    body[data-page="sales"] #pz-root .pz-total-amount { font-size: clamp(1.05rem, 10.5cqw, 1.9rem); }
+  }
+  /* big green Pay button: text replaced with a short word so it never wraps */
+  body[data-page="sales"] #pz-root .pz-pay-btn {
+    width: 100%; height: auto; min-height: 58px; padding: 0; border-radius: 14px;
+    font-size: 0; line-height: 1; justify-content: center;
+  }
+  body[data-page="sales"] #pz-root .pz-pay-btn small { display: none; }
+  body[data-page="sales"] #pz-root .pz-pay-btn::after { content: "Pay"; font-size: 21px; font-weight: 800; letter-spacing: .01em; }
+  body[data-page="sales"] #pz-root[data-mode="WHOLESALE"] .pz-pay-btn::after { content: "Charge"; }
+
+  /* ----------------------------------------------------- history view ---- */
+  body[data-page="sales"] #pz-root .pz-view-history { padding-bottom: 8px; }
+  body[data-page="sales"] #pz-root .pz-view-history .toolbar .flex { width: 100%; }
+  body[data-page="sales"] #pz-root .pz-view-history .toolbar input[type="date"],
+  body[data-page="sales"] #pz-root .pz-view-history #history-channel { max-width: none !important; flex: 1 1 0; min-width: 0; }
+
+  /* ---------------------------------------------- floating helper chips -- */
+  /* offline status chip: never on top of the tabs; "all good" chips stay hidden */
+  body[data-page="sales"].pz-focus-on .ofl-chip {
+    top: auto !important; right: auto !important; left: 8px !important;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 150px) !important;
+    z-index: 85 !important;
+  }
+  body[data-page="sales"] .pwa-float { display: none !important; }
+  body[data-page="sales"] .toast-container,
+  body[data-page="sales"] #toast-root {
+    bottom: auto !important; top: calc(env(safe-area-inset-top, 0px) + 64px) !important;
+  }
+
+  /* ======================================================================
+     MODALS -> BOTTOM SHEETS   (payment, held sales, shift, discount, customer...)
+     ====================================================================== */
+  body[data-page="sales"] .modal-backdrop {
+    align-items: flex-end !important; justify-content: center; padding: 0 !important;
+    bottom: auto !important; top: var(--pz-vvt, 0px); height: var(--pz-vvh, 100%);
+    background: rgba(16, 24, 40, .55);
+  }
+  body[data-page="sales"] .modal-backdrop .modal {
+    display: flex !important; flex-direction: column;
+    width: 100% !important; max-width: 100% !important;
+    max-height: min(94dvh, calc(var(--pz-vvh, 100dvh) - 6px));
+    margin: 0; padding-bottom: 0 !important;
+    overflow: hidden !important;
+    border-radius: 22px 22px 0 0 !important;
+    animation: pmSheetUp .24s cubic-bezier(.2, .8, .2, 1);
+  }
+  @keyframes pmSheetUp { from { transform: translateY(36px); opacity: .5; } to { transform: none; opacity: 1; } }
+  body[data-page="sales"] .modal-backdrop .modal-header {
+    position: static; flex: 0 0 auto; padding: 4px 14px 10px 16px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  body[data-page="sales"] .modal-backdrop .modal-header h3 { font-size: 1.08rem; font-weight: 700; min-width: 0; }
+  body[data-page="sales"] .modal-backdrop .modal-close {
+    flex: 0 0 auto; width: 40px; height: 40px; background: #f1f3f7; font-size: 1.1rem;
+  }
+  body[data-page="sales"] .modal-backdrop .modal-body {
+    flex: 1 1 auto; min-height: 0; padding: 12px 14px 14px;
+    overflow-x: hidden; overflow-y: auto;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  }
+  body[data-page="sales"] .modal-backdrop .modal-footer {
+    position: static; flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: #fff; border-top: 1px solid var(--color-border);
+    box-shadow: 0 -8px 18px -12px rgba(16, 24, 40, .25);
+  }
+  body[data-page="sales"] .modal-backdrop .modal-footer .btn {
+    flex: 1 1 0; min-width: 0; min-height: 50px; border-radius: 14px; font-size: 15px; font-weight: 700;
+  }
+  body[data-page="sales"] .modal-backdrop .modal-footer [data-action="cancel"] { flex: 0 0 30%; }
+  body[data-page="sales"] .modal-backdrop .modal .input,
+  body[data-page="sales"] .modal-backdrop .modal .select,
+  body[data-page="sales"] .modal-backdrop .modal select,
+  body[data-page="sales"] .modal-backdrop .modal textarea { font-size: 16px; min-height: 46px; border-radius: 12px; }
+  body[data-page="sales"] .modal-backdrop .modal .form-row { display: grid; grid-template-columns: 1fr !important; gap: 10px; }
+  body[data-page="sales"] .modal-backdrop .modal .table-wrap { overflow-x: auto !important; }
+
+  /* ---- payment window ---- */
+  body[data-page="sales"] .pz-pay-total { padding: 12px 14px; border-radius: 16px; margin-bottom: 10px; }
+  body[data-page="sales"] .pz-pay-total strong { font-size: clamp(1.9rem, 10.5vw, 2.7rem); }
+  body[data-page="sales"] .pz-methods { grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 6px; margin-bottom: 10px; }
+  body[data-page="sales"] .pz-method {
+    height: 62px; padding: 0 2px; gap: 3px; border-width: 1.5px; border-radius: 12px;
+    font-size: 11.5px; line-height: 1.15; text-align: center;
+  }
+  body[data-page="sales"] .pz-method .pz-method-ico { font-size: 1.2rem; height: 22px; }
+  body[data-page="sales"] .pz-method:active { transform: scale(.97); }
+  body[data-page="sales"] .pz-cash-input { height: 58px !important; font-size: 1.6rem !important; }
+  body[data-page="sales"] .pz-quick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 10px; }
+  body[data-page="sales"] .pz-quick button { height: 48px; padding: 0; border-radius: 12px; font-size: 14px; }
+  body[data-page="sales"] .pz-quick button:first-child { background: var(--color-primary-50); border-color: var(--color-primary); color: var(--color-primary-dark); }
+  body[data-page="sales"] .pz-change { padding: 10px 12px; border-radius: 14px; }
+  body[data-page="sales"] .pz-change strong { font-size: clamp(1.6rem, 8.5vw, 2.3rem); }
+  body[data-page="sales"] .pz-note { padding: 10px 12px; }
+  body[data-page="sales"] .pz-complete-btn { min-width: 0 !important; height: 54px; font-size: 16px; flex: 1 1 0; }
+  body[data-page="sales"] .pz-till-grid { grid-template-columns: 1fr; }
+  body[data-page="sales"] .pz-ws { padding: 12px; }
+  body[data-page="sales"] .pz-ws-row { flex-wrap: wrap; }
+  body[data-page="sales"] .pz-ws-row .input { width: 100%; }
+
+  /* ---- held sales manager ---- */
+  body[data-page="sales"] .pz-held-row { padding: 12px !important; border-radius: 14px !important; }
+  body[data-page="sales"] .pz-held-row > div:first-child { flex-direction: column; flex-wrap: nowrap !important; }
+  body[data-page="sales"] .pz-held-row > div:first-child > div:last-child { width: 100%; }
+  body[data-page="sales"] .pz-held-row [data-act] { flex: 1 1 calc(33.33% - 6px); min-height: 42px; justify-content: center; }
+  body[data-page="sales"] .pz-held-row [data-act="resume"] { flex-basis: 100%; min-height: 46px; font-size: 15px; }
+  body[data-page="sales"] #held-list { max-height: none !important; overflow: visible !important; }
+  body[data-page="sales"] .modal-backdrop .modal-footer [data-action="clear-all"] { flex: 1 1 100%; margin-right: 0 !important; min-height: 44px; }
+
+  /* ---- cash count (close shift) ---- */
+  body[data-page="sales"] .cc-row { grid-template-columns: 84px 12px 76px minmax(0, 1fr); padding: 6px 8px; }
+}
+
+/* Small phones (<= 380px) */
+@media (max-width: 380px) {
+  body[data-page="sales"] #pz-root.pz-focus { padding-left: 6px; padding-right: 6px; }
+  body[data-page="sales"] #pz-root.pz-focus .pz-topbar { margin-left: -6px; margin-right: -6px; padding-left: 6px; padding-right: 6px; }
+  body[data-page="sales"] #pz-root .pz-tbody { padding: 6px; gap: 6px; }
+  body[data-page="sales"] #pz-root .pz-tr { padding: 8px 4px 8px 10px; gap: 6px; }
+  body[data-page="sales"] #pz-root .pz-stepper button { width: 34px; }
+  body[data-page="sales"] #pz-root .pz-stepper input { width: 38px; }
+  body[data-page="sales"] #pz-root .pz-disc { min-width: 46px; padding: 0 8px; }
+  body[data-page="sales"] #pz-root .pz-tr .pb-priceinp { width: 4.8em; }
+  body[data-page="sales"] #pz-root .pz-tab i { display: none; }
+  body[data-page="sales"] #pz-root .pz-sum-body .field { flex-basis: 100px; }
+  body[data-page="sales"] #pz-root .pz-cart-foot { grid-template-columns: minmax(0, 1fr) 100px; }
+}
+
+/* Phones turned sideways: cart on the left, totals + Pay on the right */
+@media (max-width: 720px) and (orientation: landscape) {
+  body[data-page="sales"] #pz-root .pz-main { flex-direction: row; }
+  body[data-page="sales"] #pz-root .pz-summary { flex: 0 0 min(300px, 40%); display: flex; flex-direction: column; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  body[data-page="sales"] #pz-root .pz-sum-body { flex-wrap: wrap; }
+  body[data-page="sales"] #pz-root .pz-sum-body .pz-cust-btn { flex: 1 1 100%; height: 40px; }
+  body[data-page="sales"] #pz-root .pz-sum-body .field { flex: 1 1 100%; }
+  body[data-page="sales"] #pz-root .pz-sum-body .input { height: 40px; }
+  body[data-page="sales"] #pz-root .pz-cart-foot { grid-template-columns: 1fr; margin-top: auto; }
+  body[data-page="sales"] #pz-root .pz-pay-btn { min-height: 50px; }
+  body[data-page="sales"] #pz-root .pz-searchwrap .input,
+  body[data-page="sales"] #pz-root .pz-scan-btn,
+  body[data-page="sales"] #pz-root .pz-autoprint { height: 42px !important; }
+  body[data-page="sales"] #pz-root .pz-topbar { padding-top: 3px; padding-bottom: 3px; }
+  body[data-page="sales"] #pz-root #pz-focus-btn { height: 38px; }
+  body[data-page="sales"] #pz-root .pz-tab { height: 32px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-page="sales"] .modal-backdrop .modal { animation: none; }
+}

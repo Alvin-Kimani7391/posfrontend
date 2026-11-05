@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.3.1-turbo';
+const VERSION = 'v5.3.3-turbo';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
@@ -14,6 +14,7 @@ const NOTES = [
   'Pages and content now open much faster: menu pages load instantly from the saved copy',
   'Phone menu: Reports now sits between Products and Inventory; Employees removed from the bottom bar',
   'Phone top bar is cleaner: branch picker and offline set-up button removed',
+  'Sales screen redesigned for phones: big cart, clean search list, one Hold button, quick Pay bar and bottom-sheet payment',
 
 
 
@@ -40,13 +41,13 @@ const PRECACHE = [
   'rider.html', 'track.html', 'hx-live.html', 'css/live.css', 'css/rider-login.css', 'js/core/live-kit.js', 'js/rider/rider-app.js', 'js/track/track-app.js', 'js/pages/hx-live.js', 'manifest-rider.json',
   'hx-cashier.html', 'css/hx-cashier.css', 'js/pages/hx-cashier.js', 'hx-floor.html', 'hx-kitchen.html', 'hx-bills.html', 'hx-reservations.html', 'hx-delivery.html', 'hx-storefront.html', 'js/pages/hx-storefront.js', 'hx-tv.html', 'tv.html', 'js/core/tv-player.js', 'js/pages/hx-tv.js', 'css/tv.css', 'js/core/tv-render.js', 'kiosk.html', 'css/kiosk.css', 'js/pages/kiosk.js', 'hx-selfservice.html', 'js/pages/hx-selfservice.js', 'store.html', 'css/store-auth.css', 'hx-menu.html', 'hx-stock.html', 'hx-guest.html', 'hx-staff.html', 'hx-desk.html', 'hx-rooms.html', 'hx-stays.html', 'hx-housekeeping.html', 'hx-reports.html', 'js/pages/hx-floor.js', 'js/pages/hx-kitchen.js', 'js/pages/hx-bills.js', 'js/pages/hx-reservations.js', 'js/pages/hx-delivery.js', 'js/pages/hx-menu.js', 'js/pages/hx-stock.js', 'js/pages/hx-guest.js', 'js/pages/hx-staff.js', 'js/pages/hx-desk.js', 'js/pages/hx-rooms.js', 'js/pages/hx-stays.js', 'js/pages/hx-housekeeping.js', 'js/pages/hx-reports.js', 'js/core/qr-encoder.js',
   'hx-dashboard.html', 'hx-manager.html', 'js/pages/hx-manager.js', 'hx-restaurant-settings.html', 'js/pages/hx-restaurant-settings.js', 'css/hx-restsettings.css', 'js/core/business-types.js', 'hx-setup.html', 'hx-settings.html', 'hx-operations.html', 'css/hospitality.css', 'css/hx-redesign.css', 'css/hx-pro.css', 'css/hx-fixes.css', 'css/hw-skin.css', 'js/core/hx-art.js', 'js/core/home-route.js', 'js/core/hx-kit.js', 'js/core/hx-history.js', 'js/core/hx-offline.js', 'js/core/hx-offline-tour.js', 'js/core/hx-pay.js', 'js/core/hx-order.js', 'js/core/hx-recipe.js', 'js/pages/hx-dashboard.js', 'js/pages/hx-setup.js', 
-  'offline.html', 'shop.html', 'js/pages/shop.js', 'liquor.html', 'js/pages/liquor.js', 'js/core/liquor-till.js', 'css/liquor.css', 'js/core/liquor-product-form.js', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'alerts.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'index.html', 'login.html', 'register.html', 'dashboard.html', 'sales.html',
+  'offline.html', 'shop.html', 'js/pages/shop.js', 'liquor.html', 'js/pages/liquor.js', 'js/core/liquor-till.js', 'css/liquor.css', 'js/core/liquor-product-form.js', 'onboarding.html', 'shelf-labels.html', 'batches.html', 'alerts.html', 'stocktakes.html', 'serials.html', 'warranty.html', 'repairs.html', 'vehicles.html', 'pharmacy.html', 'prescriptions.html', 'medicines.html', 'patients.html', 'pharmacy-compliance.html', 'pharmacy-settings.html', 'job-cards.html', 'manifest.webmanifest', 'index.html', 'login.html', 'forgot-password.html', 'reset-password.html', 'js/pages/forgot-password.js', 'js/pages/reset-password.js', 'register.html', 'dashboard.html', 'sales.html',
   'products.html', 'inventory.html', 'customers.html', 'branches.html', 'employees.html', 'suppliers.html',
   'purchases.html', 'expenses.html', 'refunds.html', 'reports.html', 'audit-logs.html', 'settings.html',
   'cash-register.html', 'notifications.html', 'offline-review.html', 'billing.html', 'crm.html',
 
   'wholesale.html', 'wholesale-reports.html', 'wholesale-sales.html', 'warehouses.html', 'payables.html', 'css/wholesale.css', 'js/core/wholesale-kit.js', 'js/core/product-picker.js', 'js/pages/wholesale-dashboard.js', 'js/pages/wholesale-inventory.js', 'js/pages/wholesale-suppliers.js', 'js/pages/wholesale-report.js', 'js/core/invoice-view.js',
-  'css/variables.css', 'css/base.css', 'css/components.css', 'css/layout.css', 'css/pos.css', 'css/reports.css',
+  'css/variables.css', 'css/base.css', 'css/components.css', 'css/layout.css', 'css/pos.css', 'css/pos-mobile.css', 'css/reports.css',
   'css/tour.css', 'css/announcements.css', 'css/billing.css', 'css/crm.css',
 
   'js/core/config.js', 'js/core/icons.js', 'js/core/storage.js', 'js/core/api.js', 'js/core/fast-search.js', 'js/core/connectivity.js',
@@ -57,7 +58,7 @@ const PRECACHE = [
   'js/core/customer-picker.js', 'js/core/receipt-view.js', 'js/core/barcode-scanner.js', 'js/core/cash-count.js',
   'js/core/cash-drawer.js', 'js/core/tour.js', 'js/core/announcements.js', 'js/core/billing-banner.js', 'js/core/premium.js', 'js/core/pwa.js', 'js/core/i18n.js', 'js/core/i18n-sw.js', 'js/core/country-flag.js', 'css/country-flag.css',
 
-  'js/pages/dashboard.js', 'js/pages/login.js', 'js/pages/register.js', 'js/pages/sales.js', 'js/pages/products.js', 'js/core/wholesale-product-form.js', 'js/core/product-import.js',
+  'js/pages/dashboard.js', 'js/pages/login.js', 'js/pages/register.js', 'js/pages/sales.js', 'js/pages/sales-mobile.js', 'js/pages/products.js', 'js/core/wholesale-product-form.js', 'js/core/product-import.js',
   'js/pages/inventory.js', 'js/pages/customers.js', 'js/pages/branches.js', 'js/pages/employees.js', 'js/pages/suppliers.js',
   'js/pages/purchases.js', 'js/pages/expenses.js', 'js/pages/refunds.js', 'js/pages/reports.js', 'js/pages/audit-logs.js',
   'js/pages/settings.js', 'js/pages/cash-register.js', 'js/pages/notifications.js', 'js/pages/offline-review.js',
