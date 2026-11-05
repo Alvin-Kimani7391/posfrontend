@@ -850,7 +850,7 @@
         <div class="form-row">
           <div class="field">
             <label for="p-taxrate">Tax rate (%)</label>
-            <input class="input" id="p-taxrate" name="taxRate" type="number" step="0.01" min="0" max="100" value="${isEdit ? product.taxRate : 16}" />
+            <input class="input" id="p-taxrate" name="taxRate" type="number" step="0.01" min="0" max="100" value="${isEdit ? product.taxRate : 0}" />
           </div>
           ${wf ? '' : `<div class="field">
             <label for="p-unit">Unit</label>

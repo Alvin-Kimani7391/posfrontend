@@ -27,7 +27,7 @@
       { n: 'unit', l: 'Stock is counted in', t: 'select', blank: false, opts: UNITS.map((u) => [u, unitLabel(u)]), v: base, hint: isEdit ? 'Fixed once the product exists' : 'The smallest unit you sell, e.g. piece, kg, metre' },
       { n: 'costPrice', l: 'Cost price (per unit)', t: 'number', v: isEdit ? x.costPrice : 0 },
       { n: 'sellingPrice', l: 'Selling price (per unit)', t: 'number', req: 1, v: x.sellingPrice },
-      { n: 'taxRate', l: 'Tax rate %', t: 'number', v: isEdit ? x.taxRate : 16 },
+      { n: 'taxRate', l: 'Tax rate %', t: 'number', v: isEdit ? x.taxRate : 0 },
       { n: 'lowStockThreshold', l: 'Warn me when stock is below', t: 'number', step: 1, v: x.lowStockThreshold },
     ];
     if (!isEdit) fields.push(

@@ -1556,7 +1556,8 @@
    * ------------------------------------------------------------------ */
   function openQuickAdd(opts) {
     clearSearch();
-    if (!isWs() && window.PosBoost && typeof window.PosBoost.quickAdd === 'function') {
+    // Online: always the built-in window (it has batch / expiry tracking, like Products). PosBoost is kept for offline quick-add only.
+    if (!isWs() && isOfflineNow() && window.PosBoost && typeof window.PosBoost.quickAdd === 'function') {
       window.PosBoost.quickAdd(Object.assign({}, opts, {
         onAdded: (product) => {
           retailIndex.invalidate(); retailIndex.load();
@@ -1646,6 +1647,14 @@
     if (input.value.trim()) check(true);
   }
 
+  /** Tracking checkbox shown only when the business has that feature on (same rule as Products). */
+  function qaTrackingOption(name, label, feature) {
+    const profile = window.AppShell.getBusinessProfile && window.AppShell.getBusinessProfile();
+    const known = !!(profile && profile.featureSettings);
+    if (known && !(window.AppShell.hasFeature && window.AppShell.hasFeature(feature))) return '';
+    return `<label class="checkbox-row"><input type="checkbox" name="${name}" /> <span class="text-sm">${label}</span></label>`;
+  }
+
   function openBuiltinAddProduct(opts) {
     const user = window.AppShell.getUser();
     if (!window.Permissions.can(user, 'products.create')) {
@@ -1666,14 +1675,29 @@
             <div class="field"><label for="qa-barcode">Barcode <span class="text-muted">(optional)</span></label>
               <input class="input" id="qa-barcode" name="barcode" value="${esc(opts.barcode || '')}" placeholder="Scan or type" /></div>
           </div>
+          <div class="field"><label for="qa-category">Category <span class="text-muted">(optional)</span></label>
+            <select class="select" id="qa-category" name="categoryId"><option value="">No category</option></select></div>
           <div class="form-row">
             <div class="field"><label for="qa-price">Selling price (KES)</label><input class="input" id="qa-price" name="sellingPrice" type="number" step="0.01" min="0" inputmode="decimal" required /></div>
             <div class="field"><label for="qa-cost">Cost price (KES)</label><input class="input" id="qa-cost" name="costPrice" type="number" step="0.01" min="0" inputmode="decimal" value="0" /></div>
           </div>
           <div class="form-row">
-            <div class="field"><label for="qa-tax">Tax rate (%)</label><input class="input" id="qa-tax" name="taxRate" type="number" step="0.01" min="0" max="100" value="16" /></div>
+            <div class="field"><label for="qa-tax">Tax rate (%)</label><input class="input" id="qa-tax" name="taxRate" type="number" step="0.01" min="0" max="100" value="0" /></div>
             ${canStock ? `<div class="field"><label for="qa-qty">Opening stock <span class="text-muted">(optional)</span></label><input class="input" id="qa-qty" type="number" step="any" min="0" inputmode="decimal" placeholder="0" /></div>` : '<div></div>'}
           </div>
+          ${(() => {
+            const bt = qaTrackingOption('trackBatch', 'Batch tracking', 'batchTracking');
+            const et = qaTrackingOption('trackExpiry', 'Expiry dates', 'expiryTracking');
+            return (bt || et) ? `<div class="field"><label>Tracking</label><div class="flex gap-4" style="flex-wrap:wrap">${bt}${et}</div></div>` : '';
+          })()}
+          ${canStock ? `<div id="qa-batch-fields" class="field" style="display:none;border:1px solid var(--color-border,#e5e7eb);border-radius:var(--radius-md,10px);padding:var(--space-3,12px)">
+            <label><strong>Batch &amp; expiry details</strong></label>
+            <div class="form-row">
+              <div class="field"><label for="qa-batch">Batch number <span class="text-muted" id="qa-batch-opt">(optional)</span></label><input class="input" id="qa-batch" autocomplete="off" /></div>
+              <div class="field"><label for="qa-expiry">Expiry date <span class="text-muted" id="qa-exp-opt">(optional)</span></label><input class="input" id="qa-expiry" type="date" /></div>
+            </div>
+            <span class="field-hint" id="qa-batch-hint">These go with the opening stock above. Enter the stock quantity to save them.</span>
+          </div>` : ''}
           ${wsOn ? '<p class="text-xs text-muted">The product is created without stock. Receive stock into the warehouse (Warehouses &amp; stock) before selling it wholesale.</p>' : ''}
         </form>`,
       footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="save" id="qa-save">${wsOn ? 'Add product' : 'Add &amp; put in cart'}</button>`,
@@ -1684,8 +1708,38 @@
     skuEl.addEventListener('input', () => { skuTouched = true; });
     nameEl.addEventListener('input', () => { if (!skuTouched) skuEl.value = skuFromName(nameEl.value); });
     bindBarcodeLiveCheck(modal.querySelector('#qa-barcode'));
+
+    // Expiry is stored on a batch, so tracking expiry always means tracking batches too (same as Products).
+    const qaExpiryBox = modal.querySelector('input[name="trackExpiry"]');
+    const qaBatchBox = modal.querySelector('input[name="trackBatch"]');
+    const qaQtyEl = modal.querySelector('#qa-qty');
+    const qaBatchFields = modal.querySelector('#qa-batch-fields');
+    const syncQaTracking = () => {
+      if (qaExpiryBox && qaBatchBox) {
+        if (qaExpiryBox.checked) { qaBatchBox.checked = true; qaBatchBox.disabled = true; qaBatchBox.title = 'Required while expiry dates are tracked'; }
+        else { qaBatchBox.disabled = false; qaBatchBox.title = ''; }
+      }
+      if (!qaBatchFields) return;
+      const tracked = !!((qaBatchBox && qaBatchBox.checked) || (qaExpiryBox && qaExpiryBox.checked));
+      qaBatchFields.style.display = tracked ? '' : 'none';
+      const expOn = !!(qaExpiryBox && qaExpiryBox.checked);
+      const expEl = modal.querySelector('#qa-expiry');
+      if (expEl) expEl.required = false; // checked in the save handler (only needed when stock is entered)
+      const opt = modal.querySelector('#qa-exp-opt'); if (opt) opt.textContent = expOn ? '(required with stock)' : '(optional)';
+    };
+    [qaExpiryBox, qaBatchBox].forEach((el) => el && el.addEventListener('change', syncQaTracking));
+    if (qaQtyEl) qaQtyEl.addEventListener('input', syncQaTracking);
+    syncQaTracking();
+
     modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { window.UI.closeModal(); $('pos-search')?.focus(); });
     setTimeout(() => (opts.name ? modal.querySelector('#qa-price') : nameEl).focus(), 50);
+    (async () => {
+      try {
+        if (!window.__qaCats) window.__qaCats = (await window.Api.get('/categories')).data.categories || [];
+        const sel = modal.querySelector('#qa-category');
+        if (sel) sel.innerHTML = '<option value="">No category</option>' + window.__qaCats.map((c) => `<option value="${esc(c._id)}">${esc(c.name)}</option>`).join('');
+      } catch { /* categories are optional */ }
+    })();
 
     modal.querySelector('#qa-save').addEventListener('click', async () => {
       const form = modal.querySelector('#qa-form');
@@ -1702,7 +1756,14 @@
         name: raw.name.trim(), sku: raw.sku.trim(), barcode: (raw.barcode || '').trim() || undefined,
         costPrice: Number(raw.costPrice) || 0, sellingPrice: price, taxRate: Number(raw.taxRate) || 0,
         unit: 'piece', lowStockThreshold: 5, defaultDiscount: 0, trackInventory: true,
+        trackBatch: !!(raw.trackBatch || raw.trackExpiry), trackExpiry: !!raw.trackExpiry,
       };
+      const qaQty = Number(qaQtyEl ? qaQtyEl.value : 0) || 0;
+      const qaBatchNo = modal.querySelector('#qa-batch') ? modal.querySelector('#qa-batch').value.trim() : '';
+      const qaExpiry = modal.querySelector('#qa-expiry') ? modal.querySelector('#qa-expiry').value : '';
+      if (raw.categoryId) payload.categoryId = raw.categoryId;
+      if ((payload.trackBatch || payload.trackExpiry) && qaQty <= 0 && (qaBatchNo || qaExpiry)) { window.UI.toast.error('Enter the opening stock quantity so the batch / expiry can be saved with it'); if (qaQtyEl) qaQtyEl.focus(); return; }
+      if (payload.trackExpiry && qaQty > 0 && !qaExpiry) { window.UI.toast.error('Enter the expiry date for this stock'); modal.querySelector('#qa-expiry').focus(); return; }
       if (!payload.barcode) {
         try {
           if (window.BarcodeLabels) {
@@ -1719,7 +1780,7 @@
         const qty = Number(modal.querySelector('#qa-qty') ? modal.querySelector('#qa-qty').value : 0) || 0;
         if (product && product._id && qty > 0) {
           try {
-            await window.Api.post('/inventory/receive', { branchId: window.AppShell.getActiveBranchId(), productId: product._id, quantity: qty, costPrice: payload.costPrice || undefined, reason: 'Initial stock' });
+            await window.Api.post('/inventory/receive', { branchId: window.AppShell.getActiveBranchId(), productId: product._id, quantity: qty, costPrice: payload.costPrice || undefined, batchNumber: qaBatchNo || undefined, expiryDate: qaExpiry || undefined, reason: 'Initial stock' });
           } catch (e) { window.UI.toast.error(`Product added, but the stock was not received (${e.message}). Use Inventory > Receive stock.`); }
         }
         window.UI.closeModal();

@@ -93,7 +93,7 @@
       ${sec('4 · Price', `<div class="lq-grid">
           ${fld({ name: 'costPrice', label: 'Buying price per bottle (KES)', type: 'number', value: p.costPrice, attrs: 'min="0" step="0.01"' })}
           ${fld({ name: 'sellingPrice', label: 'Selling price (KES)', type: 'number', value: p.sellingPrice, req: true, attrs: 'min="0" step="0.01"' })}
-          ${fld({ name: 'taxRate', label: 'VAT %', type: 'number', value: p.taxRate != null ? p.taxRate : 16, attrs: 'min="0" max="100" step="0.01"' })}
+          ${fld({ name: 'taxRate', label: 'VAT %', type: 'number', value: p.taxRate != null ? p.taxRate : 0, attrs: 'min="0" max="100" step="0.01"' })}
           ${canDetails ? fld({ name: 'excise', label: 'Excise inside the price, per bottle (KES, optional)', type: 'number', value: excise, attrs: 'min="0" step="0.01"', hint: 'Only used for the excise report. Enter it in shillings, not cents.' }) : ''}
         </div><div class="lq-calc" id="lq-calc"></div>`)}
       ${sec('5 · Packs & empties', `<div class="lq-grid">
@@ -163,7 +163,7 @@
       const packSize = num(v('packSize'));
       if (packSize != null && packSize < 2) return showErr('A case must hold at least 2 bottles.');
 
-      const body = { name, ...(v('brand') ? { brand: v('brand') } : {}), sellingPrice: sell, ...(cost != null ? { costPrice: cost } : {}), taxRate: num(v('taxRate')) ?? 16, lowStockThreshold: num(v('lowStockThreshold')) ?? 0, ...(v('categoryId') ? { categoryId: v('categoryId') } : {}) };
+      const body = { name, ...(v('brand') ? { brand: v('brand') } : {}), sellingPrice: sell, ...(cost != null ? { costPrice: cost } : {}), taxRate: num(v('taxRate')) ?? 0, lowStockThreshold: num(v('lowStockThreshold')) ?? 0, ...(v('categoryId') ? { categoryId: v('categoryId') } : {}) };
       if (st.imageChanged) body.image = st.image;
       if (packSize != null) body.units = [{ name: v('packName') || 'Case', factor: packSize, ...(num(v('packPrice')) != null ? { retailPrice: num(v('packPrice')) } : {}) }];
       const dBody = { category: st.cat, isAlcohol: alcoholic, ...(abv != null ? { abv } : {}), ...(num(v('volumeMl')) ? { volumeMl: num(v('volumeMl')) } : {}), ...(num(v('vintage')) ? { vintage: num(v('vintage')) } : {}),
