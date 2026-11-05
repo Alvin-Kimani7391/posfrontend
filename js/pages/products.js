@@ -95,6 +95,9 @@
           <p>Manage your catalog, categories, and product variants.</p>
         </div>
         <div class="flex gap-2">
+          <button class="btn btn-secondary" id="refresh-products-btn" title="Reload products, categories and barcodes from the server">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" id="refresh-products-icon"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Refresh
+          </button>
           <button class="btn btn-secondary" id="manage-categories-btn" data-requires-permission="categories.view">
             ${window.Icons.get('box')} Categories
           </button>
@@ -332,6 +335,27 @@
   }
 
   function bindToolbar() {
+    const refreshBtn = document.getElementById('refresh-products-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', async () => {
+      if (refreshBtn.disabled) return;
+      refreshBtn.disabled = true;
+      const icon = document.getElementById('refresh-products-icon');
+      if (icon) icon.animate([{ transform: 'rotate(0)' }, { transform: 'rotate(360deg)' }], { duration: 700, iterations: Infinity });
+      try {
+        usedBarcodes = null; getUsedBarcodes(true).catch(() => {});
+        await getCategories(true);
+        populateCategoryFilter();
+        const sel = document.getElementById('category-filter');
+        if (sel) sel.value = state.categoryId || '';
+        await fetchAndRender();
+        window.UI.toast.success('Products refreshed');
+      } catch (err) {
+        window.UI.toast.error(err.message || 'Could not refresh');
+      } finally {
+        refreshBtn.disabled = false;
+        if (icon) icon.getAnimations().forEach((a) => a.cancel());
+      }
+    });
     document.getElementById('barcode-stickers-btn').addEventListener('click', () => {
       window.BarcodeLabels.openPrintDialog({ selectedIds: [] }); // everything ticked: untick what you do not need
     });
