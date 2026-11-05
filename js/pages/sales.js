@@ -2761,10 +2761,17 @@
   async function loadRecalledCart(r, label, opts) {
     const merge = !!(opts && opts.merge);
     const lines = r.lines || [];
+    // Products come from the copy already on this device (the same one that makes search instant); only a product missing
+    // from it is fetched, and those fetches run together. This is what makes Resume / Add to cart fast.
+    const idx = new Map();
+    try { const all = retailIndex.isReady() ? retailIndex.query({ limit: 1000000 }) : null; if (all) all.items.forEach((p) => { if (!p._pending) idx.set(String(p._id), p); }); } catch { /* fall back to the server */ }
     const got = await Promise.all(lines.map(async (l) => {
       if (l.problems && l.problems.includes('PRODUCT_UNAVAILABLE')) return { l, skip: 'no longer available' };
-      const { data } = await window.Api.get(`/products/${l.productId}`, { branchId: window.AppShell.getActiveBranchId() || undefined });
-      const product = data.product || data;
+      let product = idx.get(String(l.productId));
+      if (!product) {
+        const { data } = await window.Api.get(`/products/${l.productId}`, { branchId: window.AppShell.getActiveBranchId() || undefined });
+        product = data.product || data;
+      }
       const variant = l.variantId ? (product.variants || []).find((v) => String(v._id) === String(l.variantId)) : null;
       if (l.variantId && !variant) return { l, skip: 'variant no longer available' };
       return { l, product, variant };
@@ -2782,7 +2789,12 @@
     if (merge) state.cartDiscount = round2((state.cartDiscount || 0) + (Number(r.cartDiscount) || 0));
     else state.cartDiscount = Number(r.cartDiscount) || 0;
     if (!merge) state.customer = null;
-    if (r.customerId && !(merge && state.customer)) { try { const { data } = await window.Api.get(`/customers/${r.customerId._id || r.customerId}`); state.customer = data.customer || null; } catch { /* walk-in */ } }
+    // The customer never holds the cart back: use what the held sale already carries now, then swap in the full record when it arrives.
+    if (r.customerId && !(merge && state.customer)) {
+      const cid = r.customerId._id || r.customerId;
+      if (r.customerId._id && r.customerId.name) state.customer = r.customerId;
+      window.Api.get(`/customers/${cid}`).then(({ data }) => { if (data.customer && (!state.customer || String(state.customer._id) === String(cid))) { state.customer = data.customer; renderCustomerButton(); renderTotals(); } }).catch(() => {});
+    }
     checkoutKey = window.Api.newIdempotencyKey();
     const d = $('cart-discount-input'); if (d) d.value = state.cartDiscount || '';
     promoSig = ''; // prices may have changed since it was parked: re-check offers
