@@ -21,7 +21,12 @@
  * warehouses.html now redirects to inventory.html?step=warehouses.
  */
 (function () {
-  const state = { view: 'stock', page: 1, limit: 10, search: '', location: '' };
+  const state = { view: 'stock', page: 1, limit: 10, search: '', location: '', productId: '', productName: '' };
+  // opened from Products > "View stock":  inventory.html?productId=...&search=...
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('productId')) { state.productId = q.get('productId'); state.productName = q.get('search') || ''; state.search = q.get('search') || ''; }
+  } catch { /* ignore */ }
   const wh = () => !!(window.AppShell.hasFeature && window.AppShell.hasFeature('multiWarehouse'));
   const esc = (v) => window.UI.escapeHtml(v == null ? '' : String(v));
   const locLabel = (l) => (l === 'WAREHOUSE' ? 'Warehouse' : 'Retail');
@@ -59,6 +64,7 @@
       };
       document.title = `Wholesale inventory · ${window.AppShell.APP_NAME}`;
       window.WholesaleInventory.mount(contentEl, window.InventoryTools);
+      if (state.productId) { try { window.InventoryTools.setSearch(state.productName); window.InventoryTools.showView('stock'); } catch { /* hub keeps its own view */ } }
       return;
     }
 
@@ -195,7 +201,7 @@
 
   async function renderStockTable(endpoint, emptyTitle, emptyMessage) {
     const body = document.getElementById('view-body');
-    body.innerHTML = tableShell(['Product', 'SKU', 'On hand', 'Reserved', 'Available', ''], 5, 4);
+    body.innerHTML = tableShell(['Product', 'SKU', 'On hand', 'Reserved', 'Available', 'Status', 'Actions'], 7, 4);
 
     const branchId = window.AppShell.getActiveBranchId();
     if (!branchId) {
@@ -204,10 +210,28 @@
     }
 
     try {
-      const { data } = await window.Api.get(endpoint, { branchId, page: state.page, limit: state.limit, search: state.search });
+      const focused = !!state.productId;
+      const { data } = await window.Api.get(endpoint, { branchId, page: focused ? 1 : state.page, limit: focused ? 100 : state.limit, search: state.search });
+      const location = endpoint === '/warehouse' ? 'WAREHOUSE' : 'RETAIL';
+      if (focused) data.items = data.items.filter((r) => String((r.productId && r.productId._id) || r.productId) === String(state.productId));
       const tbody = body.querySelector('tbody');
-      if (!data.items.length) {
-        tbody.innerHTML = `<tr><td colspan="6">${window.UI.emptyStateHtml({ icon: 'inventory', title: emptyTitle, message: emptyMessage })}</td></tr>`;
+      if (focused) {
+        body.insertAdjacentHTML('afterbegin', `<div style="display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px var(--space-6);background:#e8f1ff;border-bottom:1px solid #9ec1ff;color:#0b3d91;font-size:14px">
+          <span>Showing stock for <strong>${esc(state.productName || 'this product')}</strong></span>
+          <button type="button" class="btn btn-secondary btn-sm" id="stock-show-all">Show all stock</button></div>`);
+        document.getElementById('stock-show-all').addEventListener('click', () => {
+          state.productId = ''; state.productName = ''; state.search = ''; state.page = 1;
+          try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+          renderToolbar(); renderStockTable(endpoint, emptyTitle, emptyMessage);
+        });
+        document.getElementById('pagination').innerHTML = '';
+      }
+      if (!data.items.length && focused) {
+        tbody.innerHTML = `<tr><td colspan="7"><div style="padding:24px;text-align:center">
+          <p class="text-secondary" style="margin-bottom:12px">No ${location === 'WAREHOUSE' ? 'warehouse' : 'shop'} stock is recorded for this product in this branch yet.</p>
+          <button type="button" class="btn btn-primary btn-sm" data-stock-action="receive" data-pid="${esc(state.productId)}" data-vid="" data-loc="${location}" data-requires-permission="inventory.receive">${window.Icons.get('plus')} Receive stock</button></div></td></tr>`;
+      } else if (!data.items.length) {
+        tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'inventory', title: emptyTitle, message: emptyMessage })}</td></tr>`;
       } else {
         tbody.innerHTML = data.items.map((row) => {
           const available = row.availableQuantity != null ? row.availableQuantity : row.quantity - row.reservedQuantity;
@@ -220,11 +244,17 @@
               <td class="text-muted">${row.reservedQuantity}</td>
               <td>${available}</td>
               <td>${row.quantity <= 0 ? '<span class="badge badge-danger">Out of stock</span>' : low ? '<span class="badge badge-warning">Low</span>' : '<span class="badge badge-success">OK</span>'}</td>
+              <td class="actions" style="white-space:nowrap">
+                <button type="button" class="btn btn-secondary btn-sm" data-stock-action="receive" data-pid="${esc((row.productId && row.productId._id) || row.productId)}" data-vid="${esc((row.variantId && row.variantId._id) || row.variantId || '')}" data-loc="${location}" data-requires-permission="inventory.receive">Receive</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-stock-action="adjust" data-pid="${esc((row.productId && row.productId._id) || row.productId)}" data-vid="${esc((row.variantId && row.variantId._id) || row.variantId || '')}" data-loc="${location}" data-requires-permission="inventory.adjust">Adjust</button>
+              </td>
             </tr>
           `;
         }).join('');
       }
-      window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; renderStockTable(endpoint, emptyTitle, emptyMessage); });
+      if (!focused) window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; renderStockTable(endpoint, emptyTitle, emptyMessage); });
+      window.Permissions.applyPermissionGates(body, window.AppShell.getUser());
+      body.querySelectorAll('[data-stock-action]').forEach((btn) => btn.addEventListener('click', () => openStockAction(btn)));
     } catch (err) {
       body.innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load inventory', message: err.message });
     }
@@ -488,6 +518,39 @@
     modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
   }
 
+  /** Receive / Adjust straight from a stock row: the product (and variant) is already chosen. */
+  async function openStockAction(btn) {
+    const { stockAction, pid, vid, loc } = btn.dataset;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const { data } = await window.Api.get(`/products/${pid}`);
+      const product = data.product || data;
+      const variant = vid ? ((product.variants || []).find((v) => String(v._id) === String(vid)) || null) : null;
+      (stockAction === 'receive' ? openReceiveModal : openAdjustModal)({ product, variant, location: loc });
+    } catch (err) {
+      window.UI.toast.error(err.message || 'Could not open the product');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /** Current on-hand stock of one product / variant in the active branch (RETAIL or WAREHOUSE pool). */
+  async function fetchCurrentStock(product, variant, location) {
+    const branchId = window.AppShell.getActiveBranchId();
+    const endpoint = location === 'WAREHOUSE' ? '/warehouse' : '/inventory';
+    const wantVid = variant ? String(variant._id) : '';
+    let page = 1, pages = 1;
+    do {
+      const { data } = await window.Api.get(endpoint, { branchId, page, limit: 100, search: product.sku || product.name });
+      const hit = (data.items || []).find((r) => String((r.productId && r.productId._id) || r.productId) === String(product._id)
+        && String((r.variantId && r.variantId._id) || r.variantId || '') === wantVid);
+      if (hit) return { quantity: Number(hit.quantity) || 0, reserved: Number(hit.reservedQuantity) || 0 };
+      pages = data.pages || 1; page += 1;
+    } while (page <= pages && page <= 5);
+    return { quantity: 0, reserved: 0 }; // no stock row yet = nothing on hand
+  }
+
   function tableShell(headers, colCount, skeletonRowCount) {
     return `
       <div class="table-wrap" style="border:none; border-radius:0">
@@ -580,7 +643,8 @@
     });
   }
 
-  function openReceiveModal() {
+  function openReceiveModal(arg) {
+    const preset = arg && arg.product ? arg : null; // (a click event is not a preset)
     const branchId = window.AppShell.getActiveBranchId();
     if (!branchId) return window.UI.toast.error('Select a branch first');
 
@@ -618,10 +682,7 @@
     });
 
     modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
-    modal.querySelector('#pick-product-btn').addEventListener('click', () => {
-      window.ProductPicker.open({
-        title: 'Select a product to receive',
-        onSelect: ({ product, variant }) => {
+    const applySel = ({ product, variant }) => {
           selected = { product, variant };
           const sf = modal.querySelector('#serials-field');
           if (sf) sf.style.display = product.trackSerialNumber ? '' : 'none';
@@ -638,9 +699,16 @@
           modal.querySelector('#selected-product').innerHTML = `
             <span class="badge badge-info">${window.UI.escapeHtml(variant ? `${product.name} (${Object.values(variant.attributes || {}).join(', ')})` : product.name)}</span>
           `;
-        },
-      });
+    };
+    modal.querySelector('#pick-product-btn').addEventListener('click', () => {
+      window.ProductPicker.open({ title: 'Select a product to receive', onSelect: applySel });
     });
+    if (preset) {
+      applySel({ product: preset.product, variant: preset.variant });
+      const locSel = modal.querySelector('[name="location"]');
+      if (locSel && preset.location) locSel.value = preset.location;
+      setTimeout(() => { const q = modal.querySelector('[name="quantity"]'); if (q) q.focus(); }, 50);
+    }
 
     modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
       if (!selected) return window.UI.toast.error('Select a product first');
@@ -683,35 +751,45 @@
   /* ------------------------------------------------------------------ *
    * Adjust stock modal
    * ------------------------------------------------------------------ */
-  function openAdjustModal() {
+  function openAdjustModal(arg) {
+    const preset = arg && arg.product ? arg : null; // (a click event is not a preset)
     const branchId = window.AppShell.getActiveBranchId();
     if (!branchId) return window.UI.toast.error('Select a branch first');
 
     let selected = null;
+    let current = null;        // { quantity, reserved } of the chosen product in the chosen pool, null = not known yet
+    let loadSeq = 0;
 
     const modal = window.UI.openModal({
       title: 'Adjust stock',
       bodyHtml: `
-        <form id="adjust-form">
+        <form id="adjust-form" novalidate>
           <div class="field">
             <label>Product</label>
             <button type="button" class="btn btn-secondary btn-block" id="pick-product-btn" style="justify-content:flex-start">${window.Icons.get('search')} Select a product</button>
             <div id="selected-product" class="text-sm" style="margin-top: var(--space-2)"></div>
           </div>
-          <div class="form-row">
-            <div class="field">
-              <label>Adjustment type</label>
-              <select class="select" name="type" required>
-                <option value="ADJUSTMENT_IN">Correction - add stock</option>
-                <option value="ADJUSTMENT_OUT">Correction - remove stock</option>
-                <option value="DAMAGE">Damaged</option>
-                <option value="EXPIRED">Expired</option>
-                <option value="LOST">Lost / stolen</option>
-              </select>
-            </div>
-            <div class="field"><label>Quantity</label><input class="input" name="quantity" type="number" min="1" required /></div>
-          </div>
           ${wh() ? `<div class="field"><label>Adjust stock in</label><select class="select" name="location"><option value="RETAIL">Retail (shop floor)</option><option value="WAREHOUSE">Warehouse</option></select></div>` : ''}
+          <div class="field">
+            <label>Current stock</label>
+            <div id="adj-current" style="font-size:22px;font-weight:700;padding:8px 12px;border-radius:8px;background:var(--color-surface-2,#f3f4f6)">—</div>
+            <span class="field-hint" id="adj-current-hint">Select a product to see its current stock.</span>
+          </div>
+          <div class="field">
+            <label>What happened? (current condition)</label>
+            <select class="select" name="type" required>
+              <option value="ADJUSTMENT_IN">Add stock (found / counted more / correction)</option>
+              <option value="ADJUSTMENT_OUT">Remove stock (counted less / correction)</option>
+              <option value="DAMAGE">Damaged</option>
+              <option value="EXPIRED">Expired</option>
+              <option value="LOST">Lost / stolen</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="field"><label id="adj-qty-label">Quantity to add</label><input class="input" name="quantity" type="number" min="1" step="1" inputmode="numeric" autocomplete="off" required /></div>
+            <div class="field"><label>New stock (calculated)</label><input class="input" id="adj-new" type="text" readonly tabindex="-1" placeholder="—" style="font-weight:700" /></div>
+          </div>
+          <div id="adj-msg" role="alert" style="display:none;margin:0 0 var(--space-3);padding:8px 10px;border-radius:6px;font-weight:600;font-size:13px"></div>
           <div class="field"><label>Reason</label><input class="input" name="reason" required placeholder="e.g. Physical count correction" /></div>
         </form>
       `,
@@ -721,38 +799,142 @@
       `,
     });
 
+    const form = modal.querySelector('#adjust-form');
+    const typeEl = form.querySelector('[name="type"]');
+    const qtyEl = form.querySelector('[name="quantity"]');
+    const locEl = form.querySelector('[name="location"]');
+    const newEl = modal.querySelector('#adj-new');
+    const msgEl = modal.querySelector('#adj-msg');
+    const curEl = modal.querySelector('#adj-current');
+    const curHint = modal.querySelector('#adj-current-hint');
+    const saveBtn = modal.querySelector('#adjust-save-btn');
+    const isAdd = () => typeEl.value === 'ADJUSTMENT_IN';
+    const LABELS = { ADJUSTMENT_IN: 'Quantity to add', ADJUSTMENT_OUT: 'Quantity to remove', DAMAGE: 'Quantity damaged', EXPIRED: 'Quantity expired', LOST: 'Quantity lost / stolen' };
+    const pool = () => (wh() && locEl ? locEl.value : 'RETAIL');
+
+    const showMsg = (kind, text) => {
+      if (!text) { msgEl.style.display = 'none'; msgEl.textContent = ''; return; }
+      const red = kind === 'error';
+      msgEl.style.cssText = `display:block;margin:0 0 var(--space-3);padding:8px 10px;border-radius:6px;font-weight:600;font-size:13px;background:${red ? '#fdecea' : '#fff7e0'};border:1px solid ${red ? '#d93025' : '#f0b429'};color:${red ? '#b3140a' : '#7a5200'}`;
+      msgEl.textContent = text;
+    };
+
+    /** Works out the new stock and checks the entered value. Returns { ok, qty, newStock, warn }. */
+    function recalc() {
+      qtyEl.style.borderColor = ''; qtyEl.style.boxShadow = ''; newEl.style.color = '';
+      const result = { ok: false, qty: NaN, newStock: NaN, warn: '' };
+      modal.querySelector('#adj-qty-label').textContent = LABELS[typeEl.value] || 'Quantity';
+      if (!selected) { newEl.value = ''; showMsg('', ''); return result; }
+      if (!current) { newEl.value = ''; showMsg('', ''); return result; }
+      const raw = String(qtyEl.value).trim();
+      if (raw === '') { newEl.value = ''; showMsg('', ''); return result; }
+      const qty = Number(raw);
+      const bad = (text) => {
+        qtyEl.style.borderColor = '#d93025'; qtyEl.style.boxShadow = '0 0 0 3px rgba(217,48,37,.25)';
+        newEl.value = ''; showMsg('error', text); return result;
+      };
+      if (!Number.isFinite(qty)) return bad('Enter a valid number.');
+      if (qty <= 0) return bad('Quantity must be more than 0. Choose "Remove stock" to reduce stock.');
+      if (!Number.isInteger(qty)) return bad('Enter a whole number (no decimals).');
+      if (qty > 1000000) return bad('That quantity is too large. Check the number you typed.');
+      const add = isAdd();
+      if (!add && qty > current.quantity) return bad(`You cannot remove ${qty}: only ${current.quantity} in stock. New stock cannot go below 0.`);
+      const newStock = add ? current.quantity + qty : current.quantity - qty;
+      newEl.value = `${newStock}  (${add ? '+' : '−'}${qty})`;
+      let warn = '';
+      if (add && qty >= 1000 && qty > current.quantity * 10) warn = `Large increase: stock goes from ${current.quantity} to ${newStock}. Make sure ${qty} is right.`;
+      else if (!add && newStock < current.reserved) warn = `${current.reserved} unit(s) are reserved for orders - new stock ${newStock} is below that.`;
+      else if (!add && newStock === 0) warn = 'This will leave the product out of stock.';
+      showMsg(warn ? 'warn' : '', warn);
+      return { ok: true, qty, newStock, warn };
+    }
+
+    async function loadCurrent() {
+      const my = ++loadSeq;
+      current = null;
+      curEl.textContent = '…'; curHint.textContent = 'Loading current stock…';
+      recalc();
+      if (!selected) { curEl.textContent = '—'; curHint.textContent = 'Select a product to see its current stock.'; return; }
+      try {
+        const c = await fetchCurrentStock(selected.product, selected.variant, pool());
+        if (my !== loadSeq) return;
+        current = c;
+        curEl.textContent = String(c.quantity);
+        curHint.textContent = `${pool() === 'WAREHOUSE' ? 'Warehouse' : 'Shop'} stock in this branch${c.reserved ? ` · ${c.reserved} reserved` : ''}.`;
+      } catch (err) {
+        if (my !== loadSeq) return;
+        curEl.textContent = '?';
+        curHint.innerHTML = '<span style="color:#b3140a;font-weight:600">Could not load current stock.</span> <a href="#" id="adj-retry">Try again</a>';
+        const r = modal.querySelector('#adj-retry'); if (r) r.addEventListener('click', (e) => { e.preventDefault(); loadCurrent(); });
+      }
+      recalc();
+    }
+
+    const select = ({ product, variant }) => {
+      selected = { product, variant: variant || null };
+      modal.querySelector('#selected-product').innerHTML = `<span class="badge badge-info">${window.UI.escapeHtml(variant ? `${product.name} (${Object.values(variant.attributes || {}).join(', ')})` : product.name)}</span>`;
+      loadCurrent();
+      setTimeout(() => qtyEl.focus(), 50);
+    };
+
     modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
     modal.querySelector('#pick-product-btn').addEventListener('click', () => {
-      window.ProductPicker.open({
-        title: 'Select a product to adjust',
-        onSelect: ({ product, variant }) => {
-          selected = { product, variant };
-          modal.querySelector('#selected-product').innerHTML = `<span class="badge badge-info">${window.UI.escapeHtml(variant ? `${product.name} (${Object.values(variant.attributes || {}).join(', ')})` : product.name)}</span>`;
-        },
-      });
+      window.ProductPicker.open({ title: 'Select a product to adjust', onSelect: select });
     });
+    typeEl.addEventListener('change', recalc);
+    qtyEl.addEventListener('input', recalc);
+    if (locEl) locEl.addEventListener('change', loadCurrent);
+    // block characters that make no sense in a whole-number quantity (e, +, -, .)
+    qtyEl.addEventListener('keydown', (e) => { if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault(); });
+    qtyEl.addEventListener('wheel', () => qtyEl.blur(), { passive: true });
 
-    modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
+    if (preset) {
+      if (locEl && preset.location) locEl.value = preset.location;
+      select({ product: preset.product, variant: preset.variant });
+    }
+
+    saveBtn.addEventListener('click', async () => {
       if (!selected) return window.UI.toast.error('Select a product first');
-      const form = modal.querySelector('#adjust-form');
-      if (!form.reportValidity()) return;
+      if (!current) return window.UI.toast.error('Current stock is not loaded yet - wait a moment or try again');
+      const r = recalc();
+      if (!String(qtyEl.value).trim()) { window.UI.toast.error('Enter the quantity'); qtyEl.focus(); return; }
+      if (!r.ok) { window.UI.toast.error(msgEl.textContent || 'Check the quantity'); qtyEl.focus(); return; }
+      if (!form.querySelector('[name="reason"]').value.trim()) { window.UI.toast.error('Enter the reason'); form.querySelector('[name="reason"]').focus(); return; }
 
-      const raw = window.UI.serializeForm(form);
-      const btn = document.getElementById('adjust-save-btn');
-      window.UI.setButtonLoading(btn, true, 'Saving…');
+      const verb = isAdd() ? 'add' : 'remove';
+      const name = selected.variant ? `${selected.product.name} (${Object.values(selected.variant.attributes || {}).join(', ')})` : selected.product.name;
+      const ok = await window.UI.confirmDialog({
+        title: 'Confirm stock change',
+        message: `${name}: ${verb} ${r.qty}. Stock changes from ${current.quantity} to ${r.newStock}.${r.warn ? ` ${r.warn}` : ''}`,
+        confirmText: 'Yes, save', danger: !isAdd(),
+      });
+      if (!ok) return;
+
+      // the stock may have changed (a sale) while the window was open: re-read it and re-check before saving
+      try {
+        const fresh = await fetchCurrentStock(selected.product, selected.variant, pool());
+        if (fresh.quantity !== current.quantity) {
+          current = fresh; curEl.textContent = String(fresh.quantity); recalc();
+          window.UI.toast.error(`Stock changed to ${fresh.quantity} while you were working. Check the new value and save again.`);
+          return;
+        }
+      } catch { /* the server still validates */ }
+
+      const values = window.UI.serializeForm(form);
+      window.UI.setButtonLoading(saveBtn, true, 'Saving…');
       try {
         await window.Api.post('/inventory/adjust', {
           branchId, productId: selected.product._id, variantId: selected.variant?._id,
-          type: raw.type, quantity: raw.quantity, reason: raw.reason,
-          location: wh() ? (raw.location || 'RETAIL') : undefined,
+          type: values.type, quantity: r.qty, reason: values.reason,
+          location: wh() ? (values.location || 'RETAIL') : undefined,
         });
-        window.UI.toast.success('Stock adjusted');
+        window.UI.toast.success(`Stock adjusted: ${current.quantity} → ${r.newStock}`);
         window.UI.closeModal();
         afterChange();
       } catch (err) {
         window.UI.toast.error(err.message);
       } finally {
-        window.UI.setButtonLoading(btn, false);
+        window.UI.setButtonLoading(saveBtn, false);
       }
     });
   }

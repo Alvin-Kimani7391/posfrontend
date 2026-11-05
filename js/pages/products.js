@@ -507,6 +507,7 @@
         <td><span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-neutral'}">${p.status}</span></td>
         <td class="actions">
           ${p.hasVariants ? `<button class="btn btn-ghost btn-sm btn-icon" data-action="variants" data-requires-permission="products.update" title="Manage variants">${window.Icons.get('box')}</button>` : ''}
+          <button class="btn btn-ghost btn-sm" data-action="view-stock" data-requires-permission="inventory.view" title="See this product's stock in Inventory (then adjust or receive)">View stock</button>
           <button class="btn btn-ghost btn-sm btn-icon" data-action="sticker" data-requires-permission="products.view" title="Print barcode sticker">${window.Icons.get('printer')}</button>
           <button class="btn btn-ghost btn-sm btn-icon" data-action="edit" data-requires-permission="products.update" title="Edit">${window.Icons.get('edit')}</button>
           <button class="btn btn-ghost btn-sm btn-icon" data-action="archive" data-requires-permission="products.delete" title="Archive">${window.Icons.get('trash')}</button>
@@ -520,6 +521,13 @@
         const prod = items.find((p) => p._id === cb.dataset.select);
         if (cb.checked) selected.set(cb.dataset.select, prod ? prod.name : ''); else selected.delete(cb.dataset.select);
         updateSelectionBar(items);
+      });
+    });
+    tbody.querySelectorAll('[data-action="view-stock"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tr = btn.closest('tr');
+        const prod = items.find((x) => x._id === tr.dataset.id);
+        window.location.href = `inventory.html?productId=${encodeURIComponent(tr.dataset.id)}&search=${encodeURIComponent(prod ? prod.name : '')}`;
       });
     });
     tbody.querySelectorAll('[data-action="sticker"]').forEach((btn) => {
