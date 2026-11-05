@@ -1576,6 +1576,64 @@
     return `${base}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   }
 
+
+  /* ------------------------------------------------------------------ *
+   * LIVE DUPLICATE-BARCODE ALERT (Add product form): as soon as a barcode is scanned/typed, a RED alert says
+   * if it already exists in the system - before "Add product" is clicked.
+   * ------------------------------------------------------------------ */
+  async function findExistingBarcode(code) {
+    const c = String(code || '').trim();
+    if (!c) return null;
+    const lc = c.toLowerCase();
+    const matches = (r) => r && r.product && [r.variant && r.variant.barcode, r.product.barcode].some((v) => v && String(v).trim().toLowerCase() === lc);
+    try { const l = localBarcode(c); if (matches(l)) return { name: l.product.name || '' }; } catch { /* ignore */ }
+    try {
+      const d = await window.Api.get(`/products/barcode/${encodeURIComponent(c)}`).then((r) => r.data);
+      const prod = d && (d.product || d);
+      if (prod && (prod._id || prod.name)) return { name: prod.name || '' };
+    } catch { /* not found */ }
+    try {
+      if (window.BarcodeLabels) { const used = (await window.BarcodeLabels.loadCatalog()).used; if (used.has(c)) return { name: '' }; }
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  function bindBarcodeLiveCheck(input) {
+    if (!input || input._bcLive) return;
+    input._bcLive = true;
+    const field = input.closest('.field') || input.parentElement;
+    const msg = document.createElement('div');
+    msg.setAttribute('role', 'alert');
+    msg.style.cssText = 'display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:#fdecea;border:1px solid #d93025;color:#b3140a;font-weight:600;font-size:13px';
+    field.appendChild(msg);
+    let timer = null, seq = 0, lastToasted = '';
+    const setState = (dup, text) => {
+      input._bcDup = dup;
+      input.style.borderColor = dup ? '#d93025' : '';
+      input.style.boxShadow = dup ? '0 0 0 3px rgba(217,48,37,.25)' : '';
+      input.style.background = dup ? '#fff5f4' : '';
+      msg.style.display = dup ? '' : 'none';
+      msg.textContent = dup ? text : '';
+    };
+    const check = async () => {
+      const code = input.value.trim();
+      const my = ++seq;
+      if (!code) { setState(false); return; }
+      const hit = await findExistingBarcode(code);
+      if (my !== seq) return;
+      if (hit) {
+        setState(true, `⚠ BARCODE ALREADY EXISTS in the system${hit.name ? ` — product: "${hit.name}"` : ''}. Use a different barcode.`);
+        if (lastToasted !== code) { lastToasted = code; window.UI.toast.error(`Barcode ${code} already exists${hit.name ? ` (${hit.name})` : ''}`); }
+        try { input.focus(); input.select(); } catch { /* ignore */ }
+      } else setState(false);
+    };
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(check, 250); });
+    input.addEventListener('change', () => { clearTimeout(timer); check(); });
+    input.addEventListener('blur', () => { clearTimeout(timer); check(); });
+    input._bcCheck = check;
+    if (input.value.trim()) check();
+  }
+
   function openBuiltinAddProduct(opts) {
     const user = window.AppShell.getUser();
     if (!window.Permissions.can(user, 'products.create')) {
@@ -1613,12 +1671,18 @@
     let skuTouched = false;
     skuEl.addEventListener('input', () => { skuTouched = true; });
     nameEl.addEventListener('input', () => { if (!skuTouched) skuEl.value = skuFromName(nameEl.value); });
+    bindBarcodeLiveCheck(modal.querySelector('#qa-barcode'));
     modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { window.UI.closeModal(); $('pos-search')?.focus(); });
     setTimeout(() => (opts.name ? modal.querySelector('#qa-price') : nameEl).focus(), 50);
 
     modal.querySelector('#qa-save').addEventListener('click', async () => {
       const form = modal.querySelector('#qa-form');
       if (!form.reportValidity()) return;
+      const bcEl = modal.querySelector('#qa-barcode');
+      if (bcEl && bcEl.value.trim()) {
+        await bcEl._bcCheck();
+        if (bcEl._bcDup) { window.UI.toast.error('This barcode already exists in the system - change it first'); bcEl.focus(); return; }
+      }
       const raw = window.UI.serializeForm(form);
       const price = Number(raw.sellingPrice);
       if (!(price >= 0)) return window.UI.toast.error('Enter the selling price');

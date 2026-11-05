@@ -173,6 +173,85 @@
     });
   }
 
+
+  /* ------------------------------------------------------------------ *
+   * LIVE DUPLICATE-BARCODE ALERT
+   * The moment a barcode is scanned / typed / generated into ANY barcode box, it is checked against the
+   * catalog (and the server) and a RED alert is shown straight away - before the user clicks Add product.
+   * `ownCodes` = barcodes that belong to the record being edited (they are not duplicates of themselves).
+   * ------------------------------------------------------------------ */
+  async function findExistingBarcode(code) {
+    const c = String(code || '').trim();
+    if (!c) return null;
+    let used = null;
+    try { used = await getUsedBarcodes(); } catch { /* ignore */ }
+    try {
+      const { data } = await window.Api.get(`/products/barcode/${encodeURIComponent(c)}`);
+      const p = data && (data.product || data);
+      if (p && (p._id || p.name)) return { name: p.name || '' };
+    } catch { /* not found on the server */ }
+    if (used && used.has(c)) return { name: '' };
+    return null;
+  }
+
+  function bindBarcodeLiveCheck(input, scope, ownCodes) {
+    if (!input || input._bcLive) return;
+    input._bcLive = true;
+    const own = new Set((ownCodes || []).map((x) => String(x || '').trim()).filter(Boolean));
+    const field = input.closest('.field') || input.parentElement;
+    const msg = document.createElement('div');
+    msg.className = 'bc-dup-msg';
+    msg.setAttribute('role', 'alert');
+    msg.style.cssText = 'display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:#fdecea;border:1px solid #d93025;color:#b3140a;font-weight:600;font-size:13px';
+    field.appendChild(msg);
+    let timer = null, seq = 0, lastToasted = '';
+
+    const setState = (dup, text) => {
+      input._bcDup = dup;
+      input.classList.toggle('bc-dup', dup);
+      input.style.borderColor = dup ? '#d93025' : '';
+      input.style.boxShadow = dup ? '0 0 0 3px rgba(217,48,37,.25)' : '';
+      input.style.background = dup ? '#fff5f4' : '';
+      msg.style.display = dup ? '' : 'none';
+      msg.textContent = dup ? text : '';
+    };
+
+    const check = async () => {
+      const code = input.value.trim();
+      const my = ++seq;
+      if (!code || own.has(code)) { setState(false); return; }
+      // same code typed in another barcode box of this same form
+      const sameForm = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"]'))
+        .some((el) => el !== input && el.value.trim() === code);
+      if (sameForm) { setState(true, `⚠ Barcode ${code} is already used in another field of this form.`); return; }
+      const hit = await findExistingBarcode(code);
+      if (my !== seq) return; // a newer scan replaced this one
+      if (hit && !own.has(input.value.trim())) {
+        const text = `⚠ BARCODE ALREADY EXISTS in the system${hit.name ? ` — product: "${hit.name}"` : ''}. Use a different barcode.`;
+        setState(true, text);
+        if (lastToasted !== code) { lastToasted = code; window.UI.toast.error(`Barcode ${code} already exists${hit.name ? ` (${hit.name})` : ''}`); }
+        try { input.focus(); input.select(); } catch { /* ignore */ }
+      } else {
+        setState(false);
+      }
+    };
+
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(check, 250); });
+    input.addEventListener('change', () => { clearTimeout(timer); check(); });
+    input.addEventListener('blur', () => { clearTimeout(timer); check(); });
+    input._bcCheck = check;
+    if (input.value.trim()) check();
+  }
+
+  /** True (and focuses the offending box) when any barcode box in `scope` currently holds a duplicate. */
+  async function barcodeBlocked(scope) {
+    const inputs = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"]'));
+    for (const el of inputs) { if (el._bcCheck && el.value.trim()) await el._bcCheck(); }
+    const bad = inputs.find((el) => el._bcDup);
+    if (bad) { window.UI.toast.error('This barcode already exists in the system - change it first'); bad.focus(); return true; }
+    return false;
+  }
+
   /* ------------------------------------------------------------------ *
    * Categories (cached, shared by the filter dropdown and product forms)
    * ------------------------------------------------------------------ */
@@ -858,6 +937,7 @@
 
     bindBarcodeScanButton(modal.querySelector('#p-barcode-scan-btn'), modal.querySelector('#p-barcode'));
     bindGenerateButton(modal.querySelector('#p-barcode-gen-btn'), modal.querySelector('#p-barcode'));
+    bindBarcodeLiveCheck(modal.querySelector('#p-barcode'), modal, isEdit ? [product.barcode].concat((product.variants || []).map((v) => v.barcode)) : []);
 
     if (wf) window.WholesaleProductForm.bind(modal, { product: isEdit ? product : null });
 
@@ -891,12 +971,14 @@
         });
         bindBarcodeScanButton(row.querySelector(`#v-barcode-scan-${idx}`), row.querySelector(`[name="v-barcode-${idx}"]`));
         bindGenerateButton(row.querySelector(`#v-barcode-gen-${idx}`), row.querySelector(`[name="v-barcode-${idx}"]`));
+        bindBarcodeLiveCheck(row.querySelector(`[name="v-barcode-${idx}"]`), modal, []);
       });
     }
 
     modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
       const form = modal.querySelector('#product-form');
       if (!form.reportValidity()) return;
+      if (await barcodeBlocked(modal)) return;
 
       const raw = window.UI.serializeForm(form);
 
@@ -1151,6 +1233,7 @@
 
     bindBarcodeScanButton(listEl.querySelector('#add-variant-barcode-scan-btn'), listEl.querySelector('#add-variant-form [name="barcode"]'));
     bindGenerateButton(listEl.querySelector('#add-variant-barcode-gen-btn'), listEl.querySelector('#add-variant-form [name="barcode"]'));
+    bindBarcodeLiveCheck(listEl.querySelector('#add-variant-form [name="barcode"]'), listEl.querySelector('#add-variant-form'), []);
 
     listEl.querySelectorAll('[data-action="save-variant"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -1186,6 +1269,7 @@
     listEl.querySelector('#add-variant-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const form = e.target;
+      if (await barcodeBlocked(form)) return;
       const raw = window.UI.serializeForm(form);
       try {
         if (!raw.barcode) raw.barcode = window.BarcodeLabels.generateCode(await getUsedBarcodes()); // no barcode typed: create one
