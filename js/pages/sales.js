@@ -440,6 +440,7 @@
     bindTopbar();
     refreshModeUi();
     applyFocus(state.focus);
+    guardFocus();
     window.addEventListener('resize', fitRoot);
     window.AppShell.onProfileChange?.(onProfileChanged);
 
@@ -487,6 +488,7 @@
       if (drawerLocked()) { e.preventDefault(); e.returnValue = ''; }
     });
     window.addEventListener('pagehide', () => {
+      leavingPage = true;
       unsubscribeBranchChange?.();
       unsubscribeBranchesLoaded?.();
       drawerUnsub?.();
@@ -582,9 +584,16 @@
     }
 
     $('pz-refresh-btn').addEventListener('click', async (ev) => {
-      const btn = ev.currentTarget; if (btn.classList.contains('spinning')) return;
+      const btn = ev.currentTarget; if (btn.classList.contains('spinning') || btn.dataset.busy === '1') return;
       if (isOfflineNow()) return window.UI.toast.error('You are offline - nothing to refresh from the server');
+      btn.dataset.busy = '1';
       btn.classList.add('spinning');
+      // Spin the icon from here (does not rely on the stylesheet) and keep it turning for at least ~0.8s so it is seen.
+      const icon = btn.querySelector('i');
+      let spin = null;
+      try { if (icon && icon.animate) spin = icon.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 700, iterations: Infinity }); } catch { /* cosmetic */ }
+      btn.disabled = true; btn.style.opacity = '.75';
+      const startedAt = Date.now();
       try {
         lcDrop('h|'); lcDrop('d|'); lcDrop('held|');
         retailIndex.invalidate();
@@ -593,8 +602,13 @@
         await Promise.allSettled(tasks);
         if (state.view === 'new-sale') renderCart();
         warmLists();
+        const wait = 800 - (Date.now() - startedAt);
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
         window.UI.toast.success('Refreshed');
-      } finally { btn.classList.remove('spinning'); }
+      } finally {
+        if (spin) spin.cancel();
+        btn.classList.remove('spinning'); btn.disabled = false; btn.style.opacity = ''; delete btn.dataset.busy;
+      }
     });
     $('pz-focus-btn').addEventListener('click', () => applyFocus(!state.focus));
     $('pz-fs-btn').addEventListener('click', toggleBrowserFullscreen);
@@ -603,11 +617,43 @@
       else window.UI.toast.error('The cash drawer module could not be loaded');
     });
     document.addEventListener('fullscreenchange', renderViewButtons);
+    guardScannerEnter();
 
     tickClock();
     clearInterval(clockTimer);
     clockTimer = setInterval(tickClock, 15000);
     renderViewButtons();
+  }
+
+  /**
+   * A barcode scanner types the code and then presses Enter. If a top-bar button (Full view, Full screen, Refresh...)
+   * still has keyboard focus from the last click, that Enter "clicks" it - which flipped the till out of full view /
+   * full screen on every scan. Two guards: (1) after a top-bar button is clicked, hand focus back to the search box;
+   * (2) an Enter that arrives as part of a fast scanner burst never activates a button.
+   */
+  let scannerGuardOn = false;
+  function guardScannerEnter() {
+    if (scannerGuardOn) return;
+    scannerGuardOn = true;
+    const root = () => $('pz-root');
+    document.addEventListener('click', (e) => {
+      const b = e.target && e.target.closest ? e.target.closest('.pz-topbar .pz-iconbtn') : null;
+      if (!b || b.id === 'pz-drawer-btn') return;
+      setTimeout(() => {
+        if (document.querySelector('.modal-backdrop')) return;
+        try { b.blur(); } catch { /* ignore */ }
+        if (state.view === 'new-sale') $('pos-search')?.focus({ preventScroll: true });
+      }, 0);
+    });
+    let lastKey = 0;
+    document.addEventListener('keydown', (e) => {
+      const now = performance.now(); const gap = now - lastKey; lastKey = now;
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const a = document.activeElement;
+      const r = root();
+      if (!a || !r || !r.contains(a) || a.tagName !== 'BUTTON') return;
+      if (gap < 60) { e.preventDefault(); } // typed by a scanner, not a person
+    }, true);
   }
 
   function tickClock() {
@@ -619,10 +665,39 @@
   function applyFocus(on) {
     state.focus = !!on;
     try { localStorage.setItem(FOCUS_KEY, state.focus ? '1' : '0'); } catch { /* private mode - fine */ }
-    $('pz-root')?.classList.toggle('pz-focus', state.focus);
-    document.body.classList.toggle('pz-focus-on', state.focus);
+    syncFocusClasses();
     renderViewButtons();
     fitRoot();
+  }
+
+  /** Puts the full-view classes back to match state.focus (only touches the DOM when something drifted). */
+  let leavingPage = false;
+  function syncFocusClasses() {
+    if (leavingPage) return;
+    const root = $('pz-root');
+    if (root && root.classList.contains('pz-focus') !== state.focus) root.classList.toggle('pz-focus', state.focus);
+    if (document.body.classList.contains('pz-focus-on') !== state.focus) document.body.classList.toggle('pz-focus-on', state.focus);
+  }
+
+  /**
+   * Full view must stay on until the cashier turns it off. Something else (the app shell re-rendering, the page coming
+   * back from the back/forward cache or from another tab, the browser leaving full screen) can strip the classes, which
+   * dropped the till back into the normal "section" layout. Watch for that and put them back.
+   */
+  let focusGuardOn = false;
+  function guardFocus() {
+    if (focusGuardOn) return;
+    focusGuardOn = true;
+    try {
+      const mo = new MutationObserver(() => { if (state.focus) syncFocusClasses(); });
+      mo.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      const root = $('pz-root'); if (root) mo.observe(root, { attributes: true, attributeFilter: ['class'] });
+    } catch { /* observers unsupported: the event handlers below still cover the common cases */ }
+    const heal = () => { leavingPage = false; syncFocusClasses(); fitRoot(); };
+    window.addEventListener('pageshow', heal);
+    window.addEventListener('focus', heal);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) heal(); });
+    document.addEventListener('fullscreenchange', heal);
   }
 
   function renderViewButtons() {
