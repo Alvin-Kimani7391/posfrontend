@@ -180,23 +180,20 @@
    * catalog (and the server) and a RED alert is shown straight away - before the user clicks Add product.
    * `ownCodes` = barcodes that belong to the record being edited (they are not duplicates of themselves).
    * ------------------------------------------------------------------ */
-  async function findExistingBarcode(code) {
-    const c = String(code || '').trim();
-    if (!c) return null;
-    let used = null;
-    try { used = await getUsedBarcodes(); } catch { /* ignore */ }
+  /** Server lookup (only used to confirm / add the product name; the instant check below needs no network). */
+  async function lookupBarcodeOnServer(code) {
     try {
-      const { data } = await window.Api.get(`/products/barcode/${encodeURIComponent(c)}`);
+      const { data } = await window.Api.get(`/products/barcode/${encodeURIComponent(code)}`);
       const p = data && (data.product || data);
       if (p && (p._id || p.name)) return { name: p.name || '' };
-    } catch { /* not found on the server */ }
-    if (used && used.has(c)) return { name: '' };
+    } catch { /* not found */ }
     return null;
   }
 
   function bindBarcodeLiveCheck(input, scope, ownCodes) {
     if (!input || input._bcLive) return;
     input._bcLive = true;
+    getUsedBarcodes().catch(() => {}); // warm the in-memory barcode list so the alert is instant
     const own = new Set((ownCodes || []).map((x) => String(x || '').trim()).filter(Boolean));
     const field = input.closest('.field') || input.parentElement;
     const msg = document.createElement('div');
@@ -215,32 +212,41 @@
       msg.style.display = dup ? '' : 'none';
       msg.textContent = dup ? text : '';
     };
+    const dupText = (name) => `⚠ BARCODE ALREADY EXISTS in the system${name ? ` — product: "${name}"` : ''}. Use a different barcode.`;
+    // final = the scan/typing has finished (pause, Enter, leaving the box): only then toast + select the text
+    const alertDup = (code, name, final) => {
+      setState(true, dupText(name));
+      if (final && lastToasted !== code) { lastToasted = code; window.UI.toast.error(`Barcode ${code} already exists${name ? ` (${name})` : ''}`); }
+      if (final) { try { input.focus(); input.select(); } catch { /* ignore */ } }
+    };
 
-    const check = async () => {
+    const check = async (final) => {
       const code = input.value.trim();
       const my = ++seq;
       if (!code || own.has(code)) { setState(false); return; }
-      // same code typed in another barcode box of this same form
       const sameForm = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"]'))
         .some((el) => el !== input && el.value.trim() === code);
-      if (sameForm) { setState(true, `⚠ Barcode ${code} is already used in another field of this form.`); return; }
-      const hit = await findExistingBarcode(code);
-      if (my !== seq) return; // a newer scan replaced this one
-      if (hit && !own.has(input.value.trim())) {
-        const text = `⚠ BARCODE ALREADY EXISTS in the system${hit.name ? ` — product: "${hit.name}"` : ''}. Use a different barcode.`;
-        setState(true, text);
-        if (lastToasted !== code) { lastToasted = code; window.UI.toast.error(`Barcode ${code} already exists${hit.name ? ` (${hit.name})` : ''}`); }
-        try { input.focus(); input.select(); } catch { /* ignore */ }
-      } else {
-        setState(false);
+      if (sameForm) { alertDup(code, '', final); msg.textContent = `⚠ Barcode ${code} is already used in another field of this form.`; return; }
+      // 1) INSTANT: in-memory list, no network
+      if (usedBarcodes && usedBarcodes.has(code)) {
+        alertDup(code, '', final);
+        if (final) lookupBarcodeOnServer(code).then((hit) => { if (hit && hit.name && my === seq) msg.textContent = dupText(hit.name); });
+        return;
       }
+      if (!usedBarcodes) { getUsedBarcodes().then(() => { if (my === seq && usedBarcodes) check(final); }).catch(() => {}); }
+      if (!final) { setState(false); return; }
+      // 2) confirm with the server (catches products added on another till a moment ago)
+      const hit = await lookupBarcodeOnServer(code);
+      if (my !== seq) return;
+      if (hit && !own.has(input.value.trim())) { if (usedBarcodes) usedBarcodes.add(code); alertDup(code, hit.name, true); }
+      else setState(false);
     };
 
-    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(check, 250); });
-    input.addEventListener('change', () => { clearTimeout(timer); check(); });
-    input.addEventListener('blur', () => { clearTimeout(timer); check(); });
-    input._bcCheck = check;
-    if (input.value.trim()) check();
+    input.addEventListener('input', () => { check(false); clearTimeout(timer); timer = setTimeout(() => check(true), 80); });
+    input.addEventListener('change', () => { clearTimeout(timer); check(true); });
+    input.addEventListener('blur', () => { clearTimeout(timer); check(true); });
+    input._bcCheck = () => check(true);
+    if (input.value.trim()) check(true);
   }
 
   /** True (and focuses the offending box) when any barcode box in `scope` currently holds a duplicate. */
@@ -303,7 +309,7 @@
   async function getUsedBarcodes(force = false) {
     if (usedBarcodes && !force) return usedBarcodes;
     try { usedBarcodes = (await window.BarcodeLabels.loadCatalog()).used; }
-    catch { usedBarcodes = new Set(); }
+    catch { const empty = new Set(); usedBarcodes = null; return empty; }
     return usedBarcodes;
   }
 
@@ -724,6 +730,7 @@
   const COPY_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
 
   function openProductModal(product) {
+    getUsedBarcodes().catch(() => {}); // warm the barcode list before the first scan
     const isEdit = !!product;
     variantRowCount = 0;
 
@@ -1106,6 +1113,7 @@
         } else {
           const created = await createProductWithRetry(payload, generated);
           window.UI.toast.success('Product added');
+          usedBarcodes = null; getUsedBarcodes(true).catch(() => {});
           if (stockReq) {
             if (created && created.queued) {
               window.UI.toast.warning('Saved offline. Add its stock from Inventory > Receive stock once it has uploaded.');

@@ -1581,26 +1581,34 @@
    * LIVE DUPLICATE-BARCODE ALERT (Add product form): as soon as a barcode is scanned/typed, a RED alert says
    * if it already exists in the system - before "Add product" is clicked.
    * ------------------------------------------------------------------ */
-  async function findExistingBarcode(code) {
-    const c = String(code || '').trim();
+  let bcUsed = null; // Set of every barcode in the catalog (kept in memory so the alert is instant)
+  function warmBarcodeSet(force) {
+    if (!window.BarcodeLabels || (bcUsed && !force)) return;
+    window.BarcodeLabels.loadCatalog().then((c) => { bcUsed = c.used; }).catch(() => {});
+  }
+  function instantBarcodeHit(code) {
+    const c = String(code || '').trim(); const lc = c.toLowerCase();
     if (!c) return null;
-    const lc = c.toLowerCase();
-    const matches = (r) => r && r.product && [r.variant && r.variant.barcode, r.product.barcode].some((v) => v && String(v).trim().toLowerCase() === lc);
-    try { const l = localBarcode(c); if (matches(l)) return { name: l.product.name || '' }; } catch { /* ignore */ }
     try {
-      const d = await window.Api.get(`/products/barcode/${encodeURIComponent(c)}`).then((r) => r.data);
+      const l = localBarcode(c);
+      if (l && l.product && [l.variant && l.variant.barcode, l.product.barcode].some((v) => v && String(v).trim().toLowerCase() === lc)) return { name: l.product.name || '' };
+    } catch { /* ignore */ }
+    if (bcUsed && bcUsed.has(c)) return { name: '' };
+    return null;
+  }
+  async function serverBarcodeHit(code) {
+    try {
+      const d = await window.Api.get(`/products/barcode/${encodeURIComponent(code)}`).then((r) => r.data);
       const prod = d && (d.product || d);
       if (prod && (prod._id || prod.name)) return { name: prod.name || '' };
     } catch { /* not found */ }
-    try {
-      if (window.BarcodeLabels) { const used = (await window.BarcodeLabels.loadCatalog()).used; if (used.has(c)) return { name: '' }; }
-    } catch { /* ignore */ }
     return null;
   }
 
   function bindBarcodeLiveCheck(input) {
     if (!input || input._bcLive) return;
     input._bcLive = true;
+    warmBarcodeSet();
     const field = input.closest('.field') || input.parentElement;
     const msg = document.createElement('div');
     msg.setAttribute('role', 'alert');
@@ -1615,23 +1623,27 @@
       msg.style.display = dup ? '' : 'none';
       msg.textContent = dup ? text : '';
     };
-    const check = async () => {
-      const code = input.value.trim();
-      const my = ++seq;
-      if (!code) { setState(false); return; }
-      const hit = await findExistingBarcode(code);
-      if (my !== seq) return;
-      if (hit) {
-        setState(true, `⚠ BARCODE ALREADY EXISTS in the system${hit.name ? ` — product: "${hit.name}"` : ''}. Use a different barcode.`);
-        if (lastToasted !== code) { lastToasted = code; window.UI.toast.error(`Barcode ${code} already exists${hit.name ? ` (${hit.name})` : ''}`); }
-        try { input.focus(); input.select(); } catch { /* ignore */ }
-      } else setState(false);
+    const dupText = (name) => `⚠ BARCODE ALREADY EXISTS in the system${name ? ` — product: "${name}"` : ''}. Use a different barcode.`;
+    const alertDup = (code, name, final) => {
+      setState(true, dupText(name));
+      if (final && lastToasted !== code) { lastToasted = code; window.UI.toast.error(`Barcode ${code} already exists${name ? ` (${name})` : ''}`); }
+      if (final) { try { input.focus(); input.select(); } catch { /* ignore */ } }
     };
-    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(check, 250); });
-    input.addEventListener('change', () => { clearTimeout(timer); check(); });
-    input.addEventListener('blur', () => { clearTimeout(timer); check(); });
-    input._bcCheck = check;
-    if (input.value.trim()) check();
+    const check = async (final) => {
+      const code = input.value.trim(); const my = ++seq;
+      if (!code) { setState(false); return; }
+      const hit = instantBarcodeHit(code);            // INSTANT: device copy, no network
+      if (hit) { alertDup(code, hit.name, final); return; }
+      if (!final) { setState(false); return; }
+      const sh = await serverBarcodeHit(code);         // confirm with the server
+      if (my !== seq) return;
+      if (sh) { if (bcUsed) bcUsed.add(code); alertDup(code, sh.name, true); } else setState(false);
+    };
+    input.addEventListener('input', () => { check(false); clearTimeout(timer); timer = setTimeout(() => check(true), 80); });
+    input.addEventListener('change', () => { clearTimeout(timer); check(true); });
+    input.addEventListener('blur', () => { clearTimeout(timer); check(true); });
+    input._bcCheck = () => check(true);
+    if (input.value.trim()) check(true);
   }
 
   function openBuiltinAddProduct(opts) {
