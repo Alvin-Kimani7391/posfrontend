@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.3.3-turbo';
+const VERSION = 'v5.3.4-turbo';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
@@ -15,6 +15,7 @@ const NOTES = [
   'Phone menu: Reports now sits between Products and Inventory; Employees removed from the bottom bar',
   'Phone top bar is cleaner: branch picker and offline set-up button removed',
   'Sales screen redesigned for phones: big cart, clean search list, one Hold button, quick Pay bar and bottom-sheet payment',
+  'Add product window on the Sales screen: scan barcode or QR code with the camera, and copy the name into SKU in one tap',
 
 
 
@@ -58,7 +59,7 @@ const PRECACHE = [
   'js/core/customer-picker.js', 'js/core/receipt-view.js', 'js/core/barcode-scanner.js', 'js/core/cash-count.js',
   'js/core/cash-drawer.js', 'js/core/tour.js', 'js/core/announcements.js', 'js/core/billing-banner.js', 'js/core/premium.js', 'js/core/pwa.js', 'js/core/i18n.js', 'js/core/i18n-sw.js', 'js/core/country-flag.js', 'css/country-flag.css',
 
-  'js/pages/dashboard.js', 'js/pages/login.js', 'js/pages/register.js', 'js/pages/sales.js', 'js/pages/sales-mobile.js', 'js/pages/products.js', 'js/core/wholesale-product-form.js', 'js/core/product-import.js',
+  'js/pages/dashboard.js', 'js/pages/login.js', 'js/pages/register.js', 'js/pages/sales.js', 'js/pages/sales-mobile.js', 'js/pages/sales-addproduct.js', 'js/pages/products.js', 'js/core/wholesale-product-form.js', 'js/core/product-import.js',
   'js/pages/inventory.js', 'js/pages/customers.js', 'js/pages/branches.js', 'js/pages/employees.js', 'js/pages/suppliers.js',
   'js/pages/purchases.js', 'js/pages/expenses.js', 'js/pages/refunds.js', 'js/pages/reports.js', 'js/pages/audit-logs.js',
   'js/pages/settings.js', 'js/pages/cash-register.js', 'js/pages/notifications.js', 'js/pages/offline-review.js',
