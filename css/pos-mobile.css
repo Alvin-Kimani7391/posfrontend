@@ -64,8 +64,11 @@
   }
   body[data-page="sales"] #pz-root .pz-tabs {
     order: 0; flex: 1 1 0; min-width: 0;
-    display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; border-radius: 12px;
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 3px; border-radius: 12px;
   }
+  body[data-page="sales"] #pz-root .pz-tab i { display: none; }
+  body[data-page="sales"] #pz-root .pz-tab > span:not(.pz-count) { overflow: hidden; text-overflow: ellipsis; }
+  body[data-page="sales"] #pz-root .pz-tab .pz-count { height: 18px; min-width: 18px; padding: 0 5px; font-size: 10.5px; }
   body[data-page="sales"] #pz-root .pz-tab {
     height: 36px; min-width: 0; padding: 0 6px; gap: 6px; justify-content: center;
     font-size: 13px; border-radius: 9px;
@@ -258,6 +261,25 @@
   body[data-page="sales"] #pz-root .pz-view-history .toolbar .flex { width: 100%; }
   body[data-page="sales"] #pz-root .pz-view-history .toolbar input[type="date"],
   body[data-page="sales"] #pz-root .pz-view-history #history-channel { max-width: none !important; flex: 1 1 0; min-width: 0; }
+
+  /* ------------------------------------------------- held sales page ---- */
+  body[data-page="sales"] #pz-root .pz-view-held { padding-bottom: 8px; }
+  body[data-page="sales"] #pz-root .hv { gap: 10px; }
+  body[data-page="sales"] #pz-root .hv-head { padding: 12px; gap: 10px; border-radius: 16px; }
+  body[data-page="sales"] #pz-root .hv-tools { margin-left: 0; width: 100%; flex-direction: column; align-items: stretch; gap: 8px; }
+  body[data-page="sales"] #pz-root .hv-search { width: 100%; }
+  body[data-page="sales"] #pz-root .hv-search .input { height: 46px; font-size: 16px; } /* 16px stops iOS zooming on focus */
+  body[data-page="sales"] #pz-root .hv-btns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
+  body[data-page="sales"] #pz-root .hv-btns .btn { height: 44px; min-height: 44px; padding: 0 10px; border-radius: 12px; font-size: 13px; justify-content: center; white-space: normal; line-height: 1.15; }
+  body[data-page="sales"] #pz-root .hv-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  body[data-page="sales"] #pz-root .hv-card { padding: 14px; border-radius: 16px; gap: 10px; }
+  body[data-page="sales"] #pz-root .hv-name { font-size: 16px; }
+  body[data-page="sales"] #pz-root .hv-actions { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 8px; }
+  body[data-page="sales"] #pz-root .hv-actions .btn { height: 50px; border-radius: 14px; font-size: 15px; }
+  body[data-page="sales"] #pz-root .hv-icons { grid-column: 1 / -1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
+  body[data-page="sales"] #pz-root .hv-ib { width: auto; height: 44px; border-radius: 12px; }
+  body[data-page="sales"] #pz-root .hv-ib span { display: inline; }
+  body[data-page="sales"] #pz-root .hv-empty { padding: 36px 16px; }
 
   /* ---------------------------------------------- floating helper chips -- */
   /* offline status chip: never on top of the tabs; "all good" chips stay hidden */

@@ -252,12 +252,14 @@ body.pz-focus-on { overflow: hidden; }
 .pz-root.pz-w-xs .pz-topbar { gap: var(--space-2); }
 .pz-root.pz-w-xs .pz-tab { padding: 0 var(--space-3); }
 /* In sales history the mode switch is meaningless (history has its own channel filter) */
-.pz-root[data-view="history"] .pz-seg { display: none; }
+.pz-root[data-view="history"] .pz-seg,
+.pz-root[data-view="held"] .pz-seg { display: none; }
 
 /* ---------------------------------------------------------------- views -- */
 .pz-view { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .pz-view-pos { gap: var(--space-3); }
-.pz-view-history { overflow: auto; -webkit-overflow-scrolling: touch; }
+.pz-view-history,
+.pz-view-held { overflow: auto; -webkit-overflow-scrolling: touch; }
 .pz-root.pz-w-xs.pz-focus { padding-left: var(--space-2); padding-right: var(--space-2); }
 .pz-root.pz-w-xs.pz-focus .pz-topbar { margin-left: calc(var(--space-2) * -1); margin-right: calc(var(--space-2) * -1); }
 .pz-root.pz-w-xs .pz-view-pos { gap: var(--space-2); }
@@ -778,3 +780,72 @@ body.pz-focus-on .modal-backdrop,
 
 /* animations that leave text on a half-pixel (blurry) when they stop */
 .pz-pay-btn:active:not(:disabled) { transform: none; }
+
+/* ==========================================================================
+   HELD SALES PAGE (tab beside New sale / Sales history)
+   Header (title, search, buttons) + a responsive grid of cards. Phones: see pos-mobile.css.
+   ========================================================================== */
+.pz-tab .pz-count { min-width: 20px; height: 20px; padding: 0 6px; font-size: 11px; box-shadow: none; }
+.hv { display: flex; flex-direction: column; gap: var(--space-3); padding-bottom: var(--space-4); min-width: 0; }
+.hv-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; padding: var(--space-4) var(--space-5); }
+.hv-titlebox { min-width: 0; }
+.hv-title { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-lg); font-weight: var(--font-bold); letter-spacing: -0.01em; }
+.hv-total { min-width: 26px; height: 26px; padding: 0 8px; border-radius: var(--radius-full); background: var(--color-primary-50); color: var(--color-primary-dark); font-size: var(--text-xs); font-weight: var(--font-bold); display: inline-flex; align-items: center; justify-content: center; }
+.hv-sub { margin-top: 2px; font-size: var(--text-sm); color: var(--color-text-muted); }
+.hv-tools { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-left: auto; min-width: 0; }
+.hv-search { width: min(340px, 100%); }
+.hv-btns { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.hv-btns .btn { white-space: nowrap; gap: 6px; }
+.hv-btns .hv-danger { color: var(--color-danger); }
+.hv-pill { min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--color-primary); color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+#hv-note:empty { display: none; }
+#hv-note { display: flex; flex-direction: column; gap: var(--space-2); }
+.hv-alert { border-color: var(--color-danger); color: var(--color-danger); background: var(--color-danger-bg); }
+
+.hv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: var(--space-3); align-items: stretch; }
+.hv-card {
+  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  padding: 16px; background: #fff; border: 1px solid var(--color-border); border-radius: 16px;
+  box-shadow: 0 1px 0 rgba(16, 24, 40, 0.02), 0 10px 28px -18px rgba(16, 24, 40, 0.22);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+}
+.hv-card:hover { border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border)); box-shadow: 0 14px 30px -16px rgba(16, 24, 40, 0.28); }
+.hv-card.hv-busy { opacity: .55; pointer-events: none; }
+.hv-card-top { display: flex; align-items: flex-start; gap: 12px; }
+.hv-ico { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: var(--color-primary-50); color: var(--color-primary-dark); }
+.hv-ico.dev { background: var(--color-warning-bg); color: var(--color-warning); }
+.hv-main { flex: 1 1 auto; min-width: 0; }
+.hv-name { font-weight: var(--font-bold); font-size: var(--text-md); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hv-meta { margin-top: 2px; font-size: var(--text-xs); color: var(--color-text-muted); }
+.hv-amt { flex: 0 0 auto; text-align: right; font-weight: var(--font-bold); font-size: var(--text-md); line-height: 1.2; }
+.hv-amt small { display: block; font-size: 11px; font-weight: 500; color: var(--color-text-muted); }
+.hv-dash { color: var(--color-text-muted); }
+.hv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.hv-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border-radius: var(--radius-full); background: #f2f4f8; color: var(--color-text-secondary); font-size: 12px; font-weight: 600; }
+.hv-chip.warn { background: var(--color-danger-bg); color: var(--color-danger); }
+.hv-lines { list-style: none; margin: 0; padding: 8px 12px; background: #fafbfd; border: 1px solid #eef0f5; border-radius: 12px; display: flex; flex-direction: column; gap: 5px; }
+.hv-lines li { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
+.hv-ln { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hv-lq { flex: 0 0 auto; font-weight: 700; color: var(--color-text-secondary); }
+.hv-more { align-self: flex-start; background: none; border: 0; padding: 2px 0; color: var(--color-primary-dark); font-weight: 600; font-size: var(--text-sm); cursor: pointer; }
+.hv-actions { margin-top: auto; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.hv-actions .btn { height: 44px; border-radius: 12px; font-weight: 700; white-space: nowrap; gap: 6px; }
+.hv-icons { display: inline-flex; gap: 6px; }
+.hv-ib { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast); }
+.hv-ib:hover { background: #f2f4f8; color: var(--color-text); }
+.hv-ib.danger { color: var(--color-danger); }
+.hv-ib.danger:hover { background: var(--color-danger-bg); }
+.hv-ib span { display: none; font-size: 13px; font-weight: 600; }
+.hv-ib:focus-visible, .hv-more:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+.hv-empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 48px 20px; background: #fff; border: 1px dashed var(--color-border); border-radius: 16px; color: var(--color-text-secondary); }
+.hv-empty h3 { margin: 0; font-size: var(--text-lg); color: var(--color-text); }
+.hv-empty p { margin: 0 0 8px; max-width: 420px; font-size: var(--text-sm); }
+.hv-empty-ico { width: 56px; height: 56px; border-radius: 18px; display: inline-flex; align-items: center; justify-content: center; background: var(--color-primary-50); color: var(--color-primary-dark); font-size: 22px; }
+
+/* loading placeholders (only the very first time, before any copy exists) */
+.hv-skel { gap: 10px; pointer-events: none; }
+.hv-skel .sk { display: block; height: 14px; border-radius: 8px; background: linear-gradient(90deg, #eef0f5 25%, #f7f8fb 50%, #eef0f5 75%); background-size: 200% 100%; animation: hv-shimmer 1.2s linear infinite; }
+.hv-skel .sk-l { width: 55%; height: 18px; } .hv-skel .sk-m { width: 80%; } .hv-skel .sk-s { width: 35%; } .hv-skel .sk-b { height: 44px; border-radius: 12px; margin-top: 6px; }
+@keyframes hv-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .hv-skel .sk { animation: none; } }

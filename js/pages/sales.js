@@ -454,15 +454,16 @@
     }
     // Paint the till first; the shift / payment flags / cash drawer load in the background.
     renderNewSaleView();
-    try { if (new URLSearchParams(window.location.search).get('view') === 'history') contentEl.querySelector('.pz-tab[data-view="history"]')?.click(); } catch { /* ignore */ }
+    try { const v = new URLSearchParams(window.location.search).get('view'); if (v === 'history' || v === 'held') contentEl.querySelector(`.pz-tab[data-view="${v}"]`)?.click(); } catch { /* ignore */ }
     loadShift().catch(() => {});
+    setTimeout(warmLists, 1200); // fetch the first page of history + held sales quietly, so both open instantly
 
     // The cash drawer module (and any unfinished "close the drawer" lock) is set up
     // after the screen is on, so a slow or missing drawer never delays selling.
     initDrawer().catch(() => {});
     window.Offline?.on('mode', () => {
       if (isOfflineNow() && isWs()) { setMode('RETAIL'); window.UI.toast.info?.('Offline: switched to retail. Wholesale needs an internet connection.'); }
-      loadShift(); if (state.view === 'history') renderHistory();
+      loadShift(); if (state.view === 'history') renderHistory(); else if (state.view === 'held') renderHeld();
     });
     window.Offline?.on('shift', renderShiftBanner);
 
@@ -474,8 +475,11 @@
     unsubscribeBranchChange = window.AppShell.onBranchChange(async () => {
       refreshCashierLabel();
       await loadShift();
+      listCache.clear();
       if (state.view === 'new-sale') renderNewSaleView();
+      else if (state.view === 'held') renderHeld();
       else renderHistory();
+      warmLists();
     });
 
     // Never walk away from an open cash drawer.
@@ -503,7 +507,8 @@
         <header class="pz-topbar">
           <div class="pz-tabs" role="tablist">
             <button class="pz-tab active" data-view="new-sale" role="tab"><i class="fa-solid fa-cash-register" aria-hidden="true"></i> New sale</button>
-            <button class="pz-tab" data-view="history" role="tab" data-requires-permission="sales.view"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Sales history</button>
+            <button class="pz-tab" data-view="held" role="tab"><i class="fa-solid fa-pause" aria-hidden="true"></i> <span>Held sales</span> <span class="pz-count held-count" style="display:none">0</span></button>
+            <button class="pz-tab" data-view="history" role="tab" data-requires-permission="sales.view"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> <span>Sales history</span></button>
           </div>
           ${window.PharmacyDesk ? window.PharmacyDesk.segHtml() : ''}
           <div class="pz-seg" id="pz-seg" data-mode="${state.mode}" role="tablist" aria-label="Sale type" hidden>
@@ -544,13 +549,17 @@
       btn.addEventListener('click', () => {
         contentEl.querySelectorAll('.pz-tab').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
+        if (btn.dataset.view === 'held' && isWs()) { // held sales are retail only: stay where we are
+          btn.classList.remove('active'); contentEl.querySelector(`.pz-tab[data-view="${state.view}"]`)?.classList.add('active');
+          return window.UI.toast.error('Held sales are for retail sales');
+        }
         state.view = btn.dataset.view;
         refreshModeUi();
         if (state.view === 'new-sale') {
           renderNewSaleView();
         } else {
           detachHardwareScanner();
-          renderHistory();
+          if (state.view === 'held') renderHeld(); else renderHistory();
         }
       });
     });
@@ -2788,13 +2797,8 @@
    *          | Upload device ones to the server | Park the cart you are serving now
    * ------------------------------------------------------------------ */
   let heldRows = [];
-  async function fetchHeldRows() {
-    let server = []; let serverErr = '';
-    if (!isOfflineNow()) {
-      try { const { data } = await window.Api.get('/shop/held', { branchId: window.AppShell.getActiveBranchId() || undefined, mine: true }); server = data.held || []; }
-      catch (e) { serverErr = isNetErr(e) ? '' : (e.message || ''); }
-    }
-    const rows = [
+  function buildHeldRows(server) {
+    return [
       ...server.map((h) => ({
         kind: 'S', id: h._id, label: h.label || 'Held sale', at: new Date(h.createdAt).getTime(),
         customer: h.customerId && h.customerId.name ? h.customerId.name : '', cartDiscount: Number(h.cartDiscount) || 0,
@@ -2807,13 +2811,21 @@
         lines: h.cart.map((i) => ({ name: nameOf(i.product, i.variant), quantity: i.quantity, discount: Number(i.discount) || 0, price: i.overridePriceEnabled && i.overridePrice != null ? i.overridePrice : (i.variant ? i.variant.sellingPrice : i.product.sellingPrice) })),
       })),
     ].sort((a, b) => b.at - a.at);
-    return { rows, serverErr };
+  }
+  function paintHeldCount() {
+    const hit = lcGet(heldKey());
+    const n = localHeld().length + (hit ? hit.data.server.filter((h) => !heldGone.has(String(h._id))).length : 0);
+    document.querySelectorAll('.held-count').forEach((el) => { el.textContent = String(n); el.style.display = n ? '' : 'none'; });
   }
   async function refreshHeldCount() {
-    const els = document.querySelectorAll('.held-count'); if (!els.length) return;
-    let n = localHeld().length;
-    if (!isOfflineNow()) { try { const { data } = await window.Api.get('/shop/held', { branchId: window.AppShell.getActiveBranchId() || undefined, mine: true }, { background: true }); n += (data.held || []).length; } catch { /* keep device count */ } }
-    document.querySelectorAll('.held-count').forEach((el) => { el.textContent = String(n); el.style.display = n ? '' : 'none'; });
+    if (!document.querySelector('.held-count')) return;
+    paintHeldCount();
+    if (isOfflineNow()) return;
+    try {
+      const { data } = await window.Api.get('/shop/held', { branchId: window.AppShell.getActiveBranchId() || undefined, mine: true }, { background: true });
+      lcSet(heldKey(), { server: data.held || [], serverErr: '' });
+    } catch { /* keep what we have */ }
+    paintHeldCount();
   }
   const heldAgo = (t) => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} d ago`; };
   function printHeldSlip(r) {
@@ -2827,158 +2839,256 @@
     setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch { /* ignore */ } setTimeout(() => f.remove(), 2000); }, 200);
   }
 
-  async function recallSale() {
+  /* ------------------------------------------------------------------ *
+   * INSTANT LISTS: the same idea as product search. The last copy of Sales history / Held sales is kept on this device
+   * (memory + this tab's session), shown the moment the tab opens, then refreshed quietly. First pages are fetched in
+   * the background right after the till loads, so the first open is instant too.
+   * ------------------------------------------------------------------ */
+  const listCache = new Map();
+  const LC_STORE = 'pos.lists.v2';
+  try { (JSON.parse(sessionStorage.getItem(LC_STORE) || '[]') || []).forEach(([k, v]) => listCache.set(k, v)); } catch { /* fresh start */ }
+  const lcUser = () => { try { return (window.AppShell.getUser() || {})._id || ''; } catch { return ''; } };
+  const lcFull = (k) => `${lcUser()}|${k}`;
+  let lcTimer = null;
+  function lcPersist() {
+    clearTimeout(lcTimer);
+    lcTimer = setTimeout(() => {
+      try { sessionStorage.setItem(LC_STORE, JSON.stringify([...listCache.entries()].filter(([k]) => /\|(held|h)\|/.test(k)).slice(-12))); } catch { /* storage full */ }
+    }, 400);
+  }
+  function lcGet(k, maxAge) { const m = listCache.get(lcFull(k)); return m && (!maxAge || Date.now() - m.t < maxAge) ? m : null; }
+  function lcSet(k, data) { listCache.set(lcFull(k), { t: Date.now(), data }); if (listCache.size > 80) listCache.delete(listCache.keys().next().value); lcPersist(); }
+  function lcDrop(prefix) { [...listCache.keys()].forEach((k) => { if (k.includes(`|${prefix}`)) listCache.delete(k); }); lcPersist(); }
+  const heldKey = () => `held|${window.AppShell.getActiveBranchId() || ''}`;
+
+  function warmLists() {
+    if (isOfflineNow() || !window.AppShell.getUser()) return;
+    refreshHeldCount();
+    if (window.Permissions.can(window.AppShell.getUser(), 'sales.view') && !lcGet(histKey(), 20000)) {
+      const key = histKey();
+      window.Api.get('/sales', histParams(), { background: true }).then(({ data }) => lcSet(key, data)).catch(() => {});
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * HELD SALES PAGE (a full tab, like Sales history): every held sale (server + this device) as a card.
+   * Resume (replace cart) | Add to cart (merge) | Items | Print slip | Rename (device ones) | Discard | Discard all
+   * | Upload device ones to the server | Park the cart you are serving now
+   * ------------------------------------------------------------------ */
+  const heldUi = { q: '', open: new Set() };
+  const heldGone = new Set(); // discarded / recalled, while the server is still confirming
+  let heldSeq = 0;
+  const heldTime = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  async function fetchHeldServer() {
+    if (isOfflineNow()) return { server: null, serverErr: '' };
+    try { const { data } = await window.Api.get('/shop/held', { branchId: window.AppShell.getActiveBranchId() || undefined, mine: true }); return { server: data.held || [], serverErr: '' }; }
+    catch (e) { return { server: null, serverErr: isNetErr(e) ? '' : (e.message || '') }; }
+  }
+  function heldDropFromCache(id) { const hit = lcGet(heldKey()); if (hit) hit.data.server = hit.data.server.filter((h) => String(h._id) !== String(id)); }
+  const heldCurrent = () => { const hit = lcGet(heldKey()); return hit ? hit.data : { server: [], serverErr: '' }; };
+
+  function goToTill() {
+    state.view = 'new-sale';
+    contentEl.querySelectorAll('.pz-tab').forEach((t) => t.classList.toggle('active', t.dataset.view === 'new-sale'));
+    refreshModeUi();
+    renderNewSaleView();
+  }
+  /** Till button + F6: open the Held sales tab. */
+  function recallSale() {
+    if (isWs()) return window.UI.toast.error('Held sales are for retail sales');
+    if (state.view === 'held') return;
+    contentEl.querySelector('.pz-tab[data-view="held"]')?.click();
+  }
+
+  function heldCardHtml(r) {
+    const units = r.lines.reduce((n, l) => n + Number(l.quantity || 0), 0);
+    const total = r.kind === 'L' && r.lines.every((l) => l.price != null) ? Math.max(r.lines.reduce((n, l) => n + l.price * l.quantity - (l.discount || 0), 0) - r.cartDiscount, 0) : null;
+    const left = r.expires ? Math.round((r.expires - Date.now()) / 3600000) : null;
+    const open = heldUi.open.has(r.id);
+    const shown = open ? r.lines : r.lines.slice(0, 3);
+    const more = r.lines.length - 3;
+    return `
+      <article class="hv-card" data-id="${esc(r.id)}">
+        <div class="hv-card-top">
+          <span class="hv-ico ${r.kind === 'L' ? 'dev' : ''}" title="${r.kind === 'L' ? 'Saved on this device' : 'Saved on the server'}"><i class="fa-solid ${r.kind === 'L' ? 'fa-laptop' : 'fa-cloud'}" aria-hidden="true"></i></span>
+          <div class="hv-main">
+            <div class="hv-name">${esc(r.label)}</div>
+            <div class="hv-meta">${esc(heldAgo(r.at))} · ${esc(heldTime(r.at))}</div>
+          </div>
+          <div class="hv-amt">${total != null ? esc(fm(total)) : '<span class="hv-dash">-</span>'}<small>${total != null ? 'estimate' : 'priced on resume'}</small></div>
+        </div>
+        <div class="hv-chips">
+          <span class="hv-chip">${r.lines.length} product${r.lines.length === 1 ? '' : 's'}</span>
+          <span class="hv-chip">${units} unit${units === 1 ? '' : 's'}</span>
+          ${r.customer ? `<span class="hv-chip"><i class="fa-solid fa-user" aria-hidden="true"></i> ${esc(r.customer)}</span>` : ''}
+          ${r.cartDiscount ? `<span class="hv-chip">Discount ${esc(fm(r.cartDiscount))}</span>` : ''}
+          ${left != null && left < 12 ? `<span class="hv-chip warn">Expires in ${Math.max(left, 0)} h</span>` : ''}
+        </div>
+        <ul class="hv-lines">${shown.map((l) => `<li><span class="hv-ln">${esc(l.name)}</span><span class="hv-lq">&times; ${esc(String(l.quantity))}</span></li>`).join('')}</ul>
+        ${more > 0 ? `<button type="button" class="hv-more" data-hv="items">${open ? 'Show less' : `Show all ${r.lines.length} items`}</button>` : ''}
+        <div class="hv-actions">
+          <button type="button" class="btn btn-primary hv-resume" data-hv="resume"><i class="fa-solid fa-play" aria-hidden="true"></i> Resume</button>
+          <button type="button" class="btn btn-secondary hv-merge" data-hv="merge" title="Add these items to the cart you are serving now">Add to cart</button>
+          <div class="hv-icons">
+            <button type="button" class="hv-ib" data-hv="print" title="Print slip" aria-label="Print slip"><i class="fa-solid fa-print" aria-hidden="true"></i><span>Print</span></button>
+            ${r.kind === 'L' ? '<button type="button" class="hv-ib" data-hv="rename" title="Rename" aria-label="Rename"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>Rename</span></button>' : ''}
+            <button type="button" class="hv-ib danger" data-hv="drop" title="Discard" aria-label="Discard"><i class="fa-solid fa-trash" aria-hidden="true"></i><span>Discard</span></button>
+          </div>
+        </div>
+      </article>`;
+  }
+
+  /** Paints header numbers, buttons and the cards from a held-sales copy (null = still loading the very first time). */
+  function paintHeld(data) {
+    const list = $('held-list'); if (!list) return;
+    if (!data) { list.innerHTML = [1, 2, 3].map(() => '<div class="hv-card hv-skel"><i class="sk sk-l"></i><i class="sk sk-m"></i><i class="sk sk-s"></i><i class="sk sk-b"></i></div>').join(''); return; }
+    const all = buildHeldRows((data.server || []).filter((h) => !heldGone.has(String(h._id)))).filter((r) => !heldGone.has(r.id));
+    heldRows = all;
+    const q = heldUi.q.trim().toLowerCase();
+    const rows = q ? all.filter((r) => (`${r.label} ${r.customer} ${r.lines.map((l) => l.name).join(' ')}`).toLowerCase().includes(q)) : all;
+    const units = all.reduce((n, r) => n + r.lines.reduce((m, l) => m + Number(l.quantity || 0), 0), 0);
+    const localCount = all.filter((r) => r.kind === 'L').length;
+    const t = $('hv-total'); if (t) t.textContent = String(all.length);
+    const sub = $('hv-sub'); if (sub) sub.textContent = all.length ? `${all.length} waiting · ${units} unit${units === 1 ? '' : 's'}${q ? ` · ${rows.length} match` : ''}` : 'Parked carts waiting to be served';
+    const btns = $('hv-btns');
+    if (btns) btns.innerHTML = `${state.cart.length ? `<button type="button" class="btn btn-secondary" data-hv="park"><i class="fa-solid fa-pause" aria-hidden="true"></i> Park current cart <span class="hv-pill">${state.cart.length}</span></button>` : ''}${localCount && !isOfflineNow() ? '<button type="button" class="btn btn-secondary" data-hv="upload"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Upload device ones</button>' : ''}${all.length ? '<button type="button" class="btn btn-ghost hv-danger" data-hv="clear"><i class="fa-solid fa-trash" aria-hidden="true"></i> Discard all</button>' : ''}`;
+    const note = $('hv-note');
+    if (note) note.innerHTML = `${data.serverErr ? `<div class="pz-note hv-alert">Could not load sales held on the server: ${esc(data.serverErr)}. Sales held on this device are shown.</div>` : ''}${state.cart.length && all.length ? '<div class="pz-note">You are serving a customer now. <b>Resume</b> replaces your cart, <b>Add to cart</b> merges a held sale into it, or park your current cart first.</div>' : ''}`;
+    if (!all.length) {
+      list.innerHTML = `<div class="hv-empty"><span class="hv-empty-ico"><i class="fa-solid fa-pause" aria-hidden="true"></i></span><h3>No held sales</h3><p>Use <b>Park</b> on the till to put the current cart aside and serve the next customer. Parked sales show up here.</p><button type="button" class="btn btn-primary" data-hv="till"><i class="fa-solid fa-cash-register" aria-hidden="true"></i> Back to the till</button></div>`;
+    } else if (!rows.length) {
+      list.innerHTML = `<div class="hv-empty"><h3>No match</h3><p>No held sale matches &ldquo;${esc(heldUi.q.trim())}&rdquo;.</p></div>`;
+    } else list.innerHTML = rows.map(heldCardHtml).join('');
+    paintHeldCount();
+  }
+  const heldRepaint = () => paintHeld(heldCurrent());
+
+  async function renderHeld() {
+    const body = $('view-body'); if (!body) return;
+    body.className = 'pz-view pz-view-held';
+    body.innerHTML = `
+      <div class="hv">
+        <div class="hv-head card">
+          <div class="hv-titlebox"><div class="hv-title">Held sales <span class="hv-total" id="hv-total">0</span></div><div class="hv-sub" id="hv-sub">Parked carts waiting to be served</div></div>
+          <div class="hv-tools">
+            <div class="input-group hv-search"><span class="input-group-icon">${window.Icons.get('search')}</span><input class="input" id="held-filter" type="search" autocomplete="off" placeholder="Search name, customer or product" value="${esc(heldUi.q)}" /></div>
+            <div class="hv-btns" id="hv-btns"></div>
+          </div>
+        </div>
+        <div id="hv-note"></div>
+        <div class="hv-grid" id="held-list"></div>
+      </div>`;
+    const root = body.querySelector('.hv');
+    root.addEventListener('click', heldClick);
+    $('held-filter').addEventListener('input', (e) => { heldUi.q = e.target.value; heldRepaint(); });
+
+    const hit = lcGet(heldKey());
+    paintHeld(hit ? hit.data : (isOfflineNow() ? { server: [], serverErr: '' } : null));
+    if (isOfflineNow()) return;
+    const seq = ++heldSeq;
+    const { server, serverErr } = await fetchHeldServer();
+    if (seq !== heldSeq || state.view !== 'held' || !$('held-list')) return;
+    const prev = hit ? hit.data : null;
+    const next = { server: server == null ? (prev ? prev.server : []) : server, serverErr };
+    lcSet(heldKey(), next);
+    if (!prev || JSON.stringify(prev) !== JSON.stringify(next)) paintHeld(next);
+  }
+
+  async function heldClick(ev) {
+    const b = ev.target.closest('[data-hv]'); if (!b || b.disabled) return;
+    const act = b.dataset.hv;
+    const card = b.closest('.hv-card');
+    const r = card ? heldRows.find((x) => x.id === card.dataset.id) : null;
+    if (card && !r) return;
+    if (act === 'till') return goToTill();
+    if (act === 'items') { heldUi.open.has(r.id) ? heldUi.open.delete(r.id) : heldUi.open.add(r.id); card.outerHTML = heldCardHtml(r); return; }
+    if (act === 'print') return printHeldSlip(r);
+    if (act === 'rename') {
+      const name = window.prompt('New name for this held sale:', r.label); if (name === null) return;
+      saveLocalHeld(localHeld().map((h) => (h.id === r.id ? { ...h, label: name.trim().slice(0, 60) || 'Held sale' } : h)));
+      return heldRepaint();
+    }
+    if (act === 'drop') return heldDiscard(r);
+    if (act === 'resume' || act === 'merge') return heldOpen(r, act === 'merge', b);
+    if (act === 'clear') return heldClearAll();
+    if (act === 'upload') return heldUpload(b);
+    if (act === 'park') { await parkSale(); if (state.view === 'held') renderHeld(); }
+  }
+
+  /** Instant: the card disappears at once; the server delete runs behind it and the card comes back (with a message) if it fails. */
+  async function heldDiscard(r) {
+    if (heldGone.has(r.id)) return;
+    if (!(await window.UI.confirmDialog({ title: `Discard "${r.label}"?`, message: 'This cannot be undone.', danger: true, confirmText: 'Discard' }))) return;
+    if (heldGone.has(r.id)) return;
+    if (r.kind === 'L') { saveLocalHeld(localHeld().filter((h) => h.id !== r.id)); heldRepaint(); window.UI.toast.success('Discarded'); return; }
+    heldGone.add(r.id); heldDropFromCache(r.id); heldRepaint(); window.UI.toast.success('Discarded');
+    window.Api.delete(`/shop/held/${r.id}`).then(() => { heldGone.delete(r.id); refreshHeldCount(); }).catch((e) => {
+      heldGone.delete(r.id); window.UI.toast.error(e.message || 'Could not discard - it is back in the list'); if (state.view === 'held') renderHeld();
+    });
+  }
+
+  async function heldClearAll() {
+    const rows = heldRows.slice(); if (!rows.length) return;
+    if (!(await window.UI.confirmDialog({ title: `Discard all ${rows.length} held sales?`, message: 'This cannot be undone.', danger: true, confirmText: 'Discard all' }))) return;
+    const local = new Set(rows.filter((r) => r.kind === 'L').map((r) => r.id)); const remote = rows.filter((r) => r.kind !== 'L');
+    if (local.size) saveLocalHeld(localHeld().filter((h) => !local.has(h.id)));
+    remote.forEach((r) => { heldGone.add(r.id); heldDropFromCache(r.id); });
+    heldRepaint(); window.UI.toast.success('All held sales discarded');
+    Promise.allSettled(remote.map((r) => window.Api.delete(`/shop/held/${r.id}`))).then((res) => {
+      remote.forEach((r) => heldGone.delete(r.id));
+      const failed = res.filter((x) => x.status === 'rejected').length;
+      if (failed) { window.UI.toast.error(`${failed} could not be discarded`); if (state.view === 'held') renderHeld(); } else refreshHeldCount();
+    });
+  }
+
+  async function heldUpload(btn) {
+    window.UI.setButtonLoading(btn, true);
+    const list = localHeld();
+    const res = await Promise.allSettled(list.map(async (h) => {
+      const items = h.cart.filter((i) => i.product && !String(i.product._id).startsWith('tmp_')).map((i) => ({ productId: i.product._id, variantId: (i.variant && i.variant._id) || undefined, quantity: i.quantity, discount: i.discount || 0 }));
+      if (!items.length) throw new Error('empty');
+      await window.Api.post('/shop/held', { branchId: window.AppShell.getActiveBranchId(), label: h.label || undefined, customerId: (h.customer && h.customer._id) || undefined, cartDiscount: h.cartDiscount || 0, items });
+      return h.id;
+    }));
+    const okIds = new Set(res.filter((x) => x.status === 'fulfilled').map((x) => x.value)); const bad = res.length - okIds.size;
+    saveLocalHeld(localHeld().filter((x) => !okIds.has(x.id)));
+    window.UI.toast[bad ? 'error' : 'success'](`${okIds.size} uploaded${bad ? `, ${bad} could not be uploaded` : ''}`);
+    if (state.view === 'held') renderHeld();
+  }
+
+  async function heldOpen(r, merge, btn) {
+    if (r.busy) return;
     if (isWs()) return window.UI.toast.error('Held sales are for retail sales');
     if (drawerLocked()) return window.UI.toast.error('Close the cash drawer first');
-    const { rows, serverErr } = await fetchHeldRows();
-    heldRows = rows;
-    const time = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    const rowHtml = (r, i) => {
-      const units = r.lines.reduce((n, l) => n + Number(l.quantity || 0), 0);
-      const total = r.kind === 'L' && r.lines.every((l) => l.price != null) ? r.lines.reduce((n, l) => n + l.price * l.quantity - (l.discount || 0), 0) - r.cartDiscount : null;
-      const left = r.expires ? Math.round((r.expires - Date.now()) / 3600000) : null;
-      return `
-        <div class="pz-held-row" data-i="${i}" data-hay="${esc((r.label + ' ' + r.customer + ' ' + r.lines.map((l) => l.name).join(' ')).toLowerCase())}" style="border:1px solid var(--color-border);border-radius:10px;padding:10px;margin-bottom:8px">
-          <div style="display:flex;gap:8px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap">
-            <div style="min-width:0">
-              <strong>${esc(r.label)}</strong>${r.kind === 'L' ? ' <span class="pb-pending" style="background:#64748b">this device</span>' : ''}
-              <div class="text-xs text-muted">${r.lines.length} product${r.lines.length === 1 ? '' : 's'} · ${units} unit${units === 1 ? '' : 's'}${total != null ? ` · about ${esc(fm(Math.max(total, 0)))}` : ''} · ${esc(heldAgo(r.at))} (${esc(time(r.at))})${r.customer ? ` · ${esc(r.customer)}` : ''}${left != null && left < 12 ? ` · <span style="color:var(--color-danger)">expires in ${Math.max(left, 0)} h</span>` : ''}</div>
-            </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <button class="btn btn-primary btn-sm" data-act="resume" data-i="${i}">Resume</button>
-              <button class="btn btn-secondary btn-sm" data-act="merge" data-i="${i}" title="Add these items to the cart you are serving now">Add to cart</button>
-              <button class="btn btn-ghost btn-sm" data-act="view" data-i="${i}">Items</button>
-              ${r.kind === 'L' ? `<button class="btn btn-ghost btn-sm" data-act="rename" data-i="${i}">Rename</button>` : ''}
-              <button class="btn btn-ghost btn-sm" data-act="print" data-i="${i}">Print</button>
-              <button class="btn btn-ghost btn-sm" data-act="drop" data-i="${i}" style="color:var(--color-danger)">Discard</button>
-            </div>
-          </div>
-          <div class="pz-held-lines text-sm" style="display:none;margin-top:8px;border-top:1px dashed var(--color-border);padding-top:6px">
-            ${r.lines.map((l) => `<div style="display:flex;justify-content:space-between;gap:8px"><span>${esc(l.name)}</span><span>× ${esc(String(l.quantity))}${l.discount ? ` <small class="text-muted">(−${esc(fm(l.discount))})</small>` : ''}</span></div>`).join('')}
-            ${r.cartDiscount ? `<div class="text-muted">Cart discount: ${esc(fm(r.cartDiscount))}</div>` : ''}
-          </div>
-        </div>`;
-    };
-    const localCount = rows.filter((r) => r.kind === 'L').length;
-    const modal = window.UI.openModal({
-      title: `Held sales (${rows.length})`,
-      maxWidth: '720px',
-      bodyHtml: `${serverErr ? `<p class="text-sm" style="color:var(--color-danger)">Could not load sales held on the server: ${esc(serverErr)}. Sales held on this device are shown below.</p>` : ''}
-        ${state.cart.length ? '<div class="pz-note" style="margin-bottom:10px">You are serving a customer now. <b>Resume</b> replaces your cart; <b>Add to cart</b> merges a held sale into it; or park your current cart first.</div>' : ''}
-        ${rows.length ? `<input class="input" id="held-filter" placeholder="Search held sales by name, customer or product" style="margin-bottom:10px" />
-        <div id="held-list" style="max-height:55vh;overflow:auto">${rows.map(rowHtml).join('')}</div>` : '<p class="text-sm text-secondary">No held sales yet. Use <b>Park</b> to put the current cart aside and serve the next customer, then come back here to resume it.</p>'}`,
-      footerHtml: `${rows.length ? '<button class="btn btn-ghost" data-action="clear-all" style="color:var(--color-danger);margin-right:auto">Discard all</button>' : ''}${state.cart.length ? '<button class="btn btn-secondary" data-action="park-now">Park current cart</button>' : ''}${localCount && !isOfflineNow() ? '<button class="btn btn-secondary" data-action="upload-local">Upload device ones to server</button>' : ''}<button class="btn btn-secondary" data-action="cancel">Close</button>`,
-    });
-    const done = () => { refreshHeldCount(); };
-    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { window.UI.closeModal(); done(); $('pos-search')?.focus(); });
-    modal.querySelector('[data-action="park-now"]')?.addEventListener('click', async () => {
-      window.UI.closeModal();
-      await parkSale();
-      recallSale();
-    });
-    modal.querySelector('#held-filter')?.addEventListener('input', (e) => {
-      const q = e.target.value.trim().toLowerCase();
-      modal.querySelectorAll('.pz-held-row').forEach((el) => { el.style.display = !q || el.dataset.hay.includes(q) ? '' : 'none'; });
-    });
-
-    const discard = async (r) => { if (r.kind === 'L') saveLocalHeld(localHeld().filter((h) => h.id !== r.id)); else await window.Api.delete(`/shop/held/${r.id}`); };
-
-    // Instant UI: the row disappears at once, the server delete runs in the background (rolled back with a message if it fails).
-    const syncHeldUi = () => {
-      const left = heldRows.filter((x) => !x.gone);
-      const h3 = modal.querySelector('.modal-header h3, .modal-title'); if (h3) h3.textContent = `Held sales (${left.length})`;
-      if (!left.length) {
-        const list = modal.querySelector('#held-list');
-        if (list) list.innerHTML = '<p class="text-sm text-secondary">No held sales left.</p>';
-        modal.querySelector('#held-filter')?.remove();
-        modal.querySelector('[data-action="clear-all"]')?.remove();
+    if (!merge && state.cart.length && !(await window.UI.confirmDialog({ title: 'Replace the current cart?', message: 'Use "Add to cart" to keep the current items, or park the current cart first.', confirmText: 'Replace', danger: true }))) return;
+    r.busy = true;
+    const card = btn.closest('.hv-card'); card?.classList.add('hv-busy'); window.UI.setButtonLoading(btn, true);
+    try {
+      if (r.kind === 'L') {
+        const h = localHeld().find((x) => x.id === r.id); if (!h) throw new Error('Not found');
+        if (merge) {
+          h.cart.forEach((i) => {
+            const same = state.cart.find((x) => keyOf(x) === (i.variant ? i.variant._id : i.product._id));
+            if (same) { same.quantity += i.quantity; syncAutoDiscount(same); } else state.cart.push({ ...i });
+          });
+          if (!state.customer && h.customer) state.customer = h.customer;
+          state.cartDiscount = round2((state.cartDiscount || 0) + (h.cartDiscount || 0));
+        } else { state.cart = h.cart.map((i) => ({ ...i })); state.customer = h.customer || null; state.cartDiscount = h.cartDiscount || 0; }
+        checkoutKey = window.Api.newIdempotencyKey(); promoSig = '';
+        saveLocalHeld(localHeld().filter((x) => x.id !== r.id));
+        window.UI.toast.success(`${merge ? 'Added' : 'Resumed'} "${r.label}"`);
+      } else {
+        const { data } = await window.Api.post(`/shop/held/${r.id}/recall`, {});
+        heldGone.add(r.id); heldDropFromCache(r.id);
+        await loadRecalledCart(data.cart, r.label, { merge });
+        heldGone.delete(r.id);
       }
-    };
-    const dropRow = (r) => {
-      r.gone = true;
-      const el = modal.querySelector(`.pz-held-row[data-i="${heldRows.indexOf(r)}"]`); if (el) el.remove();
-      syncHeldUi();
-    };
-
-    modal.querySelector('[data-action="clear-all"]')?.addEventListener('click', async (ev) => {
-      const btn = ev.currentTarget; if (btn.disabled) return;
-      const todo = heldRows.filter((x) => !x.gone);
-      if (!(await window.UI.confirmDialog({ title: `Discard all ${todo.length} held sales?`, message: 'This cannot be undone.', danger: true, confirmText: 'Discard all' }))) return;
-      btn.disabled = true;
-      todo.forEach((r) => { r.gone = true; });
-      window.UI.closeModal(); window.UI.toast.success('All held sales discarded');
-      const local = todo.filter((r) => r.kind === 'L'); const remote = todo.filter((r) => r.kind !== 'L');
-      if (local.length) { const ids = new Set(local.map((r) => r.id)); saveLocalHeld(localHeld().filter((h) => !ids.has(h.id))); }
-      done();
-      Promise.allSettled(remote.map((r) => window.Api.delete(`/shop/held/${r.id}`))).then((res) => {
-        const failed = res.filter((x) => x.status === 'rejected').length;
-        if (failed) window.UI.toast.error(`${failed} could not be discarded`);
-        done();
-      });
-    });
-
-    modal.querySelector('[data-action="upload-local"]')?.addEventListener('click', async () => {
-      let ok = 0; let bad = 0;
-      for (const h of localHeld()) {
-        const items = h.cart.filter((i) => i.product && !String(i.product._id).startsWith('tmp_')).map((i) => ({ productId: i.product._id, variantId: (i.variant && i.variant._id) || undefined, quantity: i.quantity, discount: i.discount || 0 }));
-        if (!items.length) { bad += 1; continue; }
-        try {
-          await window.Api.post('/shop/held', { branchId: window.AppShell.getActiveBranchId(), label: h.label || undefined, customerId: (h.customer && h.customer._id) || undefined, cartDiscount: h.cartDiscount || 0, items });
-          saveLocalHeld(localHeld().filter((x) => x.id !== h.id)); ok += 1;
-        } catch { bad += 1; }
-      }
-      window.UI.closeModal(); done();
-      window.UI.toast[bad ? 'error' : 'success'](`${ok} uploaded${bad ? `, ${bad} could not be uploaded` : ''}`);
-      recallSale();
-    });
-
-    modal.addEventListener('click', async (ev) => {
-      const b = ev.target.closest('button[data-act]'); if (!b) return;
-      const r = heldRows[Number(b.dataset.i)]; if (!r || r.gone) return;
-      const act = b.dataset.act;
-      if (act === 'view') { const box = b.closest('.pz-held-row').querySelector('.pz-held-lines'); box.style.display = box.style.display === 'none' ? '' : 'none'; return; }
-      if (act === 'print') { printHeldSlip(r); return; }
-      if (act === 'rename') {
-        const name = window.prompt('New name for this held sale:', r.label); if (name === null) return;
-        saveLocalHeld(localHeld().map((h) => (h.id === r.id ? { ...h, label: name.trim().slice(0, 60) || 'Held sale' } : h)));
-        window.UI.closeModal(); recallSale(); return;
-      }
-      if (act === 'drop') {
-        if (r.gone) return;
-        if (!(await window.UI.confirmDialog({ title: `Discard "${r.label}"?`, danger: true, confirmText: 'Discard' }))) return;
-        if (r.gone) return;
-        dropRow(r); window.UI.toast.success('Discarded');
-        if (r.kind === 'L') { saveLocalHeld(localHeld().filter((h) => h.id !== r.id)); done(); return; }
-        window.Api.delete(`/shop/held/${r.id}`).then(done).catch((e) => {
-          window.UI.toast.error(e.message || 'Could not discard - it is back in the list');
-          window.UI.closeModal(); recallSale();
-        });
-        return;
-      }
-      const merge = act === 'merge';
-      if (!merge && state.cart.length && !(await window.UI.confirmDialog({ title: 'Replace the current cart?', message: 'Use "Add to cart" to keep the current items, or Park the current cart first.', confirmText: 'Replace', danger: true }))) return;
-      try {
-        if (r.kind === 'L') {
-          const h = localHeld().find((x) => x.id === r.id); if (!h) throw new Error('Not found');
-          if (merge) {
-            h.cart.forEach((i) => {
-              const same = state.cart.find((x) => keyOf(x) === (i.variant ? i.variant._id : i.product._id));
-              if (same) { same.quantity += i.quantity; syncAutoDiscount(same); } else state.cart.push({ ...i });
-            });
-            if (!state.customer && h.customer) state.customer = h.customer;
-            state.cartDiscount = round2((state.cartDiscount || 0) + (h.cartDiscount || 0));
-          } else { state.cart = h.cart.map((i) => ({ ...i })); state.customer = h.customer || null; state.cartDiscount = h.cartDiscount || 0; }
-          checkoutKey = window.Api.newIdempotencyKey(); promoSig = '';
-          const d = $('cart-discount-input'); if (d) d.value = state.cartDiscount || '';
-          saveLocalHeld(localHeld().filter((x) => x.id !== r.id));
-          renderCart(); window.UI.toast.success(`${merge ? 'Added' : 'Resumed'} "${r.label}"`);
-        } else {
-          const { data } = await window.Api.post(`/shop/held/${r.id}/recall`, {});
-          await loadRecalledCart(data.cart, r.label, { merge });
-        }
-        window.UI.closeModal(); done(); $('pos-search')?.focus();
-      } catch (e) { window.UI.toast.error(e.message || 'Could not open this held sale'); }
-    });
+      goToTill(); refreshHeldCount(); $('pos-search')?.focus();
+    } catch (e) {
+      window.UI.toast.error(e.message || 'Could not open this held sale');
+      r.busy = false; card?.classList.remove('hv-busy'); if (btn.isConnected) window.UI.setButtonLoading(btn, false);
+    }
   }
 
   /* ---- Promotions: ask the server which offer each line earns, apply it as the line discount ---- */
@@ -3193,6 +3303,7 @@
         window.UI.toast.error(`Sale saved, but the receipt could not be shown: ${receiptErr.message}`);
       }
       if (PT && PT.active()) PT.afterSale(data);
+      lcDrop('h|'); lcDrop('d|'); setTimeout(warmLists, 600);
       return true;
     } catch (err) {
       window.UI.toast.error(err.message);
@@ -3264,54 +3375,78 @@
 
   const PAYMENT_BADGE = { PAID: 'badge-success', PARTIAL: 'badge-warning', CREDIT: 'badge-danger', UNPAID: 'badge-neutral' };
 
+  /* ---- Sales history: shows the last copy at once, refreshes quietly behind it (like product search) ---- */
+  let histSeq = 0;
+  const histParams = () => ({
+    branchId: window.AppShell.getActiveBranchId(), page: state.history.page, limit: state.history.limit, search: state.history.search,
+    from: state.history.from || undefined, to: state.history.to || undefined,
+    channel: isWsBiz() && state.history.channel ? state.history.channel : undefined,
+  });
+  const histKey = () => `h|${JSON.stringify(histParams())}`;
+
+  function paintHistory(data) {
+    const tbody = $('history-tbody'); if (!tbody) return;
+    const items = isWsBiz() && state.history.channel ? data.items.filter((s) => (s.channel || 'RETAIL') === state.history.channel) : data.items;
+    if (!items.length) {
+      tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'sales', title: 'No sales found' })}</td></tr>`;
+    } else {
+      tbody.innerHTML = items.map((s) => `
+        <tr data-id="${s._id}">
+          <td class="cell-primary">${s.receiptNumber}${s.channel === 'WHOLESALE' ? ' <span class="badge badge-info">Wholesale</span>' : ''}</td>
+          <td class="text-sm">${window.UI.formatDateTime(s.createdAt)}</td>
+          <td class="text-sm">${esc(s.cashierId?.name || '')}</td>
+          <td class="text-sm">${s.customerId ? esc(s.customerId.name) : '<span class="text-muted">Walk-in</span>'}</td>
+          <td class="font-semibold">${fm(s.total)}</td>
+          <td>
+            <span class="badge ${PAYMENT_BADGE[s.paymentStatus] || 'badge-neutral'}">${s.paymentStatus}</span>
+            ${s.saleStatus === 'CANCELLED' ? '<span class="badge badge-neutral">Cancelled</span>' : ''}
+            ${s.balance > 0 && s.saleStatus !== 'CANCELLED' ? `<div class="text-xs text-muted">owes ${fm(s.balance)}${s.dueDate ? ` · due ${window.UI.formatDate(s.dueDate)}` : ''}</div>` : ''}
+          </td>
+          <td class="actions"><button class="btn btn-secondary btn-sm" data-action="view">View</button></td>
+        </tr>
+      `).join('');
+    }
+    window.UI.renderPagination($('history-pagination'), data, (p) => { state.history.page = p; fetchHistory(); });
+    // one handler for the whole table; hovering / touching a row's View button already fetches that sale, so the modal opens at once
+    tbody.onclick = (e) => { const b = e.target.closest('[data-action="view"]'); if (b) openSaleDetail(b.closest('tr').dataset.id, b); };
+    const warm = (e) => { const b = e.target.closest && e.target.closest('[data-action="view"]'); if (b) prefetchSale(b.closest('tr').dataset.id); };
+    tbody.onpointerover = warm; tbody.ontouchstart = warm;
+  }
+
   async function fetchHistory() {
-    const tbody = $('history-tbody');
-    if (!tbody) return;
-    tbody.innerHTML = window.UI.skeletonRows(7, 6);
-
-    const branchId = window.AppShell.getActiveBranchId();
+    if (!$('history-tbody')) return;
+    const seq = ++histSeq; const key = histKey(); const params = histParams();
+    const hit = lcGet(key);
+    if (hit) paintHistory(hit.data); else $('history-tbody').innerHTML = window.UI.skeletonRows(7, 6);
     try {
-      const { data } = await window.Api.get('/sales', {
-        branchId, page: state.history.page, limit: state.history.limit, search: state.history.search,
-        from: state.history.from || undefined, to: state.history.to || undefined,
-        channel: isWsBiz() && state.history.channel ? state.history.channel : undefined,
-      });
-      if (isWsBiz() && state.history.channel) data.items = data.items.filter((s) => (s.channel || 'RETAIL') === state.history.channel);
-      if (!data.items.length) {
-        tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'sales', title: 'No sales found' })}</td></tr>`;
-      } else {
-        tbody.innerHTML = data.items.map((s) => `
-          <tr data-id="${s._id}">
-            <td class="cell-primary">${s.receiptNumber}${s.channel === 'WHOLESALE' ? ' <span class="badge badge-info">Wholesale</span>' : ''}</td>
-            <td class="text-sm">${window.UI.formatDateTime(s.createdAt)}</td>
-            <td class="text-sm">${esc(s.cashierId?.name || '')}</td>
-            <td class="text-sm">${s.customerId ? esc(s.customerId.name) : '<span class="text-muted">Walk-in</span>'}</td>
-            <td class="font-semibold">${fm(s.total)}</td>
-            <td>
-              <span class="badge ${PAYMENT_BADGE[s.paymentStatus] || 'badge-neutral'}">${s.paymentStatus}</span>
-              ${s.saleStatus === 'CANCELLED' ? '<span class="badge badge-neutral">Cancelled</span>' : ''}
-              ${s.balance > 0 && s.saleStatus !== 'CANCELLED' ? `<div class="text-xs text-muted">owes ${fm(s.balance)}${s.dueDate ? ` · due ${window.UI.formatDate(s.dueDate)}` : ''}</div>` : ''}
-            </td>
-            <td class="actions"><button class="btn btn-secondary btn-sm" data-action="view">View</button></td>
-          </tr>
-        `).join('');
-      }
-      window.UI.renderPagination($('history-pagination'), data, (p) => { state.history.page = p; fetchHistory(); });
-
-      tbody.querySelectorAll('[data-action="view"]').forEach((btn) => {
-        btn.addEventListener('click', () => openSaleDetail(btn.closest('tr').dataset.id));
-      });
+      const { data } = await window.Api.get('/sales', params);
+      if (seq !== histSeq || !$('history-tbody')) return; // the cashier already changed the filter / left the tab
+      const same = hit && JSON.stringify(hit.data) === JSON.stringify(data);
+      lcSet(key, data);
+      if (!same) paintHistory(data);
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load sales', message: err.message })}</td></tr>`;
+      if (seq !== histSeq || hit || !$('history-tbody')) return; // keep showing the saved copy if the refresh failed
+      $('history-tbody').innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load sales', message: err.message })}</td></tr>`;
     }
   }
 
-  async function openSaleDetail(id) {
+  const detailKey = (id) => `d|${id}`;
+  function prefetchSale(id) {
+    if (!id || lcGet(detailKey(id), 120000) || isOfflineNow()) return;
+    window.Api.get(`/sales/${id}`, undefined, { background: true }).then(({ data }) => lcSet(detailKey(id), data)).catch(() => {});
+  }
+  async function openSaleDetail(id, trigger) {
     let data;
-    try {
-      ({ data } = await window.Api.get(`/sales/${id}`));
-    } catch (err) {
-      return window.UI.toast.error(err.message);
+    const hit = lcGet(detailKey(id), 120000);
+    if (hit) data = hit.data;
+    else {
+      if (trigger) window.UI.setButtonLoading(trigger, true);
+      try {
+        ({ data } = await window.Api.get(`/sales/${id}`));
+        lcSet(detailKey(id), data);
+      } catch (err) {
+        return window.UI.toast.error(err.message);
+      } finally { if (trigger && document.body.contains(trigger)) window.UI.setButtonLoading(trigger, false); }
     }
 
     const { sale, receipt } = data;
@@ -3366,6 +3501,7 @@
         await window.Api.post(`/sales/${sale._id}/cancel`, { reason });
         window.UI.toast.success('Sale cancelled');
         window.UI.closeModal();
+        lcDrop('h|'); lcDrop('d|');
         fetchHistory();
       } catch (err) {
         window.UI.toast.error(err.message);
@@ -3431,6 +3567,7 @@
         const refund = data.refund || data;
         window.UI.toast.success(refund.status === 'COMPLETED' ? 'Refund completed' : 'Refund submitted for approval');
         window.UI.closeModal();
+        lcDrop('h|'); lcDrop('d|');
         fetchHistory();
       } catch (err) {
         window.UI.toast.error(err.message);
