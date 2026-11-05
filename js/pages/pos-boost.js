@@ -196,6 +196,8 @@
     const looksCode = /^\d{6,}$/.test(String(opts.name || '').trim());
     const name0 = looksCode ? '' : (opts.name || '');
     const bc0 = opts.barcode || (looksCode ? String(opts.name).trim() : '');
+    const can = (perm) => { try { return !window.Permissions || window.Permissions.can(window.AppShell.getUser(), perm); } catch { return false; } };
+    const expiryOk = !!(window.AppShell && window.AppShell.hasFeature && window.AppShell.hasFeature('expiryTracking')) && can('inventory.receive') && navigator.onLine !== false;
     const modal = window.UI.openModal({
       title: 'Quick add product',
       maxWidth: '440px',
@@ -207,9 +209,22 @@
             <div class="field"><label>Selling price (KES)</label><input class="input" name="sellingPrice" type="number" step="0.01" min="0" inputmode="decimal" required /></div>
             <div class="field"><label>Cost price (KES)</label><input class="input" name="costPrice" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0" /></div>
           </div>
+          <div class="field"><label>Category <span class="text-muted">(optional)</span></label>
+            <select class="select" name="categoryId" id="pb-qa-cat"><option value="">No category</option><option value="__new">+ New category…</option></select>
+            <input class="input" name="newCategory" id="pb-qa-newcat" placeholder="New category name" maxlength="60" style="display:none;margin-top:6px" />
+          </div>
           <label class="checkbox-row"><input type="checkbox" name="trackInventory" /> <span class="text-sm">Track stock for this product (leave off to sell without stock counts)</span></label>
+          ${expiryOk ? `
+          <label class="checkbox-row" style="margin-top:6px"><input type="checkbox" name="trackExpiry" id="pb-qa-exp-on" /> <span class="text-sm"><strong>This product has an expiry date</strong></span></label>
+          <div id="pb-qa-exp-box" style="display:none;margin-top:8px;padding:10px;border:1px solid var(--color-border,#e5e7eb);border-radius:10px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field"><label>Quantity in stock</label><input class="input" name="qty" type="number" min="0" step="any" inputmode="decimal" /></div>
+              <div class="field"><label>Expiry date</label><input class="input" name="expiryDate" type="date" /></div>
+            </div>
+            <div class="field" style="margin-bottom:0"><label>Batch number <span class="text-muted">(optional)</span></label><input class="input" name="batchNumber" autocomplete="off" /></div>
+          </div>` : ''}
         </form>
-        <p class="text-xs text-muted" style="margin-top:8px">Add more details (category, units, variants) later on the Products page.</p>`,
+        <p class="text-xs text-muted" style="margin-top:8px">Add more details (units, variants) later on the Products page.</p>`,
       footerHtml: '<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="save">Add &amp; use</button>',
     });
     const form = modal.querySelector('#pb-qa-form');
@@ -217,20 +232,49 @@
     setTimeout(() => first && first.focus(), 30);
     const close = () => window.UI.closeModal();
     modal.querySelector('[data-action="cancel"]').addEventListener('click', close);
+    const catEl = modal.querySelector('#pb-qa-cat'); const newCatEl = modal.querySelector('#pb-qa-newcat');
+    catEl.addEventListener('change', () => { const n = catEl.value === '__new'; newCatEl.style.display = n ? '' : 'none'; if (n) newCatEl.focus(); });
+    window.Api.get('/categories', undefined, { background: true }).then(({ data }) => {
+      const cur = catEl.value;
+      catEl.innerHTML = '<option value="">No category</option>' + (data.categories || []).map((c) => `<option value="${esc(c._id)}">${esc(c.name)}</option>`).join('') + '<option value="__new">+ New category…</option>';
+      catEl.value = cur;
+    }).catch(() => {});
+    const expOn = modal.querySelector('#pb-qa-exp-on'); const expBox = modal.querySelector('#pb-qa-exp-box');
+    if (expOn) expOn.addEventListener('change', () => {
+      expBox.style.display = expOn.checked ? '' : 'none';
+      if (expOn.checked) { form.trackInventory.checked = true; form.trackInventory.disabled = true; setTimeout(() => form.expiryDate.focus(), 30); }
+      else form.trackInventory.disabled = false;
+    });
     let busy = false;
     async function save() {
       if (busy) return;
       const name = form.name.value.trim(); const price = Number(form.sellingPrice.value);
       if (!name) { window.UI.toast.error('Enter the product name'); form.name.focus(); return; }
       if (!(price >= 0) || form.sellingPrice.value === '') { window.UI.toast.error('Enter the selling price'); form.sellingPrice.focus(); return; }
+      const withExpiry = !!(expOn && expOn.checked);
+      const qty = withExpiry ? Number(form.qty.value) : 0; const expiryDate = withExpiry ? form.expiryDate.value : '';
+      if (withExpiry && !(qty > 0)) { window.UI.toast.error('Enter the quantity in stock'); form.qty.focus(); return; }
+      if (withExpiry && !expiryDate) { window.UI.toast.error('Enter the expiry date'); form.expiryDate.focus(); return; }
+      if (catEl.value === '__new' && !newCatEl.value.trim()) { window.UI.toast.error('Type the new category name or choose one'); newCatEl.focus(); return; }
       busy = true;
-      const payload = { name, sellingPrice: price, costPrice: Number(form.costPrice.value) || 0, trackInventory: !!form.trackInventory.checked };
+      const payload = { name, sellingPrice: price, costPrice: Number(form.costPrice.value) || 0, trackInventory: withExpiry || !!form.trackInventory.checked };
+      if (withExpiry) { payload.trackExpiry = true; payload.trackBatch = true; }
+      if (catEl.value === '__new') {
+        try { const r = await window.Api.post('/categories', { name: newCatEl.value.trim() }); const c = r.data && (r.data.category || r.data); if (c && c._id) payload.categoryId = c._id; }
+        catch (e) { window.UI.toast.error(`Category not saved (${e.message}) - product will be added without one`); }
+      } else if (catEl.value) payload.categoryId = catEl.value;
       const bc = form.barcode.value.trim();
       if (bc) payload.barcode = bc;
       else if (window.BarcodeLabels && window.BarcodeLabels.generateCode) { try { payload.barcode = window.BarcodeLabels.generateCode(new Set()); } catch { /* no barcode */ } }
       try {
         const res = await window.Api.post('/products', payload);
-        const product = (res.data && (res.data.product || res.data)) || null;
+        let product = (res.data && (res.data.product || res.data)) || null;
+        if (withExpiry && product && product._id && !res.queued) {
+          try {
+            await window.Api.post('/inventory/receive', { branchId: window.AppShell.getActiveBranchId(), productId: product._id, quantity: qty, batchNumber: form.batchNumber.value.trim() || undefined, expiryDate, costPrice: payload.costPrice || undefined, reason: 'Initial stock' });
+            try { const { data } = await window.Api.get(`/products/${product._id}`, { branchId: window.AppShell.getActiveBranchId() || undefined }); product = data.product || product; } catch { /* keep what we have */ }
+          } catch (e) { window.UI.toast.error(`Product added, but the stock and expiry date were not saved (${e.message}). Use Inventory > Receive stock.`); }
+        }
         close(); emit();
         window.UI.toast.success(res.queued ? `${name} added (will upload when online)` : `${name} added`);
         if (opts.onAdded && product) opts.onAdded(product);

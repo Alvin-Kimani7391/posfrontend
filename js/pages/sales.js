@@ -520,6 +520,7 @@
             <span class="pz-user" id="pz-user" title="${esc(cashierLabel())}">${esc(cashierLabel())}</span>
             <span class="pz-clock" id="pz-clock"></span>
             <button type="button" class="pz-iconbtn drawer-btn" id="pz-drawer-btn" style="display:none"></button>
+            <button type="button" class="pz-iconbtn" id="pz-refresh-btn" title="Refresh products, held sales and history (your cart is kept)" aria-label="Refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i></button>
             <button type="button" class="pz-iconbtn" id="pz-focus-btn"></button>
             <button type="button" class="pz-iconbtn" id="pz-fs-btn" style="${document.fullscreenEnabled ? '' : 'display:none'}"></button>
           </div>
@@ -580,6 +581,21 @@
       rootObserver.observe($('pz-root'));
     }
 
+    $('pz-refresh-btn').addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget; if (btn.classList.contains('spinning')) return;
+      if (isOfflineNow()) return window.UI.toast.error('You are offline - nothing to refresh from the server');
+      btn.classList.add('spinning');
+      try {
+        lcDrop('h|'); lcDrop('d|'); lcDrop('held|');
+        retailIndex.invalidate();
+        const tasks = [retailIndex.load(), loadShift().catch(() => {}), refreshHeldCount(), refreshPromoCache && refreshPromoCache()];
+        if (state.view === 'held') tasks.push(renderHeld()); else if (state.view === 'history') tasks.push(fetchHistory());
+        await Promise.allSettled(tasks);
+        if (state.view === 'new-sale') renderCart();
+        warmLists();
+        window.UI.toast.success('Refreshed');
+      } finally { btn.classList.remove('spinning'); }
+    });
     $('pz-focus-btn').addEventListener('click', () => applyFocus(!state.focus));
     $('pz-fs-btn').addEventListener('click', toggleBrowserFullscreen);
     $('pz-drawer-btn').addEventListener('click', () => {
@@ -1234,10 +1250,10 @@
             <button type="button" class="btn btn-primary pz-scan-btn" id="pos-scan-btn">
               ${window.BarcodeScanner.cameraIconSvg} <span class="pz-scan-label">Scan barcode</span>
             </button>` : ''}
-          <label class="pz-autoprint" id="pz-autoprint-wrap" title="Print the receipt automatically after each sale. When off, the receipt opens on screen and you tap Print." style="display:inline-flex;align-items:center;gap:8px;padding:0 12px;height:40px;border:1px solid var(--color-border);border-radius:var(--radius-md,10px);background:var(--color-surface,#fff);cursor:pointer;white-space:nowrap;font-size:13px;font-weight:600;user-select:none">
+          <label class="pz-autoprint" id="pz-autoprint-wrap" title="Print the receipt automatically after each sale. When off, no receipt opens after a sale (reprint any time from Sales history)." style="display:inline-flex;align-items:center;gap:8px;padding:0 12px;height:40px;border:1px solid var(--color-border);border-radius:var(--radius-md,10px);background:var(--color-surface,#fff);cursor:pointer;white-space:nowrap;font-size:13px;font-weight:600;user-select:none">
             <input type="checkbox" id="pb-autoprint" ${autoPrintGet() ? 'checked' : ''} style="position:absolute;opacity:0;width:0;height:0" />
             <span id="pz-ap-track" style="position:relative;width:34px;height:20px;border-radius:999px;flex:none;transition:background .15s"><span id="pz-ap-knob" style="position:absolute;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:left .15s"></span></span>
-            <span>Auto-print receipt</span>
+            <span>Receipt</span>
           </label>
           <div class="pz-keys" aria-hidden="true">
             <span><kbd class="kbd">F2</kbd> search</span>
@@ -1337,7 +1353,7 @@
     $('pb-autoprint')?.addEventListener('change', (e) => {
       autoPrintSet(e.target.checked);
       paintAutoPrint();
-      window.UI.toast.success(e.target.checked ? 'Receipts will print automatically after each sale' : 'Auto-print off: the receipt opens on screen, tap Print when needed');
+      window.UI.toast.success(e.target.checked ? 'Receipts will print automatically after each sale' : 'Receipt off: no receipt will show after a sale (find it in Sales history)');
     });
     if (window.PosBoost && !boostWired) {
       boostWired = true;
@@ -3310,7 +3326,8 @@
         // Wholesale sales open the professional invoice (receipt is one tap away); retail keeps the auto-printing receipt.
         if (payload.channel === 'WHOLESALE' && !data.offline && data.sale && data.sale._id && window.InvoiceView) {
           window.InvoiceView.open(data.sale._id, { receipt: data.receipt, title: `Invoice ${data.sale.invoiceNumber || data.sale.receiptNumber}` });
-        } else window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: autoPrintGet() });
+        } else if (autoPrintGet()) window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: true });
+        // Receipt switch OFF: nothing opens after the sale. The receipt stays available under Sales history > View sale > Receipt.
       } catch (receiptErr) {
         window.UI.toast.error(`Sale saved, but the receipt could not be shown: ${receiptErr.message}`);
       }

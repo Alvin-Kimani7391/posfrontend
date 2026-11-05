@@ -849,3 +849,7 @@ body.pz-focus-on .modal-backdrop,
 .hv-skel .sk-l { width: 55%; height: 18px; } .hv-skel .sk-m { width: 80%; } .hv-skel .sk-s { width: 35%; } .hv-skel .sk-b { height: 44px; border-radius: 12px; margin-top: 6px; }
 @keyframes hv-shimmer { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .hv-skel .sk { animation: none; } }
+
+#pz-refresh-btn.spinning i { animation: pz-spin .8s linear infinite; }
+@keyframes pz-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #pz-refresh-btn.spinning i { animation: none; } }
