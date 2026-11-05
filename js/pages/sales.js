@@ -2883,12 +2883,38 @@
 
     const discard = async (r) => { if (r.kind === 'L') saveLocalHeld(localHeld().filter((h) => h.id !== r.id)); else await window.Api.delete(`/shop/held/${r.id}`); };
 
-    modal.querySelector('[data-action="clear-all"]')?.addEventListener('click', async () => {
-      if (!(await window.UI.confirmDialog({ title: `Discard all ${rows.length} held sales?`, message: 'This cannot be undone.', danger: true, confirmText: 'Discard all' }))) return;
-      let failed = 0;
-      for (const r of rows) { try { await discard(r); } catch { failed += 1; } }
-      window.UI.closeModal(); done();
-      if (failed) window.UI.toast.error(`${failed} could not be discarded`); else window.UI.toast.success('All held sales discarded');
+    // Instant UI: the row disappears at once, the server delete runs in the background (rolled back with a message if it fails).
+    const syncHeldUi = () => {
+      const left = heldRows.filter((x) => !x.gone);
+      const h3 = modal.querySelector('.modal-header h3, .modal-title'); if (h3) h3.textContent = `Held sales (${left.length})`;
+      if (!left.length) {
+        const list = modal.querySelector('#held-list');
+        if (list) list.innerHTML = '<p class="text-sm text-secondary">No held sales left.</p>';
+        modal.querySelector('#held-filter')?.remove();
+        modal.querySelector('[data-action="clear-all"]')?.remove();
+      }
+    };
+    const dropRow = (r) => {
+      r.gone = true;
+      const el = modal.querySelector(`.pz-held-row[data-i="${heldRows.indexOf(r)}"]`); if (el) el.remove();
+      syncHeldUi();
+    };
+
+    modal.querySelector('[data-action="clear-all"]')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget; if (btn.disabled) return;
+      const todo = heldRows.filter((x) => !x.gone);
+      if (!(await window.UI.confirmDialog({ title: `Discard all ${todo.length} held sales?`, message: 'This cannot be undone.', danger: true, confirmText: 'Discard all' }))) return;
+      btn.disabled = true;
+      todo.forEach((r) => { r.gone = true; });
+      window.UI.closeModal(); window.UI.toast.success('All held sales discarded');
+      const local = todo.filter((r) => r.kind === 'L'); const remote = todo.filter((r) => r.kind !== 'L');
+      if (local.length) { const ids = new Set(local.map((r) => r.id)); saveLocalHeld(localHeld().filter((h) => !ids.has(h.id))); }
+      done();
+      Promise.allSettled(remote.map((r) => window.Api.delete(`/shop/held/${r.id}`))).then((res) => {
+        const failed = res.filter((x) => x.status === 'rejected').length;
+        if (failed) window.UI.toast.error(`${failed} could not be discarded`);
+        done();
+      });
     });
 
     modal.querySelector('[data-action="upload-local"]')?.addEventListener('click', async () => {
@@ -2908,7 +2934,7 @@
 
     modal.addEventListener('click', async (ev) => {
       const b = ev.target.closest('button[data-act]'); if (!b) return;
-      const r = heldRows[Number(b.dataset.i)]; if (!r) return;
+      const r = heldRows[Number(b.dataset.i)]; if (!r || r.gone) return;
       const act = b.dataset.act;
       if (act === 'view') { const box = b.closest('.pz-held-row').querySelector('.pz-held-lines'); box.style.display = box.style.display === 'none' ? '' : 'none'; return; }
       if (act === 'print') { printHeldSlip(r); return; }
@@ -2918,8 +2944,15 @@
         window.UI.closeModal(); recallSale(); return;
       }
       if (act === 'drop') {
+        if (r.gone) return;
         if (!(await window.UI.confirmDialog({ title: `Discard "${r.label}"?`, danger: true, confirmText: 'Discard' }))) return;
-        try { await discard(r); window.UI.closeModal(); window.UI.toast.success('Discarded'); done(); recallSale(); } catch (e) { window.UI.toast.error(e.message || 'Could not discard'); }
+        if (r.gone) return;
+        dropRow(r); window.UI.toast.success('Discarded');
+        if (r.kind === 'L') { saveLocalHeld(localHeld().filter((h) => h.id !== r.id)); done(); return; }
+        window.Api.delete(`/shop/held/${r.id}`).then(done).catch((e) => {
+          window.UI.toast.error(e.message || 'Could not discard - it is back in the list');
+          window.UI.closeModal(); recallSale();
+        });
         return;
       }
       const merge = act === 'merge';
