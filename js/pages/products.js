@@ -125,6 +125,10 @@
           <select class="select" id="category-filter" style="max-width: 220px">
             <option value="">All categories</option>
           </select>
+          <select class="select" id="status-filter" style="max-width: 180px" aria-label="Show">
+            <option value="">Active products</option>
+            <option value="archived">Archived products</option>
+          </select>
         </div>
         <div class="bl-sel-bar" id="bl-sel-bar" hidden>
           <span id="bl-sel-count"></span>
@@ -198,7 +202,8 @@
     if (!input || input._bcLive) return;
     input._bcLive = true;
     getUsedBarcodes().catch(() => {}); // warm the in-memory barcode list so the alert is instant
-    const own = new Set((ownCodes || []).map((x) => String(x || '').trim()).filter(Boolean));
+    const ownList = () => (typeof ownCodes === 'function' ? ownCodes() : ownCodes) || [];
+    const ownHas = (c) => ownList().some((x) => String(x || '').trim() === c);
     const field = input.closest('.field') || input.parentElement;
     const msg = document.createElement('div');
     msg.className = 'bc-dup-msg';
@@ -227,7 +232,7 @@
     const check = async (final) => {
       const code = input.value.trim();
       const my = ++seq;
-      if (!code || own.has(code)) { setState(false); return; }
+      if (!code || ownHas(code)) { setState(false); return; }
       const sameForm = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"]'))
         .some((el) => el !== input && el.value.trim() === code);
       if (sameForm) { alertDup(code, '', final); msg.textContent = `⚠ Barcode ${code} is already used in another field of this form.`; return; }
@@ -242,7 +247,7 @@
       // 2) confirm with the server (catches products added on another till a moment ago)
       const hit = await lookupBarcodeOnServer(code);
       if (my !== seq) return;
-      if (hit && !own.has(input.value.trim())) { if (usedBarcodes) usedBarcodes.add(code); alertDup(code, hit.name, true); }
+      if (hit && !ownHas(input.value.trim())) { if (usedBarcodes) usedBarcodes.add(code); alertDup(code, hit.name, true); }
       else setState(false);
     };
 
@@ -255,7 +260,7 @@
 
   /** True (and focuses the offending box) when any barcode box in `scope` currently holds a duplicate. */
   async function barcodeBlocked(scope) {
-    const inputs = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"]'));
+    const inputs = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"], #p-pk-barcode'));
     for (const el of inputs) { if (el._bcCheck && el.value.trim()) await el._bcCheck(); }
     const bad = inputs.find((el) => el._bcDup);
     if (bad) { window.UI.toast.error('This barcode already exists in the system - change it first'); bad.focus(); return true; }
@@ -397,6 +402,12 @@
       if (productIndex.isReady()) fetchAndRender({ local: true }); else searchLater();
     });
 
+    document.getElementById('status-filter').addEventListener('change', (e) => {
+      state.status = e.target.value;
+      state.page = 1;
+      fetchAndRender(); // archived products live on the server: always a fresh load
+    });
+
     document.getElementById('category-filter').addEventListener('change', (e) => {
       state.categoryId = e.target.value;
       state.page = 1;
@@ -409,7 +420,7 @@
    * ------------------------------------------------------------------ */
   async function fetchAndRender(opts) {
     const tbody = document.getElementById('products-tbody');
-    const local = !!(opts && opts.local);
+    const local = !!(opts && opts.local) && state.status !== 'archived';
     if (!local) { productIndex.invalidate(); stockCache.clear(); } // something changed (or first load): the device copy and stock must reload
 
     if (local) {
@@ -429,12 +440,12 @@
     try {
       if (window.LiquorTill && window.LiquorTill.active()) await window.LiquorTill.refresh(); // category / ABV / size beside each drink
       const { data } = await window.Api.get('/products', {
-        page: state.page, limit: state.limit, search: state.search, categoryId: state.categoryId,
+        page: state.page, limit: state.limit, search: state.search, categoryId: state.categoryId, status: state.status || undefined,
       });
       renderRows(data.items);
       window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; fetchAndRender({ local: true }); });
       window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
-      productIndex.load(); // warm the device copy so the next search is instant
+      if (state.status !== 'archived') productIndex.load(); // warm the device copy so the next search is instant
     } catch (err) {
       // No internet / server down: show the copy saved on this device (plus anything waiting to upload).
       await productIndex.load();
@@ -590,7 +601,7 @@
     // only actions this user may do (the hidden row buttons carry the permission gates and the existing handlers)
     const act = (name) => { const b = tr.querySelector(`td.actions [data-action="${name}"]`); return b && !b.classList.contains('hidden') ? b : null; };
     const E = window.Icons.get;
-    const defs = [
+    const defs = p.status === 'archived' ? [['restore', 'Restore product', E('check')]] : [
       ['edit', 'Edit product', E('edit')],
       ['view-stock', 'View stock & adjust', E('inventory')],
       ['variants', 'Manage variants', E('box')],
@@ -670,6 +681,7 @@
         <td><span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-neutral'}">${p.status}</span></td>
         <td class="pm-stock-col" data-stock-cell="${p._id}"><span class="pm-stock pm-skel">&nbsp;</span></td>
         <td class="actions pm-actions-col">
+          ${p.status === 'archived' ? `<button class="btn btn-ghost btn-sm" data-action="restore" data-requires-permission="products.delete">Restore</button>` : ''}
           ${p.hasVariants ? `<button class="btn btn-ghost btn-sm btn-icon" data-action="variants" data-requires-permission="products.update" title="Manage variants">${window.Icons.get('box')}</button>` : ''}
           <button class="btn btn-ghost btn-sm" data-action="view-stock" data-requires-permission="inventory.view" title="See this product's stock in Inventory (then adjust or receive)">View stock</button>
           <button class="btn btn-ghost btn-sm btn-icon" data-action="sticker" data-requires-permission="products.view" title="Print barcode sticker">${window.Icons.get('printer')}</button>
@@ -717,6 +729,17 @@
         const id = btn.closest('tr').dataset.id;
         const { data } = await window.Api.get(`/products/${id}`);
         openVariantsModal(data.product);
+      });
+    });
+
+    tbody.querySelectorAll('[data-action="restore"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.closest('tr').dataset.id;
+        try {
+          await window.Api.post(`/products/${id}/restore`, {});
+          window.UI.toast.success('Product restored - it is back in the catalog and sellable');
+          fetchAndRender();
+        } catch (err) { window.UI.toast.error(err.message); }
       });
     });
 
@@ -906,8 +929,8 @@
     const packCost = pk && product ? Math.round((Number(product.costPrice) || 0) * pk.factor * 100) / 100 : '';
     const deals = pkDealsOf(product);
     return `
-        <div class="field" id="packet-section" style="border:1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3)">
-          <label class="checkbox-row"><input type="checkbox" id="p-pk-on" ${on ? 'checked' : ''} /> <span class="text-sm font-semibold">This product comes in packets <span class="text-muted">(e.g. a packet of 50 sweets)</span></span></label>
+        <div class="field" id="packet-section" style="border:1.5px solid var(--color-primary, #2563eb); background:color-mix(in srgb, var(--color-primary, #2563eb) 5%, transparent); border-radius: var(--radius-md); padding: var(--space-3)">
+          <label class="checkbox-row" style="align-items:flex-start"><input type="checkbox" id="p-pk-on" ${on ? 'checked' : ''} style="margin-top:3px" /> <span class="text-sm font-semibold">Sold in packets? <span class="text-muted" style="font-weight:400">Tick if the supplier gives you packets (e.g. 50 sweets) that you can sell whole or break and sell single pieces. Packet cost and price are entered here; the cost price below is then worked out for you.</span></span></label>
           <div id="pk-fields" style="${on ? '' : 'display:none;'}">
             <span class="field-hint">Receive and sell the whole packet by scanning its barcode, or break it and sell single pieces. Stock is counted in pieces, so nothing is ever double counted.</span>
             <div class="form-row" style="margin-top: var(--space-2)">
@@ -923,7 +946,7 @@
             <div class="field" style="margin-bottom: var(--space-2)">
               <label for="p-pk-barcode">Packet barcode <span class="text-muted">(the code printed on the supplier's packet)</span></label>
               <div class="input-button-row">
-                <input class="input" id="p-pk-barcode" name="v-barcode-pk" value="${pk ? window.UI.escapeHtml(pk.barcode || '') : ''}" placeholder="Scan, type or Generate" autocomplete="off" />
+                <input class="input" id="p-pk-barcode" value="${pk ? window.UI.escapeHtml(pk.barcode || '') : ''}" placeholder="Scan, type or Generate" autocomplete="off" />
                 ${scanButtonHtml('p-pk-scan-btn')}
                 ${generateButtonHtml('p-pk-gen-btn')}
               </div>
@@ -960,13 +983,14 @@
 
     bindBarcodeScanButton($q('#p-pk-scan-btn'), $q('#p-pk-barcode'));
     bindGenerateButton($q('#p-pk-gen-btn'), $q('#p-pk-barcode'));
-    bindBarcodeLiveCheck($q('#p-pk-barcode'), modal, own && own.barcode ? [own.barcode] : []);
+    bindBarcodeLiveCheck($q('#p-pk-barcode'), modal, () => [own && own.barcode, product && product.barcode, $q('#p-barcode') && $q('#p-barcode').value]);
 
     const num = (q) => Number($q(q).value) || 0;
     const refresh = () => {
       const isOn = on.checked;
       fields.style.display = isOn ? '' : 'none';
-      if (costEl) { costEl.readOnly = isOn; costEl.title = isOn ? 'Worked out from the packet cost' : ''; }
+      if (costEl) { costEl.readOnly = isOn; const cf = costEl.closest('.field'); if (cf) cf.style.display = isOn ? 'none' : ''; } // one cost only: the packet cost
+      const pl = modal.querySelector('label[for="p-price"]'); if (pl) pl.textContent = isOn ? 'Selling price of ONE piece (KES)' : 'Selling price (KES)';
       const stockUnit = $q('#p-stock-unit-wrap'); if (stockUnit) stockUnit.style.display = isOn ? '' : 'none';
       const sum = $q('#pk-summary');
       if (!isOn) { if (sum) sum.innerHTML = ''; return; }
@@ -987,7 +1011,18 @@
       });
       sum.innerHTML = lines.length ? lines.join('<br/>') : 'Enter the pieces per packet and the packet cost to see the cost and profit per piece.';
     };
-    on.addEventListener('change', () => { refresh(); if (on.checked) $q('#p-pk-factor').focus(); });
+    // Switching packets on for a product that already exists: what was saved as its cost / price / barcode was the PACKET's.
+    const autofill = () => {
+      const bc = $q('#p-barcode'); const pb = $q('#p-pk-barcode');
+      if (pb && !pb.value.trim() && bc && bc.value.trim()) pb.value = bc.value.trim();
+      if (!own) {
+        const c = Number(costEl && costEl.value) || 0; const pr = priceEl ? Number(priceEl.value) || 0 : 0;
+        if (!$q('#p-pk-cost').value && c > 0) $q('#p-pk-cost').value = c;
+        if (!$q('#p-pk-price').value && pr > 0 && priceEl) { $q('#p-pk-price').value = pr; priceEl.value = ''; if (priceEl) priceEl.placeholder = 'price of ONE piece'; }
+      }
+    };
+    on.addEventListener('change', () => { if (on.checked) autofill(); refresh(); if (on.checked) $q('#p-pk-factor').focus(); });
+    $q('#p-barcode') && $q('#p-barcode').addEventListener('change', () => { const pb = $q('#p-pk-barcode'); if (on.checked && pb && !pb.value.trim()) pb.value = $q('#p-barcode').value.trim(); });
     ['#p-pk-factor', '#p-pk-cost', '#p-pk-price'].forEach((q) => $q(q).addEventListener('input', refresh));
     if (priceEl) priceEl.addEventListener('input', refresh);
     modal.querySelector('#pk-deals').addEventListener('input', refresh);
@@ -1020,8 +1055,6 @@
         if (!(n > 1) || !Number.isInteger(n)) return { error: 'Enter how many pieces are in one packet (a whole number, 2 or more)', focus: $q('#p-pk-factor') };
         if (!(packCost > 0)) return { error: 'Enter the packet cost price - the cost of each piece is worked out from it', focus: $q('#p-pk-cost') };
         const barcode = $q('#p-pk-barcode').value.trim();
-        const mainBc = ($q('#p-barcode') && $q('#p-barcode').value.trim()) || '';
-        if (barcode && mainBc && barcode === mainBc) return { error: 'The packet barcode must be different from the single-piece barcode', focus: $q('#p-pk-barcode') };
         const packPrice = num('#p-pk-price');
         const units = [{
           ...(own ? { _id: own._id } : {}), name, code: PKT, factor: n, barcode: barcode || undefined,
@@ -1123,6 +1156,7 @@
           </div>
           <span class="field-hint">Tap the copy icon to put this name into the SKU box.</span>
         </div>
+        ${wf ? '' : packetSectionHtml(isEdit ? product : null)}
         <div class="form-row">
           <div class="field">
             <label for="p-sku">SKU</label>
@@ -1179,8 +1213,6 @@
         </div>
         ${product.hasVariants ? '<p class="text-xs text-muted" style="margin-top:-8px; margin-bottom: var(--space-4)">This product has variants - manage their prices individually from the Variants screen.</p>' : ''}
         `}
-
-        ${packetSectionHtml(isEdit ? product : null)}
 
         <div class="field">
           <label for="p-discount">Discount per unit (KES) <span class="text-muted">(optional)</span></label>

@@ -395,6 +395,8 @@
       if (String(p.barcode || '').toLowerCase() === t || String(p.sku || '').toLowerCase() === t) return { product: p, variant: null };
       const v = (p.variants || []).find((x) => String(x.barcode || '').toLowerCase() === t || String(x.sku || '').toLowerCase() === t);
       if (v) return { product: p, variant: v };
+      const pu = (p.units || []).find((x) => x.status !== 'inactive' && x.barcode && String(x.barcode).toLowerCase() === t);
+      if (pu) return { product: p, variant: null, unitId: String(pu._id) }; // packet / carton barcode
     }
     return null;
   }
@@ -998,7 +1000,11 @@
       if (isWs()) await addWholesaleByCode(code);
       else {
         const data = localBarcode(code) || await lookupBarcode(code);
-        if (await ensureRetailStock(data.product, data.variant)) addToCart(data.product, data.variant);
+        if (!data.unitId && !data.variant) { const pu = packetUnitForCode(data.product, code); if (pu) data.unitId = String(pu._id); }
+        if (await ensureRetailStock(data.product, data.variant)) {
+          if (data.unitId && unitByIdOf(data.product, data.unitId)) await addUnitScan(data.product, data.unitId); // a packet / carton barcode
+          else addToCart(data.product, data.variant);
+        }
       }
     } catch (err) {
       if (err.code === 'BARCODE_NOT_FOUND' && !isWs()) { openQuickAdd({ barcode: code }); return; }
@@ -1235,6 +1241,8 @@
       const p = wsUnitOf(item).wholesalePrice / 100; // the warehouse catalog sends cents
       return { unit: p, priceType: 'WHOLESALE', retail: p, wholesale: null, moq: null };
     }
+    const lu = lineUnitOf(item);
+    if (lu) { const up = unitPriceFor(item.product, item.variant, lu); return { unit: up, priceType: 'RETAIL', retail: up, wholesale: null, moq: null }; }
     return window.Wholesale ? window.Wholesale.forItem(state.cart, item) : { unit: item.variant ? item.variant.sellingPrice : item.product.sellingPrice, priceType: 'RETAIL', retail: item.variant ? item.variant.sellingPrice : item.product.sellingPrice, wholesale: null, moq: null };
   }
   function unitPriceOf(item) {
@@ -1252,7 +1260,8 @@
 
   /** The preset discount for this cart line right now: per-unit x quantity, never above the line total. */
   function autoDiscountFor(item) {
-    const per = unitDiscountOf(item.product);
+    const lu0 = lineUnitOf(item);
+    const per = unitDiscountOf(item.product) * (lu0 ? Number(lu0.factor) : 1);
     if (per <= 0) return 0;
     const gross = round2(unitPriceOf(item) * item.quantity);
     return Math.min(round2(per * item.quantity), gross);
@@ -1544,7 +1553,7 @@
           return `
           <div class="pz-dd-row ${i === active ? 'active' : ''}" data-idx="${i}" role="option">
             <span class="pz-mono">${esc(barcodeOf(r.product, r.variant)) || '-'}</span>
-            <span class="pz-name">${esc(nameOf(r.product, r.variant))}<small>SKU ${esc(r.variant ? r.variant.sku : r.product.sku)}</small>${retailStockNote(r.product)}</span>
+            <span class="pz-name">${esc(nameOf(r.product, r.variant))}<small>SKU ${esc(r.variant ? r.variant.sku : r.product.sku)}</small>${retailStockNote(r.product)}${searchChipsHtml(r)}</span>
             <span class="pz-price">${fm(r.variant ? r.variant.sellingPrice : r.product.sellingPrice)}${off ? `<small>${fm(off)} off</small>` : ''}${wholesaleSearchHint(r)}</span>
           </div>`;
         }).join('')}
@@ -1553,11 +1562,18 @@
       bindAddBtn(term);
       dd.querySelectorAll('.pz-dd-row').forEach((el) => {
         el.addEventListener('mouseenter', () => setActive(Number(el.dataset.idx)));
-        el.addEventListener('click', () => pick(Number(el.dataset.idx)));
+        el.addEventListener('click', (ev) => { const chip = ev.target.closest('[data-unit]'); pick(Number(el.dataset.idx), chip ? chip.dataset.unit : null); });
       });
     }
 
-    async function pick(i) {
+    /** Packet / deal choices under a result: tap one to add it straight away (e.g. "3 for 5", "Packet (50)"). */
+    function searchChipsHtml(r) {
+      const us = retailUnitsOf(r.product);
+      if (!us.length) return '';
+      return `<span style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${us.map((u) => `<button type="button" data-unit="${esc(u._id)}" style="min-height:30px;padding:3px 11px;border:1px solid var(--color-primary,#2563eb);border-radius:999px;background:#fff;color:var(--color-primary,#2563eb);font:inherit;font-size:12px;font-weight:600;cursor:pointer">${esc(u.name)}${u.code === 'DEAL' ? '' : ` (${esc(String(u.factor))})`} · ${esc(pktMoney(unitPriceFor(r.product, r.variant, u)))}</button>`).join('')}</span>`;
+    }
+
+    async function pick(i, unitId) {
       const r = rows[i];
       if (!r) return;
       if (r.ws) {
@@ -1565,7 +1581,7 @@
         addWholesale(r.item);
       } else {
         if (!(await ensureRetailStock(r.product, r.variant))) { clearSearch(); return; }
-        addToCart(r.product, r.variant);
+        addToCart(r.product, r.variant, 1, unitId || undefined);
       }
       clearSearch();
       input.focus();
@@ -1883,6 +1899,104 @@
   /* ---- Cart operations ---- */
   function keyOf(item) { return item.key || (item.variant ? item.variant._id : item.product._id); }
 
+  /* ================================================================== *
+   * PACKETS / DEALS on retail lines (sweets: 1 packet = 50 pieces, "3 for 5 bob")
+   * Stock is kept in pieces. A cart line can be sold in the product's base unit (piece) or in one of its units
+   * (packet / deal). The server prices the line from the unit and takes cost per piece x pieces, so profit is exact
+   * whether a packet is sold whole or broken and sold piece by piece.
+   * ================================================================== */
+  const retailUnitsOf = (product) => ((product && product.units) || []).filter((u) => u.status !== 'inactive' && Number(u.factor) > 0);
+  const unitByIdOf = (product, id) => retailUnitsOf(product).find((u) => String(u._id) === String(id)) || null;
+  const lineUnitOf = (item) => (item && !item.ws && item.unitId ? unitByIdOf(item.product, item.unitId) : null);
+  const unitKeyOf = (product, variant, unitId) => (unitId ? `${variant ? variant._id : product._id}|u|${unitId}` : undefined);
+  const baseKeyOf = (product, variant) => (variant ? variant._id : product._id);
+  const baseUnitName = (product) => product.unit || 'piece';
+  const canBreakUnit = (u) => !!u && u.code !== 'DEAL' && Number(u.factor) > 1;
+  function unitPriceFor(product, variant, u) {
+    if (!u) return variant ? variant.sellingPrice : product.sellingPrice;
+    return u.retailPrice != null && u.retailPrice !== '' ? Number(u.retailPrice) : round2((variant ? variant.sellingPrice : product.sellingPrice) * u.factor);
+  }
+  const pktMoney = (n) => `KES ${Number(n).toLocaleString('en-KE', { maximumFractionDigits: 2 })}`;
+
+  /** Switch a cart line to another unit (piece / packet / deal). Merges into the line that already sells that unit. */
+  function changeLineUnit(line, unitId) {
+    const nk = unitId ? unitKeyOf(line.product, line.variant, unitId) : baseKeyOf(line.product, line.variant);
+    const other = state.cart.find((x) => x !== line && keyOf(x) === nk);
+    if (other) {
+      other.quantity += line.quantity;
+      syncAutoDiscount(other);
+      state.cart.splice(state.cart.indexOf(line), 1);
+      state.lastAdded = nk;
+      return;
+    }
+    line.unitId = unitId || undefined;
+    if (unitId) line.key = nk; else delete line.key;
+    line.overridePriceEnabled = false; line.overridePrice = null; // the old price was for another unit
+    if (line.autoDiscount) line.discount = autoDiscountFor(line);
+    syncAutoDiscount(line);
+    state.lastAdded = nk;
+  }
+
+  /** "Break packet": one packet leaves the cart and its pieces are sold instead (stock is already in pieces). */
+  function breakLine(idx) {
+    const line = state.cart[idx];
+    const u = lineUnitOf(line);
+    if (!line || !canBreakUnit(u)) return;
+    const product = line.product; const variant = line.variant;
+    line.quantity -= 1;
+    if (line.quantity <= 0) state.cart.splice(idx, 1); else syncAutoDiscount(line);
+    addToCart(product, variant, 1);
+    const pieces = state.cart.find((i) => keyOf(i) === baseKeyOf(product, variant));
+    if (pieces) { pieces.fromPacket = u.name; renderCart(keyOf(pieces)); }
+    window.UI.toast.success(`${u.name} broken: set how many ${baseUnitName(product)}s the customer wants on the line below`);
+  }
+
+  /** A product barcode that is really the PACKET's code (the supplier's packet was scanned as the product before packets existed, or the packet has no code of its own). */
+  function packetUnitForCode(product, code) {
+    if (!product || !code) return null;
+    const t = String(code).trim().toLowerCase();
+    if (String(product.barcode || '').trim().toLowerCase() !== t) return null;
+    const pu = retailUnitsOf(product).find((u) => u.code === 'PKT' && Number(u.factor) > 1);
+    if (!pu) return null;
+    return !pu.barcode || String(pu.barcode).trim().toLowerCase() === t ? pu : null;
+  }
+
+  const pktAddMore = new Set(); // packet barcodes where the cashier chose "add another whole packet"
+  /** A packet / carton barcode was scanned. First scan = one whole packet; scanning the same packet again asks: break it, or add another. */
+  async function addUnitScan(product, unitId) {
+    const u = unitByIdOf(product, unitId);
+    if (!u) { addToCart(product, null); return; }
+    const key = unitKeyOf(product, null, unitId);
+    const line = state.cart.find((i) => keyOf(i) === key);
+    if (!line) pktAddMore.delete(key);
+    if (line && canBreakUnit(u) && !pktAddMore.has(key)) {
+      const brk = await window.UI.confirmDialog({
+        title: `${u.name} scanned again`,
+        message: `Break this ${u.name} (${u.factor} ${baseUnitName(product)}s) and sell single ${baseUnitName(product)}s? Choose "Add another" to sell one more whole ${u.name}.`,
+        confirmText: `Break ${u.name}`, cancelText: `Add another ${u.name}`,
+      });
+      if (brk) { breakLine(state.cart.indexOf(line)); return; }
+      pktAddMore.add(key);
+    }
+    addToCart(product, null, 1, unitId);
+  }
+
+  /** Unit picker + Break button shown under the product name when the product has packets / deals. */
+  function unitControlsHtml(item, i) {
+    const us = retailUnitsOf(item.product);
+    if (!us.length || item.ws) return '';
+    const cur = lineUnitOf(item);
+    const opt = (val, label, price) => `<option value="${esc(val)}" ${String(val) === String(item.unitId || '') ? 'selected' : ''}>${esc(label)} · ${esc(pktMoney(price))}</option>`;
+    return `<span class="pk-ctl" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px">
+      <select class="select" data-action="runit" data-idx="${i}" aria-label="Sell as" style="height:34px;min-height:34px;padding:0 8px;font-size:13px;max-width:100%;width:auto">
+        ${opt('', baseUnitName(item.product), unitPriceFor(item.product, item.variant, null))}
+        ${us.map((u) => opt(u._id, `${u.name} (${u.factor})`, unitPriceFor(item.product, item.variant, u))).join('')}
+      </select>
+      ${canBreakUnit(cur) ? `<button type="button" class="btn btn-secondary btn-sm" data-action="break" data-idx="${i}" style="height:34px;min-height:34px">Break ${esc(cur.name)}</button>` : ''}
+      ${item.fromPacket ? `<small class="text-muted">from broken ${esc(item.fromPacket)}</small>` : ''}
+    </span>`;
+  }
+
   /**
    * Wholesale businesses keep bulk stock in warehouses. A product that is still ONLY in a warehouse has no shop-floor
    * stock, so it cannot be sold at retail yet: say where it is and offer to move it (owner / managers), or ask the
@@ -1918,16 +2032,17 @@
     } catch { return true; } // never block a sale just because the hint could not be loaded
   }
 
-  function addToCart(product, variant, qty) {
+  function addToCart(product, variant, qty, unitId) {
     if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before starting the next sale'); return; }
     const add = Number(qty) > 0 ? Number(qty) : 1; // the pharmacy desk loads a whole prescription quantity at once
-    const key = variant ? variant._id : product._id;
+    if (unitId && !unitByIdOf(product, unitId)) unitId = null;
+    const key = unitId ? unitKeyOf(product, variant, unitId) : (variant ? variant._id : product._id);
     const existing = state.cart.find((i) => keyOf(i) === key);
     if (existing) {
       existing.quantity += add;
       syncAutoDiscount(existing); // preset discount grows with the quantity; a manual discount is left alone
     } else {
-      const item = { product, variant, quantity: add, discount: 0, autoDiscount: false, overridePriceEnabled: false, overridePrice: null };
+      const item = { product, variant, quantity: add, discount: 0, autoDiscount: false, overridePriceEnabled: false, overridePrice: null, ...(unitId ? { unitId, key } : {}) };
       const preset = autoDiscountFor(item);
       if (preset > 0) {
         item.discount = preset;
@@ -2027,6 +2142,7 @@
       } else {
         const info = priceInfoOf(item);
         if (window.PharmacyTill) nameExtra = window.PharmacyTill.tag(item.product._id, state.pharmacy);
+        nameExtra += unitControlsHtml(item, i);
         if (window.BatchTill) nameExtra += window.BatchTill.tag(item, i);
         const wholesaleHint = info.priceType === 'WHOLESALE'
           ? 'wholesale price'
@@ -2096,6 +2212,9 @@
         case 'discount':
           openLineDiscountModal(idx);
           break;
+        case 'break':
+          breakLine(idx);
+          break;
         default:
       }
     });
@@ -2105,6 +2224,12 @@
       if (bsel) {
         const line = state.cart[Number(bsel.dataset.idx)];
         if (line) { line.batchId = bsel.value || undefined; renderCart(); }
+        return;
+      }
+      const rsel = e.target.closest('select[data-action="runit"]');
+      if (rsel) {
+        const line = state.cart[Number(rsel.dataset.idx)];
+        if (line) { changeLineUnit(line, rsel.value || null); renderCart(state.lastAdded); }
         return;
       }
       const sel = e.target.closest('select[data-action="unit"]');
@@ -3303,7 +3428,7 @@
   const isNetErr = (e) => !e || e.status == null || e.status === 0 || /network|failed to fetch|offline|timeout/i.test(String((e && e.message) || ''));
 
   function snapshotCart() {
-    return state.cart.map((i) => ({ product: i.product, variant: i.variant || null, quantity: i.quantity, discount: i.discount || 0, autoDiscount: !!i.autoDiscount, promoApplied: !!i.promoApplied, overridePriceEnabled: !!i.overridePriceEnabled, overridePrice: i.overridePrice == null ? null : i.overridePrice }));
+    return state.cart.map((i) => ({ product: i.product, variant: i.variant || null, quantity: i.quantity, discount: i.discount || 0, autoDiscount: !!i.autoDiscount, promoApplied: !!i.promoApplied, overridePriceEnabled: !!i.overridePriceEnabled, overridePrice: i.overridePrice == null ? null : i.overridePrice, ...(i.unitId ? { unitId: i.unitId, key: i.key } : {}), ...(i.fromPacket ? { fromPacket: i.fromPacket } : {}) }));
   }
   function parkLocal(label) {
     const list = localHeld();
@@ -3324,7 +3449,7 @@
       try {
         await window.Api.post('/shop/held', {
           branchId: window.AppShell.getActiveBranchId(), label: label || undefined, customerId: state.customer?._id || undefined, cartDiscount: state.cartDiscount || 0,
-          items: state.cart.map((i) => ({ productId: i.product._id, variantId: i.variantId || i.variant?._id || undefined, quantity: i.quantity, discount: i.discount || 0 })),
+          items: state.cart.map((i) => ({ productId: i.product._id, variantId: i.variantId || i.variant?._id || undefined, ...(i.unitId ? { unitId: i.unitId } : {}), quantity: i.quantity, discount: i.discount || 0 })),
         });
         saved = true; onServer = true;
       } catch (e) {
@@ -3361,6 +3486,10 @@
     got.forEach((g) => {
       if (g.skip) { notes.push(`${g.l.name}: ${g.skip}`); return; }
       const item = { product: g.product, variant: g.variant, quantity: g.l.quantity, discount: Number(g.l.discount) || 0, autoDiscount: false, promoApplied: false, overridePriceEnabled: false, overridePrice: null };
+      if (g.l.unitId) {
+        if (!unitByIdOf(g.product, g.l.unitId)) { notes.push(`${g.l.name}: packet / deal no longer available`); return; }
+        item.unitId = String(g.l.unitId); item.key = unitKeyOf(g.product, g.variant, item.unitId);
+      }
       if (item.discount > round2(unitPriceOf(item) * item.quantity)) item.discount = round2(unitPriceOf(item) * item.quantity);
       const same = merge ? state.cart.find((x) => keyOf(x) === keyOf(item)) : null;
       if (same) { same.quantity += item.quantity; same.discount = round2((same.discount || 0) + item.discount); same.autoDiscount = false; } else state.cart.push(item);
@@ -3400,7 +3529,7 @@
       ...localHeld().map((h) => ({
         kind: 'L', id: h.id, label: h.label || 'Held sale', at: h.at, customer: h.customer && h.customer.name ? h.customer.name : '',
         cartDiscount: Number(h.cartDiscount) || 0, expires: 0,
-        lines: h.cart.map((i) => ({ name: nameOf(i.product, i.variant), quantity: i.quantity, discount: Number(i.discount) || 0, price: i.overridePriceEnabled && i.overridePrice != null ? i.overridePrice : (i.variant ? i.variant.sellingPrice : i.product.sellingPrice) })),
+        lines: h.cart.map((i) => ({ name: nameOf(i.product, i.variant), quantity: i.quantity, discount: Number(i.discount) || 0, price: i.overridePriceEnabled && i.overridePrice != null ? i.overridePrice : unitPriceFor(i.product, i.variant, i.unitId ? unitByIdOf(i.product, i.unitId) : null) })),
       })),
     ].sort((a, b) => b.at - a.at);
   }
@@ -3638,7 +3767,7 @@
     window.UI.setButtonLoading(btn, true);
     const list = localHeld();
     const res = await Promise.allSettled(list.map(async (h) => {
-      const items = h.cart.filter((i) => i.product && !String(i.product._id).startsWith('tmp_')).map((i) => ({ productId: i.product._id, variantId: (i.variant && i.variant._id) || undefined, quantity: i.quantity, discount: i.discount || 0 }));
+      const items = h.cart.filter((i) => i.product && !String(i.product._id).startsWith('tmp_')).map((i) => ({ productId: i.product._id, variantId: (i.variant && i.variant._id) || undefined, ...(i.unitId ? { unitId: i.unitId } : {}), quantity: i.quantity, discount: i.discount || 0 }));
       if (!items.length) throw new Error('empty');
       await window.Api.post('/shop/held', { branchId: window.AppShell.getActiveBranchId(), label: h.label || undefined, customerId: (h.customer && h.customer._id) || undefined, cartDiscount: h.cartDiscount || 0, items });
       return h.id;
@@ -3661,7 +3790,7 @@
         const h = localHeld().find((x) => x.id === r.id); if (!h) throw new Error('Not found');
         if (merge) {
           h.cart.forEach((i) => {
-            const same = state.cart.find((x) => keyOf(x) === (i.variant ? i.variant._id : i.product._id));
+            const same = state.cart.find((x) => keyOf(x) === (i.key || (i.variant ? i.variant._id : i.product._id)));
             if (same) { same.quantity += i.quantity; syncAutoDiscount(same); } else state.cart.push({ ...i });
           });
           if (!state.customer && h.customer) state.customer = h.customer;
@@ -3685,7 +3814,7 @@
 
   /* ---- Promotions: ask the server which offer each line earns, apply it as the line discount ---- */
   let promoAnnounce = false; let promoSig = ''; let promoTimer = null; let promoSeq = 0;
-  const promoEligible = (i) => !i.ws && !(i.discount > 0 && !i.autoDiscount && !i.promoApplied); // a hand-typed discount is never overwritten
+  const promoEligible = (i) => !i.ws && !i.unitId && !(i.discount > 0 && !i.autoDiscount && !i.promoApplied); // a hand-typed discount is never overwritten
 
   /* Offers cached on this till so they still apply with no internet. Same rules as the server (promotion.service.js): the best single offer per line. */
   const PROMO_CACHE_KEY = 'pos.promosActive.v1';
@@ -3813,10 +3942,11 @@
     const wholesale = isWs();
     const off = window.Offline;
     const offlineNow = isOfflineNow();
+    if (!wholesale && offlineNow && state.cart.some((i) => i.unitId)) { window.UI.toast.error('Packet and deal lines need an internet connection. Switch them to single pieces to sell offline.'); return false; }
     const PT = window.PharmacyTill;
     const pharmacyOffline = PT && PT.active() ? PT.offlineIssue(state.cart) : '';
     if (PT && PT.active() && !wholesale && !offlineNow && state.pharmacy.sig !== PT.sig(state.cart)) { window.UI.toast.error('The cart changed. Review the pharmacy details and try again.'); return false; }
-    const canOffline = !wholesale && !pharmacyOffline && !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
+    const canOffline = !wholesale && !pharmacyOffline && !state.cart.some((i) => i.unitId) && !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
     let onCredit = false;
     if (wholesale) {
       if (offlineNow) { window.UI.toast.error('Wholesale sales need an internet connection.'); return false; }
@@ -3844,7 +3974,7 @@
       cartDiscount: state.cartDiscount || 0,
       items: state.cart.map((item) => ({
         productId: item.product._id, variantId: item.variantId || item.variant?._id, quantity: item.quantity,
-        ...(wholesale && item.unitId ? { unitId: item.unitId } : {}),
+        ...(item.unitId ? { unitId: item.unitId } : {}),
         ...(!wholesale && item.batchId ? { batchId: item.batchId } : {}),
         discount: item.discount || 0, overridePrice: item.overridePriceEnabled ? item.overridePrice : undefined,
       })),
