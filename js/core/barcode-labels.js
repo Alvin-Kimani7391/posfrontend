@@ -3,7 +3,8 @@
  * on the same thermal receipt printer used for receipts (80 mm or 58 mm roll).
  *
  * Public API (window.BarcodeLabels):
- *   generateCode(usedSet)            -> new unique EAN-13 string (prefix 2 = "in-store use", valid check digit)
+ *   generateCode(usedSet)            -> new unique EAN-13 string (prefix 2 = "in-store use", valid check digit), always 200...
+ *   isGenerated(code)                -> true for a system-made code (200..., or a legacy 254... one)
  *   loadCatalog()                    -> { items, used:Set }   every active product / variant + every barcode already in use
  *   printItems(items, opts?)         -> prints stickers. items = [{ name, barcode, price, copies }]
  *   openPrintDialog({ selectedIds }) -> modal: tick products (all or some), set copies, auto-generate missing, print
@@ -35,14 +36,33 @@
   /* ------------------------------------------------------------------ *
    * Code generation
    * ------------------------------------------------------------------ */
-  /** Next free in-store EAN-13: "2" + 11-digit running number + check digit. */
+  /**
+   * System barcodes are "2" + 11-digit running number + check digit. While the running number stays below 100,000,000 every
+   * system code starts with 200. SYSTEM_PREFIX is the family new codes are made in. LEGACY_PREFIXES are older system codes
+   * that started with 254: an earlier version continued the counter from ANY code starting with 2 (a typed / imported
+   * 254... code was enough), so codes drifted from 200... to 254.... They are still recognised as system codes.
+   */
+  const SYSTEM_PREFIX = '200';
+  const LEGACY_PREFIXES = ['254'];
+  const MAX_SEQ = 99999999;
+
+  /** True for a valid 13-digit EAN-13 made by the system (200... or a legacy 254... one). */
+  function isGenerated(code) {
+    const c = String(code == null ? '' : code).replace(/\s/g, '');
+    if (!/^\d{13}$/.test(c) || !window.Barcode.isEan13(c)) return false;
+    return c.startsWith(SYSTEM_PREFIX) || LEGACY_PREFIXES.some((p) => c.startsWith(p));
+  }
+
+  /** Next free in-store EAN-13: "2" + 11-digit running number + check digit. Always in the 200... family. */
   function generateCode(used) {
     let max = 0;
     used.forEach((c) => {
-      if (/^2\d{12}$/.test(c) && window.Barcode.isEan13(c)) max = Math.max(max, parseInt(c.slice(1, 12), 10));
+      // only the 200... family moves the counter: a 254... / other 2... code can no longer make new codes jump to 254...
+      if (typeof c === 'string' && c.startsWith(SYSTEM_PREFIX) && /^2\d{12}$/.test(c) && window.Barcode.isEan13(c)) max = Math.max(max, parseInt(c.slice(1, 12), 10));
     });
     let n = max + 1, code;
     do {
+      if (n > MAX_SEQ) throw new Error('Barcode numbers are used up');
       const body = '2' + String(n).padStart(11, '0');
       code = body + window.Barcode.ean13CheckDigit(body);
       n += 1;
@@ -304,5 +324,5 @@
     renderBody();
   }
 
-  window.BarcodeLabels = { generateCode, loadCatalog, printItems, openPrintDialog, getOpts, saveOpts, PAPERS };
+  window.BarcodeLabels = { generateCode, isGenerated, SYSTEM_PREFIX, LEGACY_PREFIXES, loadCatalog, printItems, openPrintDialog, getOpts, saveOpts, PAPERS };
 })(window);
