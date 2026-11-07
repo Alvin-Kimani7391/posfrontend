@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.5.4-access';
+const VERSION = 'v5.5.6-split-pay';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
@@ -49,7 +49,7 @@ const PRECACHE = [
   'cash-register.html', 'notifications.html', 'offline-review.html', 'billing.html', 'crm.html',
 
   'wholesale.html', 'wholesale-reports.html', 'wholesale-sales.html', 'warehouses.html', 'payables.html', 'css/wholesale.css', 'js/core/wholesale-kit.js', 'js/core/product-picker.js', 'js/pages/wholesale-dashboard.js', 'js/pages/wholesale-inventory.js', 'js/pages/wholesale-suppliers.js', 'js/pages/wholesale-report.js', 'js/core/invoice-view.js',
-  'css/variables.css', 'css/base.css', 'css/components.css', 'css/layout.css', 'css/pos.css', 'css/pos-mobile.css', 'css/reports.css',
+  'css/variables.css', 'css/base.css', 'css/components.css', 'css/layout.css', 'css/pos.css', 'css/pos-mobile.css', 'css/split-pay.css', 'css/reports.css',
   'css/tour.css', 'css/announcements.css', 'css/billing.css', 'css/crm.css',
 
   'js/core/config.js', 'js/core/icons.js', 'js/core/storage.js', 'js/core/api.js', 'js/core/fast-search.js', 'js/core/connectivity.js',

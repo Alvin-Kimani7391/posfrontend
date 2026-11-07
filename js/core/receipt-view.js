@@ -52,6 +52,7 @@
     return window.UI.formatMoney(n);
   }
 
+  const PAY_LABEL = { CASH: 'Cash', MPESA: 'M-PESA', MOBILE_MONEY: 'Mobile money', CARD: 'Card', BANK: 'Bank', TRADE_IN: 'Trade-in', OTHER: 'Other' };
   function esc(s) {
     return window.UI.escapeHtml(s == null ? '' : String(s));
   }
@@ -226,15 +227,16 @@
           <div class="rcpt-row rcpt-grand"><span>TOTAL</span><span>${money(d.total)}</span></div>
         </div>
         <div class="rcpt-pay">
+          ${(d.payments || []).filter((p) => p.method !== 'TRADE_IN').length > 1 || ((d.payments || []).length >= 1 && d.balance > 0) ? '<div class="rcpt-row rcpt-split"><span><strong>SPLIT PAYMENT</strong></span><span></span></div>' : ''}
           ${(d.payments || []).map((p) => `
             <div class="rcpt-row">
-              <span>${esc(p.method)}${p.method === 'MPESA' && b.showMpesaReceiptCode !== false && p.externalTransactionId ? ` <span class="rcpt-muted">(M-PESA: ${esc(p.externalTransactionId)})</span>` : p.reference ? ` (${esc(p.reference)})` : ''}</span>
+              <span>${esc(PAY_LABEL[p.method] || p.method)}${p.method === 'MPESA' && b.showMpesaReceiptCode !== false && p.externalTransactionId ? ` <span class="rcpt-muted">(M-PESA: ${esc(p.externalTransactionId)})</span>` : p.reference ? ` (${esc(p.reference)})` : ''}</span>
               <span>${money(p.amount)}</span>
             </div>
             ${p.method === 'CASH' && Number(p.amountTendered) > Number(p.amount) ? `<div class="rcpt-row rcpt-muted"><span>Cash received</span><span>${money(p.amountTendered)}</span></div>` : ''}
           `).join('')}
           ${d.changeGiven ? `<div class="rcpt-row"><span>Change</span><span>${money(d.changeGiven)}</span></div>` : ''}
-          ${d.balance > 0 ? `<div class="rcpt-row rcpt-owed"><span>Balance owed</span><span>${money(d.balance)}</span></div>` : ''}
+          ${d.balance > 0 ? `<div class="rcpt-row rcpt-owed"><span>On credit - balance owed</span><span>${money(d.balance)}</span></div>` : ''}
         </div>
         ${(b.customLines || []).map((line) => `<div class="rcpt-custom">${esc(line)}</div>`).join('')}
         ${b.footerMessage ? `<div class="rcpt-footer-msg">${esc(b.footerMessage)}</div>` : ''}

@@ -22,13 +22,14 @@
    * Helpers
    * ------------------------------------------------------------------ */
   function trim1(n) { return n.toFixed(1).replace(/\.0$/, ''); }
+  function trim2(n) { return n.toFixed(2).replace(/\.?0+$/, ''); }
 
   /** 1 250 000 -> "1.3M", 45 000 -> "45K", 820 -> "820" */
   function compact(n) {
     const v = Number(n) || 0;
     const a = Math.abs(v);
-    if (a >= 1e9) return `${trim1(v / 1e9)}B`;
-    if (a >= 1e6) return `${trim1(v / 1e6)}M`;
+    if (a >= 1e9) return `${trim2(v / 1e9)}B`;
+    if (a >= 1e6) return `${trim2(v / 1e6)}M`;
     if (a >= 1e4) return `${trim1(v / 1e3)}K`;
     return Math.round(v).toLocaleString('en-KE');
   }

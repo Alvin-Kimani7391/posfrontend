@@ -24,6 +24,7 @@
     { key: 'move',       n: 4, label: 'Move to shop',   hint: 'Send stock where it sells', icon: 'truck', title: 'Move stock', intro: 'Move bulk stock to the shop floor to sell at retail, send unsold stock back, or shift stock between stores.' },
     { key: 'adjust',     n: 5, label: 'Adjust & count', hint: 'Fix differences',       icon: 'clipboard', title: 'Adjust and count', intro: 'Correct the numbers when reality differs: damaged, expired or lost goods, a recount, or opening stock.' },
     { key: 'history',    n: 6, label: 'History & checks', hint: 'Audit trail',         icon: 'audit',     title: 'History and checks', intro: 'Every movement is recorded. Use the books check to confirm the ledger matches the shelves.' },
+    { key: 'returns',    n: 7, label: 'Purchase returns', hint: 'Send goods back',     icon: 'bag',       title: 'Purchase returns', intro: 'Goods that arrived damaged, wrong or surplus can go back to the supplier. Stock is taken out exactly as it came in and the amount you owe the supplier goes down.' },
   ];
   const KIND = { TO_RETAIL: 'Warehouse → Shop', TO_WAREHOUSE: 'Shop → Warehouse', WAREHOUSE_TO_WAREHOUSE: 'Warehouse → Warehouse' };
 
@@ -129,7 +130,7 @@
   function renderStep() {
     const t = ++token; void t;
     const panel = $('#wi-panel'); if (!panel) return;
-    ({ warehouses: stepWarehouses, receive: stepReceive, stock: stepStock, move: stepMove, adjust: stepAdjust, history: stepHistory })[state.step](panel);
+    ({ warehouses: stepWarehouses, receive: stepReceive, stock: stepStock, move: stepMove, adjust: stepAdjust, history: stepHistory, returns: stepReturns })[state.step](panel);
   }
 
   /* ---------------------------------------------------------------- 1 warehouses */
@@ -322,6 +323,16 @@
 
   /* ---------------------------------------------------------------- 6 history */
   const HIST_VIEWS = [['ledger', 'Movement ledger'], ['moves', 'Warehouse moves'], ['branch', 'Branch transfers'], ['books', 'Books check']];
+  /* ---------------------------------------------------------------- 7 purchase returns */
+  function stepReturns(panel) {
+    const s = stepOf('returns');
+    panel.innerHTML = panelHead(s, '<button type="button" class="btn btn-primary" id="pr-new" data-requires-permission="purchases.return">Return a purchase</button>') + '<div id="pr-host"></div>' + panelFoot(s);
+    wireGo(panel); gate(panel);
+    if (!window.PurchaseReturns) { $('#pr-host').innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Purchase returns did not load', message: 'Refresh the page and try again.' }); return; }
+    const list = window.PurchaseReturns.renderList($('#pr-host'));
+    $('#pr-new').addEventListener('click', () => window.PurchaseReturns.openWizard({ onDone: () => list.reload() }));
+  }
+
   function stepHistory(panel) {
     const s = stepOf('history');
     panel.innerHTML = panelHead(s) + `<div class="ws-pad flow-sub">${seg(HIST_VIEWS, state.histView, 'hist-seg')}</div><div id="hist-body"></div>` + panelFoot(s);

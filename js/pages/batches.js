@@ -94,13 +94,54 @@
     else renderUnbatched(root);
   }
 
+
+  /* ---- Print / Save as PDF (expiry watch + no-expiry lists) ---- */
+  let lastExpiry = null, lastUnbatched = null;
+  const plainDue = (v) => { if (!v) return ''; const d = daysLeft(v); return d < 0 ? `Expired ${-d} day${d === -1 ? '' : 's'} ago` : d === 0 ? 'Expires today' : `${d} day${d === 1 ? '' : 's'} left`; };
+  const printBtns = () => '<span class="flex gap-2" style="margin-left:auto"><button class="btn btn-secondary btn-sm" data-print="print">Print</button><button class="btn btn-secondary btn-sm" data-print="pdf">Download PDF</button></span>';
+  function bindPrint(root, build) {
+    root.querySelectorAll('[data-print]').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.print === 'pdf') window.UI.toast.info?.('In the print window choose “Save as PDF” as the destination.');
+      printDoc(build());
+    }));
+  }
+  function printDoc({ title, subtitle, sections }) {
+    const esc = K.esc;
+    const table = (head, rows) => `<table><thead><tr>${head.map((h, i) => `<th${h.r ? ' class="r"' : ''}>${esc(h.t)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td${head[i].r ? ' class="r"' : ''}>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    const body = sections.map((sec) => `<h2>${esc(sec.heading)}</h2>${sec.rows.length ? table(sec.head, sec.rows) : `<p class="muted">${esc(sec.empty)}</p>`}`).join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+      @page{size:A4;margin:14mm} body{font:12px/1.4 Arial,Helvetica,sans-serif;color:#111}
+      h1{font-size:18px;margin:0 0 2px} h2{font-size:13px;margin:18px 0 6px} .muted{color:#666;margin:2px 0}
+      table{width:100%;border-collapse:collapse} th,td{border:1px solid #ccc;padding:5px 7px;text-align:left} th{background:#f1f1f1} .r{text-align:right}
+      tr{page-break-inside:avoid}</style></head><body><h1>${esc(title)}</h1><p class="muted">${esc(subtitle)}</p>${body}</body></html>`;
+    const f = document.createElement('iframe');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+    document.body.appendChild(f);
+    f.contentDocument.open(); f.contentDocument.write(html); f.contentDocument.close();
+    let done = false;
+    const go = () => { if (done) return; done = true; try { f.contentWindow.focus(); f.contentWindow.print(); } catch { /* blocked */ } setTimeout(() => f.remove(), 4000); };
+    f.onload = go;
+    setTimeout(go, 400);
+  }
+  const stamp = () => `Printed ${new Date().toLocaleString()}`;
+
   async function renderExpiry(root) {
-    root.innerHTML = `<div class="card"><div class="toolbar"><label class="text-sm">Show items expiring within <select class="select" id="exp-days" style="display:inline-block;width:auto">${[7, 14, 30, 60, 90].map((d) => `<option value="${d}" ${d === days ? 'selected' : ''}>${d} days</option>`).join('')}</select></label></div><div class="card-body" id="exp-body">Loading…</div></div>`;
+    root.innerHTML = `<div class="card"><div class="toolbar"><label class="text-sm">Show items expiring within <select class="select" id="exp-days" style="display:inline-block;width:auto">${[7, 14, 30, 60, 90].map((d) => `<option value="${d}" ${d === days ? 'selected' : ''}>${d} days</option>`).join('')}</select></label>${printBtns()}</div><div class="card-body" id="exp-body">Loading…</div></div>`;
+    bindPrint(root, () => {
+      const d = lastExpiry || { expired: [], expiring: [] };
+      const head = [{ t: 'Product' }, { t: 'Batch' }, { t: 'Qty', r: 1 }, { t: 'Expiry' }, { t: 'Status' }];
+      const row = (b) => [b.productId?.name || '-', b.batchNumber || '', String(b.quantity), expDate(b.expiryDate), plainDue(b.expiryDate)];
+      return { title: 'Expiry watch', subtitle: `${stamp()} · expiring within ${days} days`, sections: [
+        { heading: `Already expired (${d.expired.length}) · cost value ${K.money((d.expiredCostValue || 0) / 100)}`, head, rows: d.expired.map(row), empty: 'Nothing expired is still in stock.' },
+        { heading: `Expiring in ${days} days (${d.expiring.length}) · cost value ${K.money((d.expiringCostValue || 0) / 100)}`, head, rows: d.expiring.map(row), empty: `Nothing expires in the next ${days} days.` },
+      ] };
+    });
     document.getElementById('exp-days').addEventListener('change', (e) => { days = Number(e.target.value); renderExpiry(root); });
     const branchId = K.branchId();
     if (!branchId) { document.getElementById('exp-body').innerHTML = '<p class="text-muted">Select a branch first.</p>'; return; }
     try {
       const { data } = await window.Api.get('/batches/expiring', { branchId, days });
+      lastExpiry = data;
       const table = (rows, emptyMsg) => rows.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Product</th><th>Batch</th><th style="text-align:right">Qty</th><th>Expiry</th><th></th><th></th></tr></thead><tbody>${rows.map((b) => `<tr data-id="${b._id}"><td>${name(b)}</td><td>${K.esc(b.batchNumber)}</td><td style="text-align:right">${b.quantity}</td><td>${expDate(b.expiryDate)}</td><td>${dueBadge(b.expiryDate)}</td><td style="text-align:right">${K.can('batches.manage') ? K.btn('dispose', 'Write off') : ''}</td></tr>`).join('')}</tbody></table></div>` : `<p class="text-muted">${emptyMsg}</p>`;
       document.getElementById('exp-body').innerHTML = `
         <div class="mk-section">Already expired (${data.expired.length}) · cost value ${K.money((data.expiredCostValue || 0) / 100)}</div>${table(data.expired, 'Nothing expired is still in stock.')}
@@ -112,13 +153,17 @@
 
   /** Stock already on the shelf that has no batch / expiry date: lets the shop add it so it shows up in the expiry watch. */
   async function renderUnbatched(root) {
-    root.innerHTML = '<div class="card"><div class="card-body" id="unb-body">Loading…</div></div>';
+    root.innerHTML = `<div class="card"><div class="toolbar">${printBtns()}</div><div class="card-body" id="unb-body">Loading…</div></div>`;
+    bindPrint(root, () => ({ title: 'Stock with no expiry date recorded', subtitle: stamp(), sections: [{
+      heading: `Products (${(lastUnbatched || []).length})`, head: [{ t: 'Product' }, { t: 'Units without expiry', r: 1 }],
+      rows: (lastUnbatched || []).map((it) => [it.name + (it.variantLabel ? ` (${it.variantLabel})` : ''), String(it.quantityUnbatched)]), empty: 'Every unit has an expiry date recorded.' }] }));
     const body = document.getElementById('unb-body');
     const branchId = K.branchId();
     if (!branchId) { body.innerHTML = '<p class="text-muted">Select a branch first.</p>'; return; }
     try {
       const { data } = await window.Api.get('/batches/unbatched', { branchId });
       const items = data.items || [];
+      lastUnbatched = items;
       if (!items.length) { body.innerHTML = '<p class="text-muted">Every unit of your batch / expiry-tracked products has an expiry date recorded.</p>'; return; }
       body.innerHTML = `<p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">These products have stock on hand that was never given a batch and expiry date, so it cannot appear in the expiry watch. Add the details printed on the pack. Your stock quantity does not change.</p>
         <div class="table-wrap"><table class="table"><thead><tr><th>Product</th><th style="text-align:right">Units without expiry</th><th></th></tr></thead><tbody>${items.map((it, i) => `<tr data-i="${i}"><td>${K.esc(it.name)}${it.variantLabel ? ` <span class="text-muted">(${K.esc(it.variantLabel)})</span>` : ''}</td><td style="text-align:right">${it.quantityUnbatched}</td><td style="text-align:right">${K.can('batches.manage') ? K.btn('backfill', 'Add expiry') : ''}</td></tr>`).join('')}</tbody></table></div>`;

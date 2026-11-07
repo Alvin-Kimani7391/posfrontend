@@ -57,6 +57,7 @@
         receive: openReceiveModal,
         adjust: openAdjustModal,
         branchTransfer: openTransferModal,
+        returnPurchase: openReturnPurchase,
         /** Draw one of the classic views (overview | stock | lowstock | movements | transfers | locmoves) into #view-toolbar / #view-body / #pagination. */
         showView(view) { state.view = view; state.page = 1; return renderActiveView(); },
         setSearch(v) { state.search = v || ''; },
@@ -101,11 +102,14 @@
         <div class="flex gap-2" style="flex-wrap:wrap">
           <button class="btn btn-secondary" id="adjust-stock-btn" data-requires-permission="inventory.adjust">${window.Icons.get('edit')} Adjust</button>
           <button class="btn btn-secondary" id="receive-stock-btn" data-requires-permission="inventory.receive">${window.Icons.get('plus')} Receive stock</button>
+          <button class="btn btn-secondary" id="return-purchase-btn" data-requires-permission="purchases.return">${window.Icons.get('bag')} Return purchase</button>
           ${wh() ? `<button class="btn btn-secondary" id="move-stock-btn" data-requires-permission="inventory.transfer">${window.Icons.get('truck')} Move stock</button>` : ''}
           <button class="btn btn-secondary" id="low-sms-btn" data-requires-permission="settings.update">${window.Icons.get('bell')} Low stock SMS</button>
           <button class="btn btn-primary" id="new-transfer-btn" data-requires-permission="inventory.transfer">${window.Icons.get('branches')} New transfer</button>
         </div>
       </div>
+
+      <div id="stock-value-strip"></div>
 
       <div class="card">
         <div class="tabs" style="padding: 0 var(--space-6)">
@@ -116,6 +120,7 @@
           <button class="tab-btn" data-view="movements">Movements</button>
           <button class="tab-btn" data-view="transfers">${wh() ? 'Branch transfers' : 'Transfers'}</button>
           ${wh() ? '<button class="tab-btn" data-view="locmoves">Warehouse moves</button>' : ''}
+          <button class="tab-btn" data-view="preturns" data-requires-permission="purchases.view">Purchase returns</button>
         </div>
         <div class="toolbar" id="view-toolbar"></div>
         <div id="view-body"></div>
@@ -129,6 +134,7 @@
     document.getElementById('receive-stock-btn').addEventListener('click', openReceiveModal);
     window.AppShell.runUrlAction?.('receive-stock-btn'); // opened from the setup guide
     document.getElementById('new-transfer-btn').addEventListener('click', openTransferModal);
+    document.getElementById('return-purchase-btn')?.addEventListener('click', openReturnPurchase);
     document.getElementById('move-stock-btn')?.addEventListener('click', openMoveModal);
     document.getElementById('low-sms-btn')?.addEventListener('click', openLowStockSmsModal);
   }
@@ -145,8 +151,30 @@
     });
   }
 
+  /** Stock value for the active branch (same calculation as the dashboard). Values arrive in cents. */
+  async function loadStockValue() {
+    const el = document.getElementById('stock-value-strip');
+    if (!el) return;
+    const branchId = window.AppShell.getActiveBranchId();
+    if (!branchId) { el.innerHTML = ''; return; }
+    try {
+      const { data } = await window.Api.get('/inventory/valuation', { branchId });
+      const t = data.totals || {};
+      const tile = (label, val, sub) => `<div class="card" style="flex:1;min-width:170px;padding:var(--space-4)"><div class="text-sm text-secondary">${label}</div><div style="font-size:1.4rem;font-weight:700">${kes(val)}</div>${sub ? `<div class="text-sm text-muted">${sub}</div>` : ''}</div>`;
+      el.innerHTML = `<div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-4)">
+        ${tile('Stock value (at cost)', t.cost, `${Number(t.units || 0).toLocaleString()} units on hand`)}
+        ${tile('Shop floor', t.retailCost)}
+        ${wh() || t.warehouseCost ? tile('Warehouse', t.warehouseCost) : ''}
+        ${tile('Selling value', t.retail, `Potential profit ${kes((t.retail || 0) - (t.retailCost || 0))}`)}
+        ${t.expiredCost ? tile('Expired (not counted)', t.expiredCost) : ''}
+      </div>
+      ${t.zeroCostItems ? `<div class="card" style="margin-bottom:var(--space-4);border-left:4px solid var(--color-warning, #d97706);padding:var(--space-3) var(--space-4)"><span class="text-sm"><strong>${t.zeroCostItems}</strong> product${t.zeroCostItems === 1 ? '' : 's'} in stock ha${t.zeroCostItems === 1 ? 's' : 've'} no cost price, so ${t.zeroCostItems === 1 ? 'it is' : 'they are'} valued at 0 (e.g. ${(data.zeroCostList || []).slice(0, 3).map((z) => esc(z.name)).join(', ')}). Set the cost price or receive them through a purchase to correct the stock value.</span></div>` : ''}`;
+    } catch { el.innerHTML = ''; }
+  }
+
   async function renderActiveView() {
     window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+    loadStockValue();
     renderToolbar();
     if (state.view === 'overview') return renderOverview();
     if (state.view === 'stock') return renderStockLevels();
@@ -155,6 +183,25 @@
     if (state.view === 'movements') return renderMovements();
     if (state.view === 'transfers') return renderTransfers();
     if (state.view === 'locmoves') return renderLocationMoves();
+    if (state.view === 'preturns') return renderPurchaseReturns();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Purchase returns: send goods from a RECEIVED purchase back to the supplier (stock out + supplier balance down).
+   * The wizard and the list live in js/pages/purchase-returns.js.
+   * ------------------------------------------------------------------ */
+  let returnsList = null;
+  function renderPurchaseReturns() {
+    document.getElementById('pagination').innerHTML = '';
+    const body = document.getElementById('view-body');
+    if (!window.PurchaseReturns) { body.innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Purchase returns did not load', message: 'Refresh the page and try again.' }); return; }
+    returnsList = window.PurchaseReturns.renderList(body);
+  }
+  function openReturnPurchase() {
+    if (!window.PurchaseReturns) return window.UI.toast.error('Purchase returns did not load. Refresh the page.');
+    window.PurchaseReturns.openWizard({
+      onDone: () => { if (state.view === 'preturns' && returnsList) returnsList.reload(); else renderActiveView(); },
+    });
   }
 
   function renderToolbar() {

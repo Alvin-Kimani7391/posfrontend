@@ -141,7 +141,8 @@
                 <th>Category</th>
                 <th>Price</th>
                 <th>Status</th>
-                <th></th>
+                <th class="pm-stock-col">Stock</th>
+                <th class="pm-actions-col"></th>
               </tr>
             </thead>
             <tbody id="products-tbody">${window.UI.skeletonRows(7, 4)}</tbody>
@@ -409,7 +410,7 @@
   async function fetchAndRender(opts) {
     const tbody = document.getElementById('products-tbody');
     const local = !!(opts && opts.local);
-    if (!local) productIndex.invalidate(); // something changed (or first load): the device copy must reload
+    if (!local) { productIndex.invalidate(); stockCache.clear(); } // something changed (or first load): the device copy and stock must reload
 
     if (local) {
       // Search / filter / page change answered from the in-memory list: no skeleton, no waiting.
@@ -446,7 +447,7 @@
         window.UI.toast.info('Offline: showing products saved on this device');
         return;
       }
-      tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
     }
   }
 
@@ -471,11 +472,167 @@
     return `<div class="lq-pcell">${thumb}<div><div class="cell-primary">${e(p.name)}</div><small>${meta}</small></div></div>`;
   }
 
+
+  /* ------------------------------------------------------------------ *
+   * STOCK beside every product (one request per page) + the row action menu (3 dots)
+   * ------------------------------------------------------------------ */
+  const stockCache = new Map(); // product id -> { quantity, warehouse, low, out, tracked, threshold }
+  let stockSeq = 0;
+
+  (function injectMenuStyles() {
+    if (document.getElementById('pm-styles')) return;
+    const st = document.createElement('style'); st.id = 'pm-styles';
+    st.textContent = `
+      .pm-namecell{display:flex;align-items:flex-start;gap:8px;min-width:0}
+      .pm-namebody{min-width:0;flex:1}
+      .pm-kebab{flex:none;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--color-text-secondary,#5b6475);cursor:pointer;transition:background .15s,border-color .15s,color .15s;-webkit-tap-highlight-color:transparent}
+      .pm-kebab svg{width:20px;height:20px;transform:rotate(90deg)}
+      .pm-kebab:hover,.pm-kebab[aria-expanded="true"]{background:var(--color-primary-50,#eef2ff);border-color:var(--color-border,#e5e7eb);color:var(--color-primary,#4f46e5)}
+      .pm-kebab:focus-visible{outline:2px solid var(--color-primary,#4f46e5);outline-offset:1px}
+      .pm-actions-col{display:none !important}
+      .pm-stock{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.5;white-space:nowrap;background:#ecfdf3;color:#047857;font-variant-numeric:tabular-nums}
+      .pm-stock.low{background:#fff7e6;color:#b45309}
+      .pm-stock.out{background:#fdecea;color:#b3140a}
+      .pm-stock.off{background:#f1f2f6;color:#6b7280;font-weight:500}
+      .pm-stock .pm-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+      .pm-stock-sub{display:block;font-size:11px;color:var(--color-text-muted,#6b7280);margin-top:2px;font-weight:400}
+      .pm-skel{min-width:64px;background:linear-gradient(90deg,#eef0f4,#f7f8fa,#eef0f4);background-size:200% 100%;animation:pm-sh 1.2s infinite;color:transparent}
+      @keyframes pm-sh{from{background-position:200% 0}to{background-position:-200% 0}}
+      .pm-stock-inline{display:none;margin-top:4px}
+      @media (max-width:900px){.pm-stock-col{display:none !important}.pm-stock-inline{display:block}}
+      #pm-menu{position:fixed;z-index:1400;min-width:240px;max-width:min(320px,calc(100vw - 16px));background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e7eb);border-radius:14px;box-shadow:0 18px 48px rgba(16,24,40,.22),0 2px 8px rgba(16,24,40,.08);padding:6px;opacity:0;transform:translateY(-4px) scale(.98);transform-origin:top left;transition:opacity .12s,transform .12s}
+      #pm-menu.open{opacity:1;transform:none}
+      #pm-menu .pm-head{padding:10px 12px 8px;border-bottom:1px solid var(--color-border,#e5e7eb);margin:0 0 6px}
+      #pm-menu .pm-title{font-weight:700;font-size:14px;color:var(--color-text,#111827);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #pm-menu .pm-sub{margin-top:5px}
+      #pm-menu .pm-item{display:flex;align-items:center;gap:12px;width:100%;min-height:42px;padding:0 12px;border:0;border-radius:9px;background:transparent;font:inherit;font-size:14px;font-weight:500;color:var(--color-text,#111827);text-align:left;cursor:pointer}
+      #pm-menu .pm-item svg{width:18px;height:18px;flex:none;color:var(--color-text-secondary,#5b6475)}
+      #pm-menu .pm-item:hover,#pm-menu .pm-item:focus-visible{background:var(--color-primary-50,#eef2ff);outline:none}
+      #pm-menu .pm-item.danger,#pm-menu .pm-item.danger svg{color:#b3140a}
+      #pm-menu .pm-item.danger:hover,#pm-menu .pm-item.danger:focus-visible{background:#fdecea}
+      #pm-menu .pm-sep{height:1px;background:var(--color-border,#e5e7eb);margin:6px 4px}
+      #pm-back{position:fixed;inset:0;z-index:1399;background:rgba(15,23,42,.45);opacity:0;transition:opacity .15s}
+      #pm-back.open{opacity:1}
+      @media (max-width:560px){
+        #pm-menu{left:0 !important;right:0;top:auto !important;bottom:0;max-width:none;min-width:0;border-radius:18px 18px 0 0;padding:8px 8px calc(10px + env(safe-area-inset-bottom));transform:translateY(24px);transform-origin:bottom}
+        #pm-menu.open{transform:none}
+        #pm-menu .pm-item{min-height:50px;font-size:15px}
+        #pm-menu::before{content:"";display:block;width:38px;height:4px;border-radius:4px;background:#d5d9e0;margin:2px auto 8px}
+      }
+      @media (prefers-reduced-motion:reduce){#pm-menu,#pm-back{transition:none}}
+    `;
+    document.head.appendChild(st);
+  })();
+
+  function stockHtml(p, st) {
+    if (!st) return '<span class="pm-stock pm-skel">&nbsp;</span>';
+    if (!st.tracked) return '<span class="pm-stock off">Not tracked</span>';
+    const unit = (p && p.unit) || 'pcs';
+    const unitLabel = unit === 'piece' ? 'pcs' : unit;
+    const total = Math.round((st.quantity + (st.warehouse || 0)) * 1000) / 1000;
+    const cls = st.out || total <= 0 ? 'out' : st.low ? 'low' : '';
+    const label = cls === 'out' ? 'Out of stock' : `${total.toLocaleString('en-KE')} ${window.UI.escapeHtml(unitLabel)}${cls === 'low' ? ' · low' : ''}`;
+    let sub = '';
+    const pk = ((p && p.units) || []).find((u) => u.code === 'PKT' && u.status !== 'inactive' && u.factor > 1);
+    if (pk && total > 0) { const full = Math.floor(total / pk.factor); const loose = Math.round((total - full * pk.factor) * 1000) / 1000; sub = `${full} ${window.UI.escapeHtml(pk.name)}${full === 1 ? '' : 's'}${loose ? ` + ${loose} loose` : ''}`; }
+    else if (st.warehouse > 0) sub = `${st.quantity} shop · ${st.warehouse} warehouse`;
+    return `<span class="pm-stock ${cls}"><span class="pm-dot"></span>${label}</span>${sub ? `<span class="pm-stock-sub">${sub}</span>` : ''}`;
+  }
+
+  function paintStock(items) {
+    items.forEach((p) => {
+      const html = stockHtml(p, stockCache.get(String(p._id)));
+      const cell = document.querySelector(`[data-stock-cell="${p._id}"]`); if (cell) cell.innerHTML = html;
+      const inl = document.querySelector(`[data-stock-inline="${p._id}"]`); if (inl) inl.innerHTML = html;
+    });
+  }
+
+  async function loadStock(items) {
+    const ids = items.filter((p) => !p._pending && !String(p._id).startsWith('tmp_')).map((p) => p._id);
+    if (!ids.length) return;
+    const my = ++stockSeq;
+    try {
+      const { data } = await window.Api.get('/products/stock-levels', { ids: ids.join(','), branchId: window.AppShell.getActiveBranchId() || undefined }, { background: true });
+      if (my !== stockSeq) return;
+      Object.entries(data.stock || {}).forEach(([id, v]) => stockCache.set(id, v));
+      paintStock(items);
+    } catch {
+      // no permission / offline: show a dash instead of a spinner that never ends
+      if (my !== stockSeq) return;
+      items.forEach((p) => { if (!stockCache.has(String(p._id))) { ['data-stock-cell', 'data-stock-inline'].forEach((a) => { const el = document.querySelector(`[${a}="${p._id}"]`); if (el) el.innerHTML = '<span class="text-muted">-</span>'; }); } });
+    }
+  }
+
+  let pmOpenBtn = null;
+  function closeRowMenu() {
+    const m = document.getElementById('pm-menu'); const b = document.getElementById('pm-back');
+    if (m) m.remove(); if (b) b.remove();
+    if (pmOpenBtn) { pmOpenBtn.setAttribute('aria-expanded', 'false'); pmOpenBtn = null; }
+    document.removeEventListener('keydown', pmKey, true);
+    window.removeEventListener('resize', closeRowMenu);
+    window.removeEventListener('scroll', pmScroll, true);
+  }
+  function pmScroll(e) { if (e.target && e.target.closest && e.target.closest('#pm-menu')) return; closeRowMenu(); }
+  function pmKey(e) {
+    const m = document.getElementById('pm-menu'); if (!m) return;
+    if (e.key === 'Escape') { e.preventDefault(); const b = pmOpenBtn; closeRowMenu(); if (b) b.focus(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const its = Array.from(m.querySelectorAll('.pm-item')); const i = its.indexOf(document.activeElement);
+      its[(i + (e.key === 'ArrowDown' ? 1 : -1) + its.length) % its.length].focus();
+    }
+  }
+
+  function openRowMenu(btn, items) {
+    if (pmOpenBtn === btn) { closeRowMenu(); return; }
+    closeRowMenu();
+    const tr = btn.closest('tr'); const p = items.find((x) => String(x._id) === tr.dataset.id); if (!p) return;
+    // only actions this user may do (the hidden row buttons carry the permission gates and the existing handlers)
+    const act = (name) => { const b = tr.querySelector(`td.actions [data-action="${name}"]`); return b && !b.classList.contains('hidden') ? b : null; };
+    const E = window.Icons.get;
+    const defs = [
+      ['edit', 'Edit product', E('edit')],
+      ['view-stock', 'View stock & adjust', E('inventory')],
+      ['variants', 'Manage variants', E('box')],
+      ['sticker', 'Print barcode sticker', E('printer')],
+      ['sep'],
+      ['archive', 'Archive product', E('trash'), 'danger'],
+    ].filter((d) => d[0] === 'sep' || act(d[0]));
+    while (defs.length && defs[0][0] === 'sep') defs.shift();
+    while (defs.length && defs[defs.length - 1][0] === 'sep') defs.pop();
+    if (!defs.length) { window.UI.toast.info('You do not have any actions for this product'); return; }
+
+    const m = document.createElement('div');
+    m.id = 'pm-menu'; m.setAttribute('role', 'menu');
+    m.innerHTML = `<div class="pm-head"><div class="pm-title">${window.UI.escapeHtml(p.name)}</div><div class="pm-sub">${stockHtml(p, stockCache.get(String(p._id)))}</div></div>`
+      + defs.map((d) => d[0] === 'sep' ? '<div class="pm-sep" role="separator"></div>' : `<button type="button" role="menuitem" class="pm-item ${d[3] || ''}" data-pm="${d[0]}">${d[2]}<span>${d[1]}</span></button>`).join('');
+    const narrow = window.matchMedia('(max-width: 560px)').matches;
+    if (narrow) { const back = document.createElement('div'); back.id = 'pm-back'; back.addEventListener('click', closeRowMenu); document.body.appendChild(back); requestAnimationFrame(() => back.classList.add('open')); }
+    document.body.appendChild(m);
+    btn.setAttribute('aria-expanded', 'true'); pmOpenBtn = btn;
+    if (!narrow) {
+      const r = btn.getBoundingClientRect(); const w = m.offsetWidth; const h = m.offsetHeight;
+      let left = r.left; if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
+      let top = r.bottom + 6; if (top + h > window.innerHeight - 8) { top = Math.max(8, r.top - h - 6); m.style.transformOrigin = 'bottom left'; }
+      m.style.left = `${left}px`; m.style.top = `${top}px`;
+    }
+    requestAnimationFrame(() => { m.classList.add('open'); const f = m.querySelector('.pm-item'); if (f) f.focus({ preventScroll: true }); });
+    m.addEventListener('click', (e) => {
+      const it = e.target.closest('.pm-item'); if (!it) return;
+      const target = act(it.dataset.pm); closeRowMenu();
+      if (target) target.click();
+    });
+    document.addEventListener('keydown', pmKey, true);
+    window.addEventListener('resize', closeRowMenu);
+    window.addEventListener('scroll', pmScroll, true);
+    setTimeout(() => document.addEventListener('click', function off(e) { if (e.target.closest && e.target.closest('#pm-menu')) return; document.removeEventListener('click', off, true); closeRowMenu(); }, true), 0);
+  }
+
   function renderRows(items) {
     const tbody = document.getElementById('products-tbody');
 
     if (!items.length) {
-      tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({
+      tbody.innerHTML = `<tr><td colspan="8">${window.UI.emptyStateHtml({
         icon: 'products',
         title: state.search || state.categoryId ? 'No products match your filters' : 'No products yet',
         message: state.search || state.categoryId ? '' : 'Add your first product to start building your catalog.',
@@ -489,8 +646,14 @@
       <tr data-id="${p._id}">
         <td class="bl-sel-col"><input type="checkbox" data-select="${p._id}" ${selected.has(p._id) ? 'checked' : ''} /></td>
         <td>
-          ${liquorCell(p) || `<div class="cell-primary">${window.UI.escapeHtml(p.name)}${p._pending ? '<span class="pb-pending">waiting to upload</span>' : ''}</div>`}
-          ${p.hasVariants ? `<div class="text-xs text-muted">${p.variants.length} variant${p.variants.length === 1 ? '' : 's'}</div>` : ''}
+          <div class="pm-namecell">
+            <button type="button" class="pm-kebab" data-pm-open aria-haspopup="menu" aria-label="Product actions" title="Actions">${window.Icons.get('dots')}</button>
+            <div class="pm-namebody">
+              ${liquorCell(p) || `<div class="cell-primary">${window.UI.escapeHtml(p.name)}${p._pending ? '<span class="pb-pending">waiting to upload</span>' : ''}</div>`}
+              ${p.hasVariants ? `<div class="text-xs text-muted">${p.variants.length} variant${p.variants.length === 1 ? '' : 's'}</div>` : ''}
+              <div class="pm-stock-inline" data-stock-inline="${p._id}"></div>
+            </div>
+          </div>
         </td>
         <td>
           <div class="text-sm">${window.UI.escapeHtml(p.sku)}</div>
@@ -505,7 +668,8 @@
           ${p.wholesaleEnabled && p.moq ? `<div class="text-xs text-muted">${p.wholesalePrice ? window.UI.formatMoney(p.wholesalePrice) : 'Per variant'} wholesale from ${p.moq} ${window.UI.escapeHtml(p.unit || '')}</div>` : ''}`}
         </td>
         <td><span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-neutral'}">${p.status}</span></td>
-        <td class="actions">
+        <td class="pm-stock-col" data-stock-cell="${p._id}"><span class="pm-stock pm-skel">&nbsp;</span></td>
+        <td class="actions pm-actions-col">
           ${p.hasVariants ? `<button class="btn btn-ghost btn-sm btn-icon" data-action="variants" data-requires-permission="products.update" title="Manage variants">${window.Icons.get('box')}</button>` : ''}
           <button class="btn btn-ghost btn-sm" data-action="view-stock" data-requires-permission="inventory.view" title="See this product's stock in Inventory (then adjust or receive)">View stock</button>
           <button class="btn btn-ghost btn-sm btn-icon" data-action="sticker" data-requires-permission="products.view" title="Print barcode sticker">${window.Icons.get('printer')}</button>
@@ -534,6 +698,9 @@
       btn.addEventListener('click', () => window.BarcodeLabels.openPrintDialog({ selectedIds: [btn.closest('tr').dataset.id] }));
     });
     updateSelectionBar(items);
+    paintStock(items);
+    loadStock(items);
+    tbody.querySelectorAll('[data-pm-open]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); openRowMenu(b, items); }));
 
     tbody.querySelectorAll('[data-action="edit"]').forEach((btn) => {
       btn.addEventListener('click', async () => {

@@ -52,7 +52,7 @@
       'payments.view', 'payments.refund',
       'customers.view', 'customers.create', 'customers.update',
       'suppliers.view', 'suppliers.create', 'suppliers.update',
-      'purchases.view', 'purchases.create', 'purchases.receive', 'purchases.pay',
+      'purchases.view', 'purchases.create', 'purchases.receive', 'purchases.pay', 'purchases.return',
       'registers.view', 'registers.manage',
       'shifts.open', 'shifts.close', 'shifts.view',
       'shortages.view', 'shortages.manage',

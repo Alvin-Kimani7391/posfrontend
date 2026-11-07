@@ -46,6 +46,8 @@
  *      (Barcode | Product name | Price per unit) and picking a row adds it.
  *   2. Added products appear in the ticket. Adjust quantity / discount inline.
  *   3. ONE button: "Add payment to complete sale" (F9).
+ *   SPLIT tab: one sale paid with several methods (Cash + M-PESA, M-PESA + Credit ...). Each line is sent as its own payment;
+ *              the unpaid remainder (Credit line) is the sale balance, exactly like a part payment. M-PESA is verified by the backend.
  *   4. The payment window asks how the customer is paying:
  *        CASH         -> amount received, system shows the CHANGE
  *        M-PESA STK   -> STK push; once confirmed the sale completes automatically
@@ -130,6 +132,7 @@
     { id: 'BANK', label: 'Bank', ico: 'fa-solid fa-building-columns' },
     { id: 'CREDIT', label: 'Credit', ico: 'fa-solid fa-file-invoice-dollar' },
     { id: 'CARD', label: 'Card', ico: 'fa-solid fa-credit-card' },
+    { id: 'SPLIT', label: 'Split', ico: 'fa-solid fa-code-branch' }, // several methods for one sale (renderSplit)
   ];
 
   const DEFAULT_FLAGS = { mpesaEnabled: false, etimsEnabled: false, mpesaManualEnabled: false, tillNumber: null };
@@ -146,6 +149,7 @@
     cartDiscount: 0,
     payments: [], // built when the payment window completes: { method, amount, reference, amountTendered }
     pendingMpesa: null, // { reference, amount (KES), mode: 'STK' | 'MANUAL' } - confirmed M-PESA money that has not been saved as a sale yet
+    splitDraft: null, // split payment in progress: { total, preset, lines[], mpesa, pendingRef } - survives closing the payment window
     lastAdded: null, // key of the last product added
     currentShift: null,
     flags: { ...DEFAULT_FLAGS },
@@ -391,8 +395,6 @@
       if (String(p.barcode || '').toLowerCase() === t || String(p.sku || '').toLowerCase() === t) return { product: p, variant: null };
       const v = (p.variants || []).find((x) => String(x.barcode || '').toLowerCase() === t || String(x.sku || '').toLowerCase() === t);
       if (v) return { product: p, variant: v };
-      const pu = (p.units || []).find((x) => x.status !== 'inactive' && x.barcode && String(x.barcode).toLowerCase() === t);
-      if (pu) return { product: p, variant: null, unitId: String(pu._id) }; // packet / carton barcode
     }
     return null;
   }
@@ -996,10 +998,7 @@
       if (isWs()) await addWholesaleByCode(code);
       else {
         const data = localBarcode(code) || await lookupBarcode(code);
-        if (await ensureRetailStock(data.product, data.variant)) {
-          if (data.unitId && unitByIdOf(data.product, data.unitId)) await addUnitScan(data.product, data.unitId); // a packet / carton barcode
-          else addToCart(data.product, data.variant);
-        }
+        if (await ensureRetailStock(data.product, data.variant)) addToCart(data.product, data.variant);
       }
     } catch (err) {
       if (err.code === 'BARCODE_NOT_FOUND' && !isWs()) { openQuickAdd({ barcode: code }); return; }
@@ -1236,8 +1235,6 @@
       const p = wsUnitOf(item).wholesalePrice / 100; // the warehouse catalog sends cents
       return { unit: p, priceType: 'WHOLESALE', retail: p, wholesale: null, moq: null };
     }
-    const lu = lineUnitOf(item);
-    if (lu) { const up = unitPriceFor(item.product, item.variant, lu); return { unit: up, priceType: 'RETAIL', retail: up, wholesale: null, moq: null }; }
     return window.Wholesale ? window.Wholesale.forItem(state.cart, item) : { unit: item.variant ? item.variant.sellingPrice : item.product.sellingPrice, priceType: 'RETAIL', retail: item.variant ? item.variant.sellingPrice : item.product.sellingPrice, wholesale: null, moq: null };
   }
   function unitPriceOf(item) {
@@ -1255,8 +1252,7 @@
 
   /** The preset discount for this cart line right now: per-unit x quantity, never above the line total. */
   function autoDiscountFor(item) {
-    const lu0 = lineUnitOf(item);
-    const per = unitDiscountOf(item.product) * (lu0 ? Number(lu0.factor) : 1);
+    const per = unitDiscountOf(item.product);
     if (per <= 0) return 0;
     const gross = round2(unitPriceOf(item) * item.quantity);
     return Math.min(round2(per * item.quantity), gross);
@@ -1887,94 +1883,6 @@
   /* ---- Cart operations ---- */
   function keyOf(item) { return item.key || (item.variant ? item.variant._id : item.product._id); }
 
-  /* ================================================================== *
-   * PACKETS / DEALS on retail lines (sweets: 1 packet = 50 pieces, "3 for 5 bob")
-   * Stock is kept in pieces. A cart line can be sold in the product's base unit (piece) or in one of its units
-   * (packet / deal). The server prices the line from the unit and takes cost per piece x pieces, so profit is exact
-   * whether a packet is sold whole or broken and sold piece by piece.
-   * ================================================================== */
-  const retailUnitsOf = (product) => ((product && product.units) || []).filter((u) => u.status !== 'inactive' && Number(u.factor) > 0);
-  const unitByIdOf = (product, id) => retailUnitsOf(product).find((u) => String(u._id) === String(id)) || null;
-  const lineUnitOf = (item) => (item && !item.ws && item.unitId ? unitByIdOf(item.product, item.unitId) : null);
-  const unitKeyOf = (product, variant, unitId) => (unitId ? `${variant ? variant._id : product._id}|u|${unitId}` : undefined);
-  const baseKeyOf = (product, variant) => (variant ? variant._id : product._id);
-  const baseUnitName = (product) => product.unit || 'piece';
-  const canBreakUnit = (u) => !!u && u.code !== 'DEAL' && Number(u.factor) > 1;
-  function unitPriceFor(product, variant, u) {
-    if (!u) return variant ? variant.sellingPrice : product.sellingPrice;
-    return u.retailPrice != null && u.retailPrice !== '' ? Number(u.retailPrice) : round2((variant ? variant.sellingPrice : product.sellingPrice) * u.factor);
-  }
-  const pktMoney = (n) => `KES ${Number(n).toLocaleString('en-KE', { maximumFractionDigits: 2 })}`;
-
-  /** Switch a cart line to another unit (piece / packet / deal). Merges into the line that already sells that unit. */
-  function changeLineUnit(line, unitId) {
-    const nk = unitId ? unitKeyOf(line.product, line.variant, unitId) : baseKeyOf(line.product, line.variant);
-    const other = state.cart.find((x) => x !== line && keyOf(x) === nk);
-    if (other) {
-      other.quantity += line.quantity;
-      syncAutoDiscount(other);
-      state.cart.splice(state.cart.indexOf(line), 1);
-      state.lastAdded = nk;
-      return;
-    }
-    line.unitId = unitId || undefined;
-    if (unitId) line.key = nk; else delete line.key;
-    line.overridePriceEnabled = false; line.overridePrice = null; // the old price was for another unit
-    if (line.autoDiscount) line.discount = autoDiscountFor(line);
-    syncAutoDiscount(line);
-    state.lastAdded = nk;
-  }
-
-  /** "Break packet": one packet leaves the cart and its pieces are sold instead (stock is already in pieces). */
-  function breakLine(idx) {
-    const line = state.cart[idx];
-    const u = lineUnitOf(line);
-    if (!line || !canBreakUnit(u)) return;
-    const product = line.product; const variant = line.variant;
-    line.quantity -= 1;
-    if (line.quantity <= 0) state.cart.splice(idx, 1); else syncAutoDiscount(line);
-    addToCart(product, variant, 1);
-    const pieces = state.cart.find((i) => keyOf(i) === baseKeyOf(product, variant));
-    if (pieces) { pieces.fromPacket = u.name; renderCart(keyOf(pieces)); }
-    window.UI.toast.success(`${u.name} broken: set how many ${baseUnitName(product)}s the customer wants on the line below`);
-  }
-
-  const pktAddMore = new Set(); // packet barcodes where the cashier chose "add another whole packet"
-  /** A packet / carton barcode was scanned. First scan = one whole packet; scanning the same packet again asks: break it, or add another. */
-  async function addUnitScan(product, unitId) {
-    const u = unitByIdOf(product, unitId);
-    if (!u) { addToCart(product, null); return; }
-    const key = unitKeyOf(product, null, unitId);
-    const line = state.cart.find((i) => keyOf(i) === key);
-    if (!line) pktAddMore.delete(key);
-    if (line && canBreakUnit(u) && !pktAddMore.has(key)) {
-      const brk = await window.UI.confirmDialog({
-        title: `${u.name} scanned again`,
-        message: `Break this ${u.name} (${u.factor} ${baseUnitName(product)}s) and sell single ${baseUnitName(product)}s? Choose "Add another" to sell one more whole ${u.name}.`,
-        confirmText: `Break ${u.name}`, cancelText: `Add another ${u.name}`,
-      });
-      if (brk) { breakLine(state.cart.indexOf(line)); return; }
-      pktAddMore.add(key);
-    }
-    addToCart(product, null, 1, unitId);
-  }
-
-  /** Unit picker + Break button shown under the product name when the product has packets / deals. */
-  function unitControlsHtml(item, i) {
-    const us = retailUnitsOf(item.product);
-    if (!us.length || item.ws) return '';
-    const cur = lineUnitOf(item);
-    const opt = (val, label, price) => `<option value="${esc(val)}" ${String(val) === String(item.unitId || '') ? 'selected' : ''}>${esc(label)} · ${esc(pktMoney(price))}</option>`;
-    return `<span class="pk-ctl" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px">
-      <select class="select" data-action="runit" data-idx="${i}" aria-label="Sell as" style="height:34px;min-height:34px;padding:0 8px;font-size:13px;max-width:100%;width:auto">
-        ${opt('', baseUnitName(item.product), unitPriceFor(item.product, item.variant, null))}
-        ${us.map((u) => opt(u._id, `${u.name} (${u.factor})`, unitPriceFor(item.product, item.variant, u))).join('')}
-      </select>
-      ${canBreakUnit(cur) ? `<button type="button" class="btn btn-secondary btn-sm" data-action="break" data-idx="${i}" style="height:34px;min-height:34px">Break ${esc(cur.name)}</button>` : ''}
-      ${item.fromPacket ? `<small class="text-muted">from broken ${esc(item.fromPacket)}</small>` : ''}
-    </span>`;
-  }
-
   /**
    * Wholesale businesses keep bulk stock in warehouses. A product that is still ONLY in a warehouse has no shop-floor
    * stock, so it cannot be sold at retail yet: say where it is and offer to move it (owner / managers), or ask the
@@ -2010,17 +1918,16 @@
     } catch { return true; } // never block a sale just because the hint could not be loaded
   }
 
-  function addToCart(product, variant, qty, unitId) {
+  function addToCart(product, variant, qty) {
     if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before starting the next sale'); return; }
     const add = Number(qty) > 0 ? Number(qty) : 1; // the pharmacy desk loads a whole prescription quantity at once
-    if (unitId && !unitByIdOf(product, unitId)) unitId = null;
-    const key = unitId ? unitKeyOf(product, variant, unitId) : (variant ? variant._id : product._id);
+    const key = variant ? variant._id : product._id;
     const existing = state.cart.find((i) => keyOf(i) === key);
     if (existing) {
       existing.quantity += add;
       syncAutoDiscount(existing); // preset discount grows with the quantity; a manual discount is left alone
     } else {
-      const item = { product, variant, quantity: add, discount: 0, autoDiscount: false, overridePriceEnabled: false, overridePrice: null, ...(unitId ? { unitId, key } : {}) };
+      const item = { product, variant, quantity: add, discount: 0, autoDiscount: false, overridePriceEnabled: false, overridePrice: null };
       const preset = autoDiscountFor(item);
       if (preset > 0) {
         item.discount = preset;
@@ -2120,7 +2027,6 @@
       } else {
         const info = priceInfoOf(item);
         if (window.PharmacyTill) nameExtra = window.PharmacyTill.tag(item.product._id, state.pharmacy);
-        nameExtra += unitControlsHtml(item, i);
         if (window.BatchTill) nameExtra += window.BatchTill.tag(item, i);
         const wholesaleHint = info.priceType === 'WHOLESALE'
           ? 'wholesale price'
@@ -2190,9 +2096,6 @@
         case 'discount':
           openLineDiscountModal(idx);
           break;
-        case 'break':
-          breakLine(idx);
-          break;
         default:
       }
     });
@@ -2202,12 +2105,6 @@
       if (bsel) {
         const line = state.cart[Number(bsel.dataset.idx)];
         if (line) { line.batchId = bsel.value || undefined; renderCart(); }
-        return;
-      }
-      const rsel = e.target.closest('select[data-action="runit"]');
-      if (rsel) {
-        const line = state.cart[Number(rsel.dataset.idx)];
-        if (line) { changeLineUnit(line, rsel.value || null); renderCart(state.lastAdded); }
         return;
       }
       const sel = e.target.closest('select[data-action="unit"]');
@@ -2440,7 +2337,16 @@
       offTill = (window.Offline.context.get() || {}).mpesaTill;
     }
     const { total } = computeTotals();
-    const resumeMpesa = !!state.pendingMpesa;
+    // A split sale whose M-PESA part was already received: reopen on the Split tab, not as a full M-PESA payment.
+    let resumeSplit = false;
+    if (state.pendingMpesa && state.splitDraft) {
+      const pm = state.pendingMpesa; const sd = state.splitDraft;
+      if ((sd.mpesa && sd.mpesa.reference === pm.reference) || sd.pendingRef === pm.reference) {
+        sd.mpesa = { reference: pm.reference, amount: pm.amount, mode: pm.mode };
+        resumeSplit = true;
+      }
+    }
+    const resumeMpesa = !!state.pendingMpesa && !resumeSplit;
     if (total <= 0 && !resumeMpesa) return window.UI.toast.error('Total must be greater than zero');
 
     let dueAmount = resumeMpesa ? state.pendingMpesa.amount : total;
@@ -2457,12 +2363,13 @@
         return true;
       }
       if (m.id === resumeId) return true; // always show the tab that holds already-received money
+      if (m.id === 'SPLIT') return !wholesale || resumeSplit; // split: retail tills (wholesale has its own part-payment + credit)
       if (m.id === 'MPESA') return state.flags.mpesaEnabled;
       if (m.id === 'MPESA_TILL') return state.flags.mpesaManualEnabled;
       // MOBILE_MONEY (any network, typed code) is on for every business type, online and offline
       return true;
     });
-    let method = resumeId || (initialMethod && methods.some((m) => m.id === initialMethod) ? initialMethod : 'CASH');
+    let method = resumeSplit ? 'SPLIT' : resumeId || (initialMethod && methods.some((m) => m.id === initialMethod) ? initialMethod : 'CASH');
 
     const modal = window.UI.openModal({
       title: wholesale ? 'Wholesale payment' : 'Payment',
@@ -2506,8 +2413,10 @@
     }
 
     function selectMethod(next) {
-      const lockedTo = state.pendingMpesa ? mpesaMethodIdFor(state.pendingMpesa) : null;
+      const splitOwns = !!(state.pendingMpesa && state.splitDraft && state.splitDraft.mpesa && state.splitDraft.mpesa.reference === state.pendingMpesa.reference);
+      const lockedTo = state.pendingMpesa ? (splitOwns ? 'SPLIT' : mpesaMethodIdFor(state.pendingMpesa)) : null;
       if (lockedTo && next !== lockedTo) return window.UI.toast.error('M-PESA payment already received - complete the sale first');
+      if (method === 'SPLIT' && next !== 'SPLIT' && state.splitDraft && state.splitDraft.lines.some((l) => l.locked && !l.confirmed)) return window.UI.toast.error('An M-PESA request for the split is in progress. Wait for it or let it fail first.');
       if (next === 'MPESA_TILL' && method === 'MPESA_TILL' && modal._manualRef) return; // already waiting on this tab
 
       clearMpesaPolling(modal);
@@ -2520,7 +2429,7 @@
 
       method = next;
       modal.querySelectorAll('.pz-method').forEach((b) => b.classList.toggle('active', b.dataset.method === method));
-      const renderers = { CASH: renderCash, MPESA: renderMpesa, MPESA_TILL: renderMpesaTill, MPESA_OFFLINE: renderMpesaOffline, MOBILE_MONEY: renderMobileMoney, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
+      const renderers = { SPLIT: renderSplit, CASH: renderCash, MPESA: renderMpesa, MPESA_TILL: renderMpesaTill, MPESA_OFFLINE: renderMpesaOffline, MOBILE_MONEY: renderMobileMoney, BANK: renderRef, CARD: renderRef, CREDIT: renderCredit };
       renderers[method]();
       syncWs();
     }
@@ -2842,6 +2751,341 @@
       startManualAttempt();
     }
 
+    /* ---- SPLIT PAYMENT (several methods for one sale) ----
+       Cash + M-PESA, M-PESA + Credit, Cash + Card ... Each line has its own method and amount. The last unpaid
+       part can go on Credit (needs a customer). M-PESA is confirmed for real (STK prompt or Till code) before the
+       sale can be completed, so the cashier cannot "pretend" an M-PESA part. Draft survives closing the window. */
+    function renderSplit() {
+      const mpesaAuto = !!(state.flags.mpesaEnabled || state.flags.mpesaManualEnabled);
+      const MP = mpesaAuto ? 'MPESA' : 'MOBILE_MONEY';
+      const LM = {
+        CASH: 'Cash', MPESA: 'M-PESA', MOBILE_MONEY: mpesaAuto ? 'Mobile money' : 'M-PESA / Mobile money',
+        CARD: 'Card', BANK: 'Bank', CREDIT: 'Credit',
+      };
+      const ICO = { CASH: 'fa-money-bill-wave', MPESA: 'fa-mobile-screen-button', MOBILE_MONEY: 'fa-mobile-retro', CARD: 'fa-credit-card', BANK: 'fa-building-columns', CREDIT: 'fa-file-invoice-dollar' };
+      const PRESETS = [
+        { id: 'cash_mpesa', label: 'Cash + M-PESA', m: ['CASH', MP] },
+        { id: 'mpesa_credit', label: 'M-PESA + Credit', m: [MP, 'CREDIT'] },
+        { id: 'cash_credit', label: 'Cash + Credit', m: ['CASH', 'CREDIT'] },
+        { id: 'cash_card', label: 'Cash + Card', m: ['CASH', 'CARD'] },
+        { id: 'mpesa_card', label: 'M-PESA + Card', m: [MP, 'CARD'] },
+        { id: 'cash_bank', label: 'Cash + Bank', m: ['CASH', 'BANK'] },
+        { id: 'mpesa_bank', label: 'M-PESA + Bank', m: [MP, 'BANK'] },
+        { id: 'cash_mpesa_credit', label: 'Cash + M-PESA + Credit', m: ['CASH', MP, 'CREDIT'] },
+        { id: 'custom', label: 'Custom mix…', m: null },
+      ];
+      const isMp = (l) => l.method === 'MPESA';
+      const PAYABLE = ['CASH', ...(mpesaAuto ? ['MPESA'] : []), 'MOBILE_MONEY', 'CARD', 'BANK', 'CREDIT'];
+      let uid = 0;
+      const mkLine = (method) => ({ id: ++uid, method, amount: '', tendered: '', ref: '', phone: state.customer?.phone || '', net: 'M-PESA', mode: state.flags.mpesaEnabled ? 'STK' : 'TILL', locked: false, confirmed: null });
+
+      // The draft lives in state so closing / reopening the window (e.g. to pick a customer) keeps everything.
+      let D = state.splitDraft;
+      if (!D || D.total !== total) {
+        const p = PRESETS[0];
+        D = state.splitDraft = { total, preset: p.id, lines: p.m.map(mkLine), mpesa: null, pendingRef: null };
+      }
+      uid = Math.max(uid, ...D.lines.map((l) => l.id));
+      D.lines.forEach((l) => { if (l.locked && !l.confirmed) l.locked = false; }); // the window was closed mid-request: nothing is being polled any more
+      // Money confirmed earlier (window was closed after the customer paid): put it back on its line.
+      if (D.mpesa) {
+        let ml = D.lines.find(isMp);
+        if (!ml) { ml = mkLine('MPESA'); D.lines.unshift(ml); }
+        ml.method = 'MPESA'; ml.amount = String(D.mpesa.amount); ml.locked = true; ml.confirmed = D.mpesa;
+      }
+
+      const num = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? round2(n) : 0; };
+      const credit = () => D.lines.find((l) => l.method === 'CREDIT');
+      const paidNow = () => round2(D.lines.filter((l) => l.method !== 'CREDIT').reduce((s, l) => s + num(l.amount), 0));
+      const remaining = () => round2(total - paidNow());
+      const anyLocked = () => D.lines.some((l) => l.locked);
+
+      /** With two lines, typing one amount fills the other with the rest - the fastest way to split. */
+      function autoFill(editedId) {
+        const open = D.lines.filter((l) => l.method !== 'CREDIT');
+        if (open.length !== 2) return;
+        const other = open.find((l) => l.id !== editedId);
+        if (!other || other.locked) return;
+        const edited = open.find((l) => l.id === editedId);
+        const rest = round2(total - num(edited.amount));
+        other.amount = rest > 0 ? String(rest) : '';
+        const inp = panel.querySelector(`[data-sp-amt="${other.id}"]`);
+        if (inp) inp.value = other.amount;
+      }
+
+      function validity() {
+        const issues = [];
+        const mp = D.lines.find(isMp);
+        const cr = credit();
+        const rem = remaining();
+        D.lines.forEach((l) => {
+          if (l.method === 'CREDIT') return;
+          if (!num(l.amount)) issues.push(`Enter the ${LM[l.method]} amount`);
+          if (l.method === 'MOBILE_MONEY' && l.ref.length < 6) issues.push('Enter the mobile money code');
+        });
+        if (mp && !mp.confirmed) issues.push('Confirm the M-PESA payment');
+        if (cr) {
+          if (rem <= 0.009) issues.push('Nothing left for credit - lower another amount or remove Credit');
+          else if (!state.customer) issues.push('Choose a customer for the credit part');
+        } else if (Math.abs(rem) > 0.009) issues.push(rem > 0 ? `${fm(rem)} still unallocated` : `Over by ${fm(-rem)}`);
+        if (D.lines.length < 2) issues.push('Add a second payment method');
+        return issues;
+      }
+
+      /** Updates the totals strip + Complete button without redrawing the lines (so typing never loses focus). */
+      function paint() {
+        const rem = remaining(); const paid = paidNow(); const cr = credit();
+        const pct = Math.max(0, Math.min(100, (paid / total) * 100));
+        const bar = panel.querySelector('#sp-bar'); if (bar) bar.style.width = `${pct}%`;
+        const set = (id, html) => { const e = panel.querySelector(id); if (e) e.innerHTML = html; };
+        set('#sp-paid', fm(paid));
+        const left = panel.querySelector('#sp-left');
+        if (left) {
+          left.className = `sp-left ${cr && rem > 0.009 ? 'credit' : Math.abs(rem) <= 0.009 ? 'ok' : rem < 0 ? 'over' : ''}`;
+          left.innerHTML = cr ? `<span>On credit</span><strong>${fm(Math.max(0, rem))}</strong>` : (rem < -0.009 ? `<span>Over by</span><strong>${fm(-rem)}</strong>` : Math.abs(rem) <= 0.009 ? `<span>Balanced</span><strong><i class="fa-solid fa-circle-check"></i></strong>` : `<span>Left to allocate</span><strong>${fm(rem)}</strong>`);
+        }
+        const cl = D.lines.find((l) => l.method === 'CREDIT');
+        if (cl) { const e = panel.querySelector(`[data-sp-credit-amt]`); if (e) e.textContent = fm(Math.max(0, rem)); }
+        D.lines.filter((l) => l.method === 'CASH').forEach((l) => {
+          const e = panel.querySelector(`[data-sp-change="${l.id}"]`); if (!e) return;
+          const amt = num(l.amount); const t = num(l.tendered);
+          e.textContent = t > amt && amt ? `Change to give: ${fm(round2(t - amt))}` : '';
+          e.style.display = t > amt && amt ? '' : 'none';
+        });
+        const issues = validity();
+        const hint = panel.querySelector('#sp-hint');
+        if (hint) { hint.textContent = issues[0] || 'All set - complete the sale'; hint.className = `sp-hint ${issues.length ? '' : 'ok'}`; }
+        const hasMpPending = D.lines.some((l) => isMp(l) && !l.confirmed);
+        setComplete({ enabled: !issues.length, label: cr ? 'Complete sale (rest on credit)' : 'Complete split sale & print receipt' });
+        completeBtn.dataset.mp = hasMpPending ? '1' : '';
+      }
+
+      function lineHtml(l, idx) {
+        const locked = l.locked; const credit = l.method === 'CREDIT';
+        const opts = PAYABLE.filter((m) => m === l.method || !(m === 'CREDIT' && D.lines.some((x) => x.method === 'CREDIT')) && !(m === 'MPESA' && D.lines.some((x) => x.method === 'MPESA')));
+        const sel = `<select class="select sp-method" data-sp-method="${l.id}" ${locked ? 'disabled' : ''} aria-label="Payment method">${opts.map((m) => `<option value="${m}" ${m === l.method ? 'selected' : ''}>${LM[m]}</option>`).join('')}</select>`;
+        let body = '';
+        if (credit) {
+          body = `<div class="sp-credit-amt"><span>Amount on credit</span><strong data-sp-credit-amt>${fm(Math.max(0, remaining()))}</strong></div>
+            <div class="sp-cust">${state.customer ? `<div><b>${esc(state.customer.name)}</b><small>${esc(state.customer.phone || '')}${state.customer.outstandingBalance > 0 ? ` · owes ${fm(state.customer.outstandingBalance)}` : ''}</small></div>` : '<div><b>No customer yet</b><small>Credit needs a customer</small></div>'}
+              <button type="button" class="btn btn-secondary btn-sm" data-sp-cust>${state.customer ? 'Change' : 'Choose customer'}</button></div>`;
+        } else {
+          body = `<div class="sp-amt-row"><div class="sp-amt-wrap"><span>KES</span><input class="input sp-amt" data-sp-amt="${l.id}" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00" value="${esc(l.amount)}" ${locked ? 'disabled' : ''} /></div>
+            <button type="button" class="sp-rest" data-sp-rest="${l.id}" ${locked ? 'disabled' : ''} title="Put everything that is left on this line">Rest</button></div>`;
+          if (l.method === 'CASH') body += `<div class="sp-sub"><label>Customer gave <em>(optional, for change)</em></label><input class="input" data-sp-tend="${l.id}" type="number" inputmode="decimal" step="0.01" min="0" placeholder="e.g. 1000" value="${esc(l.tendered)}" /><div class="sp-change" data-sp-change="${l.id}" style="display:none"></div></div>`;
+          if (l.method === 'CARD' || l.method === 'BANK') body += `<div class="sp-sub"><label>Reference / slip no. <em>(optional)</em></label><input class="input" data-sp-ref="${l.id}" placeholder="Transaction code, slip number…" value="${esc(l.ref)}" /></div>`;
+          if (l.method === 'MOBILE_MONEY') body += `<div class="sp-sub sp-two"><div><label>Network</label><select class="select" data-sp-net="${l.id}">${['M-PESA', 'Airtel Money', 'T-Kash', 'Equitel', 'Other'].map((n) => `<option ${n === l.net ? 'selected' : ''}>${n}</option>`).join('')}</select></div><div><label>Transaction code</label><input class="input pz-code-input" data-sp-ref="${l.id}" maxlength="30" autocapitalize="characters" autocomplete="off" placeholder="e.g. UJK1A2B3C4" value="${esc(l.ref)}" /></div></div>`;
+          if (l.method === 'MPESA') {
+            const both = state.flags.mpesaEnabled && state.flags.mpesaManualEnabled;
+            body += `<div class="sp-sub sp-mp">
+              ${l.confirmed ? '' : `${both ? `<div class="sp-seg" role="tablist"><button type="button" class="${l.mode === 'STK' ? 'on' : ''}" data-sp-mode="STK" ${locked ? 'disabled' : ''}>STK prompt</button><button type="button" class="${l.mode === 'TILL' ? 'on' : ''}" data-sp-mode="TILL" ${locked ? 'disabled' : ''}>Till (customer pays)</button></div>` : ''}
+              ${l.mode === 'STK' ? `<label for="pz-mpesa-phone">Customer M-PESA number</label><div class="input-button-row"><input class="input" id="pz-mpesa-phone" inputmode="tel" placeholder="07XXXXXXXX" value="${esc(l.phone)}" ${locked ? 'disabled' : ''} /><button type="button" class="btn btn-primary" id="mpesa-send-btn" ${locked ? 'disabled' : ''}>Send prompt</button></div>`
+                : `<div class="pz-till-grid"><div><span>Till number</span><strong id="pz-till-no">${esc(state.flags.tillNumber || '-')}</strong></div><div><span>Amount</span><strong data-sp-mp-amt>${fm(num(l.amount))}</strong></div></div>
+                   <div class="pz-code-box" id="pz-code-box"><button type="button" class="pz-linkbtn" id="pz-code-toggle">Customer paid but nothing appears? Enter the M-PESA code</button><div class="pz-code-row" id="pz-code-row"><input class="input pz-code-input" id="pz-code" maxlength="10" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. UJK1A2B3C4" /><button type="button" class="btn btn-primary" id="pz-code-btn">Confirm</button></div></div>
+                   <button type="button" class="btn btn-primary btn-block" id="sp-till-start" ${locked ? 'disabled' : ''}>Start till payment</button>`}`}
+              <div id="mpesa-stk-status"></div></div>`;
+          }
+        }
+        const rm = !locked && D.lines.length > 2 ? `<button type="button" class="sp-x" data-sp-del="${l.id}" aria-label="Remove this method"><i class="fa-solid fa-xmark"></i></button>` : '';
+        return `<div class="sp-line ${credit ? 'is-credit' : ''} ${l.confirmed ? 'is-done' : ''}" data-line="${l.id}">
+          <div class="sp-line-head"><span class="sp-ico"><i class="fa-solid ${ICO[l.method]}"></i></span><span class="sp-n">${idx + 1}</span>${sel}${l.confirmed ? '<span class="sp-done"><i class="fa-solid fa-circle-check"></i> Received</span>' : ''}${rm}</div>${body}</div>`;
+      }
+
+      function draw() {
+        const canAdd = D.lines.length < 4 && !anyLocked();
+        panel.innerHTML = `
+          <div class="sp">
+            <div class="sp-top">
+              <label for="sp-preset">Combination</label>
+              <select class="select" id="sp-preset" ${anyLocked() ? 'disabled' : ''}>${PRESETS.map((p) => `<option value="${p.id}" ${p.id === D.preset ? 'selected' : ''}>${p.label}</option>`).join('')}</select>
+            </div>
+            <div class="sp-sum">
+              <div><span>Sale total</span><strong>${fm(total)}</strong></div>
+              <div><span>Allocated</span><strong id="sp-paid">${fm(paidNow())}</strong></div>
+              <div id="sp-left" class="sp-left"></div>
+              <div class="sp-barwrap"><i id="sp-bar"></i></div>
+            </div>
+            <div class="sp-lines" id="sp-lines">${D.lines.map(lineHtml).join('')}</div>
+            ${canAdd ? '<button type="button" class="sp-add" id="sp-add"><i class="fa-solid fa-plus"></i> Add another method</button>' : ''}
+            <div class="sp-hint" id="sp-hint"></div>
+            ${!state.currentShift && D.lines.some((l) => l.method === 'CASH') ? '<div class="pz-note warn">No open shift. Open a shift before taking cash so the drawer balances.</div>' : ''}
+          </div>`;
+        bind();
+        const ml = D.lines.find(isMp);
+        if (ml && ml.confirmed) renderMpesaStatus(modal, { tone: 'success', label: 'Confirmed', message: `M-PESA ${fm(ml.confirmed.amount)} received.` });
+        paint();
+      }
+
+      function stopMpesaIfAny() { clearMpesaPolling(modal); if (modal._manualRef) cancelManualAttempt(modal); }
+
+      function setPreset(id) {
+        const p = PRESETS.find((x) => x.id === id) || PRESETS[0];
+        stopMpesaIfAny();
+        D.preset = p.id;
+        if (p.m) D.lines = p.m.map(mkLine); else if (D.lines.length < 2) D.lines = [mkLine('CASH'), mkLine(MP)];
+        draw();
+        setTimeout(() => panel.querySelector('.sp-amt')?.focus(), 40);
+      }
+
+      function mpesaDone(line, reference) {
+        const amt = num(line.amount);
+        line.confirmed = { reference, amount: amt, mode: line.mode === 'TILL' ? 'MANUAL' : 'STK' };
+        line.locked = true;
+        D.mpesa = line.confirmed;
+        // Remember it as pending too, so a new sale / cart edit is blocked until this one is saved.
+        state.pendingMpesa = { reference, amount: amt, mode: line.confirmed.mode };
+        draw();
+      }
+
+      function bind() {
+        panel.querySelector('#sp-preset').addEventListener('change', (e) => setPreset(e.target.value));
+        panel.querySelector('#sp-add')?.addEventListener('click', () => {
+          const have = new Set(D.lines.map((l) => l.method));
+          const next = ['CASH', MP, 'CARD', 'BANK', 'MOBILE_MONEY', 'CREDIT'].find((m) => !have.has(m) && (m !== 'MOBILE_MONEY' || true)) || 'CARD';
+          D.lines.push(mkLine(next)); D.preset = 'custom'; draw();
+        });
+        panel.querySelectorAll('[data-sp-del]').forEach((b) => b.addEventListener('click', () => {
+          D.lines = D.lines.filter((l) => l.id !== Number(b.dataset.spDel)); D.preset = 'custom'; draw();
+        }));
+        panel.querySelectorAll('[data-sp-method]').forEach((s) => s.addEventListener('change', () => {
+          const l = D.lines.find((x) => x.id === Number(s.dataset.spMethod)); if (!l || l.locked) return;
+          l.method = s.value; l.ref = ''; l.confirmed = null; D.preset = 'custom'; draw();
+        }));
+        panel.querySelectorAll('[data-sp-amt]').forEach((i) => {
+          i.addEventListener('input', () => {
+            const l = D.lines.find((x) => x.id === Number(i.dataset.spAmt)); if (!l) return;
+            l.amount = i.value; autoFill(l.id);
+            const mpAmt = panel.querySelector('[data-sp-mp-amt]'); const m = D.lines.find(isMp); if (mpAmt && m) mpAmt.textContent = fm(num(m.amount));
+            paint();
+          });
+          i.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !completeBtn.disabled) completeBtn.click(); });
+        });
+        panel.querySelectorAll('[data-sp-rest]').forEach((b) => b.addEventListener('click', () => {
+          const l = D.lines.find((x) => x.id === Number(b.dataset.spRest)); if (!l) return;
+          const others = round2(D.lines.filter((x) => x.id !== l.id && x.method !== 'CREDIT').reduce((s, x) => s + num(x.amount), 0));
+          const rest = round2(total - others);
+          l.amount = rest > 0 ? String(rest) : '';
+          const inp = panel.querySelector(`[data-sp-amt="${l.id}"]`); if (inp) inp.value = l.amount;
+          const mpAmt = panel.querySelector('[data-sp-mp-amt]'); const m = D.lines.find(isMp); if (mpAmt && m) mpAmt.textContent = fm(num(m.amount));
+          paint();
+        }));
+        panel.querySelectorAll('[data-sp-tend]').forEach((i) => i.addEventListener('input', () => { const l = D.lines.find((x) => x.id === Number(i.dataset.spTend)); if (l) { l.tendered = i.value; paint(); } }));
+        panel.querySelectorAll('[data-sp-ref]').forEach((i) => i.addEventListener('input', () => {
+          const l = D.lines.find((x) => x.id === Number(i.dataset.spRef)); if (!l) return;
+          if (l.method === 'MOBILE_MONEY') i.value = i.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          l.ref = i.value.trim(); paint();
+        }));
+        panel.querySelectorAll('[data-sp-net]').forEach((s) => s.addEventListener('change', () => { const l = D.lines.find((x) => x.id === Number(s.dataset.spNet)); if (l) l.net = s.value; }));
+        panel.querySelector('[data-sp-cust]')?.addEventListener('click', () => {
+          if (anyLocked()) return window.UI.toast.error('A payment is in progress. Finish or cancel it first.');
+          window.UI.closeModal();
+          window.CustomerPicker.open({ onSelect: (c) => { state.customer = c; renderCustomerButton(); openPaymentModal('SPLIT'); } });
+        });
+
+        // ---- M-PESA line ----
+        const ml = D.lines.find(isMp);
+        if (!ml || ml.confirmed) return;
+        panel.querySelectorAll('[data-sp-mode]').forEach((b) => b.addEventListener('click', () => { if (ml.locked) return; ml.mode = b.dataset.spMode; draw(); }));
+        const unlock = (view) => { ml.locked = false; D.mpesa = null; D.pendingRef = null; draw(); if (view) renderMpesaStatus(modal, { ...view, retry: false }); };
+        const needAmt = () => { if (!num(ml.amount)) { window.UI.toast.error('Enter the M-PESA amount first'); panel.querySelector(`[data-sp-amt="${ml.id}"]`)?.focus(); return false; } return true; };
+        const onPaid = (reference) => mpesaDone(ml, reference);
+
+        if (ml.mode === 'STK') {
+          const ph = panel.querySelector('#pz-mpesa-phone');
+          ph?.addEventListener('input', () => { ml.phone = ph.value; });
+          bindMpesaSendSplit();
+        } else {
+          bindTill();
+        }
+
+        function bindMpesaSendSplit() {
+          const send = panel.querySelector('#mpesa-send-btn'); if (!send) return;
+          const fresh = send.cloneNode(true); send.replaceWith(fresh); // drop the guard above, bind one clean handler
+          fresh.addEventListener('click', async () => {
+            if (!needAmt()) return;
+            const phone = panel.querySelector('#pz-mpesa-phone').value.trim();
+            if (!phone) return window.UI.toast.error('Enter the customer phone number first');
+            const amount = num(ml.amount);
+            clearMpesaPolling(modal);
+            ml.locked = true;
+            panel.querySelectorAll('[data-sp-amt],[data-sp-method],[data-sp-rest],#sp-preset,#sp-add,[data-sp-mode]').forEach((e) => { e.disabled = true; });
+            window.UI.setButtonLoading(fresh, true, 'Sending…');
+            renderMpesaStatus(modal, { tone: 'pending', label: 'Sending', message: 'Sending prompt to customer\u2019s phone…' });
+            try {
+              const { data } = await window.Api.post('/payments/mpesa/stk', { branchId: window.AppShell.getActiveBranchId(), phone, amountCents: Math.round(amount * 100) });
+              renderMpesaStatus(modal, { tone: 'pending', label: 'Waiting', message: 'Ask the customer to enter their M-PESA PIN on their phone.' });
+              watchMpesa(modal, data.reference, { amount, mode: 'STK', onPaid, onFail: unlock });
+            } catch (err) {
+              renderMpesaStatus(modal, { tone: 'error', label: MPESA_FAILURE_LABELS[err.data?.failureType] || 'Could not send prompt', message: err.message, retry: false });
+              window.UI.toast.error(err.message);
+              unlock({ tone: 'error', label: MPESA_FAILURE_LABELS[err.data?.failureType] || 'Could not send prompt', message: err.message });
+            } finally { if (document.body.contains(fresh)) window.UI.setButtonLoading(fresh, false); }
+          });
+        }
+
+        function bindTill() {
+          const codeRow = panel.querySelector('#pz-code-row'); const codeInput = panel.querySelector('#pz-code');
+          panel.querySelector('#pz-code-toggle')?.addEventListener('click', () => { codeRow.classList.toggle('open'); if (codeRow.classList.contains('open')) codeInput.focus(); });
+          codeInput?.addEventListener('input', () => { codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
+          codeInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') panel.querySelector('#pz-code-btn').click(); });
+          panel.querySelector('#pz-code-btn')?.addEventListener('click', async () => {
+            const code = codeInput.value.trim().toUpperCase();
+            if (!/^[A-Z][A-Z0-9]{9}$/.test(code)) return window.UI.toast.error('An M-PESA code is 10 characters, e.g. UJK1A2B3C4');
+            if (!modal._manualRef) return window.UI.toast.error('Tap "Start till payment" first.');
+            const btn = panel.querySelector('#pz-code-btn'); window.UI.setButtonLoading(btn, true, 'Checking…');
+            try { const { data } = await window.Api.post(`/payments/mpesa/${modal._manualRef}/claim`, { receiptCode: code }); modal._handleStatus?.(data, true); }
+            catch (err) { window.UI.toast.error(err.message); }
+            finally { if (document.body.contains(btn)) window.UI.setButtonLoading(btn, false); }
+          });
+          const start = panel.querySelector('#sp-till-start');
+          async function begin() {
+            if (!needAmt()) return;
+            const amount = num(ml.amount);
+            ml.locked = true;
+            panel.querySelectorAll('[data-sp-amt],[data-sp-method],[data-sp-rest],#sp-preset,#sp-add,[data-sp-mode]').forEach((e) => { e.disabled = true; });
+            if (start) { start.disabled = true; start.textContent = 'Waiting for payment…'; }
+            modal._manualView = null;
+            renderMpesaStatus(modal, { tone: 'pending', label: 'Starting', message: 'Preparing the payment request…' });
+            try {
+              const { data } = await window.Api.post('/payments/mpesa/manual', { branchId: window.AppShell.getActiveBranchId(), amountCents: Math.round(amount * 100) });
+              if (!document.body.contains(modal)) { window.Api.post(`/payments/mpesa/${data.reference}/cancel`, {}).catch(() => {}); return; }
+              modal._manualRef = data.reference; D.pendingRef = data.reference;
+              const t = panel.querySelector('#pz-till-no'); if (t && data.tillNumber) t.textContent = data.tillNumber;
+              renderMpesaStatus(modal, { tone: 'pending', label: 'Waiting', message: 'Waiting for the customer to pay to the Till number…' });
+              watchMpesa(modal, data.reference, { amount, mode: 'MANUAL', onPaid, onFail: (v) => { modal._manualRef = null; unlock(v); } });
+            } catch (err) {
+              renderMpesaStatus(modal, { tone: 'error', label: 'Could not start', message: err.message });
+              window.UI.toast.error(err.message); unlock({ tone: 'error', label: 'Could not start', message: err.message });
+            }
+          }
+          start?.addEventListener('click', begin);
+          modal._onRetry = () => begin();
+        }
+      }
+
+      onComplete = async () => {
+        const issues = validity();
+        if (issues.length) return window.UI.toast.error(issues[0]);
+        const cash = D.lines.find((l) => l.method === 'CASH');
+        if (cash && await drawerIsOpen()) return window.UI.toast.error('The cash drawer is open. Close it before taking cash.');
+        const pays = [];
+        D.lines.forEach((l) => {
+          if (l.method === 'CREDIT') return; // the unpaid remainder becomes credit on the server
+          const amount = num(l.amount);
+          if (l.method === 'CASH') pays.push({ method: 'CASH', amount, amountTendered: Math.max(amount, num(l.tendered) || amount) });
+          else if (l.method === 'MPESA') pays.push({ method: 'MPESA', amount, reference: l.confirmed.reference });
+          else if (l.method === 'MOBILE_MONEY') pays.push({ method: 'MOBILE_MONEY', amount, reference: l.ref, provider: l.net, network: l.net });
+          else pays.push({ method: l.method, amount, reference: l.ref || undefined });
+        });
+        state.payments = pays;
+        const changeV = cash ? round2(Math.max(0, (num(cash.tendered) || num(cash.amount)) - num(cash.amount))) : 0;
+        const ok = await checkout({ btn: completeBtn, change: changeV, tendered: cash ? (num(cash.tendered) || num(cash.amount)) : 0, due: cash ? num(cash.amount) : 0 });
+        if (ok !== false) state.splitDraft = null;
+      };
+      draw();
+      setTimeout(() => panel.querySelector('.sp-amt')?.focus(), 60);
+    }
+
     modal.querySelector('#pz-methods').addEventListener('click', (e) => {
       const b = e.target.closest('.pz-method');
       if (b) selectMethod(b.dataset.method);
@@ -2947,7 +3191,7 @@
   }
 
   /** Polls a confirmed-by-backend M-PESA request (STK or TILL) until it succeeds or fails. */
-  function watchMpesa(modal, reference, { amount, mode, onPaid }) {
+  function watchMpesa(modal, reference, { amount, mode, onPaid, onFail }) {
     clearMpesaPolling(modal);
     let handled = false;
 
@@ -2970,8 +3214,9 @@
         const label = mode === 'MANUAL'
           ? (s.failureType === 'timeout' ? 'No payment received' : 'Not completed')
           : (MPESA_FAILURE_LABELS[s.failureType] || 'Payment failed');
-        renderMpesaStatus(modal, { tone: s.failureType === 'timeout' ? 'warning' : 'error', label, message: s.message, retry: true });
+        renderMpesaStatus(modal, { tone: s.failureType === 'timeout' ? 'warning' : 'error', label, message: s.message, retry: !onFail });
         window.UI.toast.error(label);
+        if (onFail) onFail({ tone: s.failureType === 'timeout' ? 'warning' : 'error', label, message: s.message });
       } else if (mode === 'MANUAL') {
         showManualPending(modal, s);
       } else if (manual) {
@@ -3058,7 +3303,7 @@
   const isNetErr = (e) => !e || e.status == null || e.status === 0 || /network|failed to fetch|offline|timeout/i.test(String((e && e.message) || ''));
 
   function snapshotCart() {
-    return state.cart.map((i) => ({ product: i.product, variant: i.variant || null, quantity: i.quantity, discount: i.discount || 0, autoDiscount: !!i.autoDiscount, promoApplied: !!i.promoApplied, overridePriceEnabled: !!i.overridePriceEnabled, overridePrice: i.overridePrice == null ? null : i.overridePrice, ...(i.unitId ? { unitId: i.unitId, key: i.key } : {}), ...(i.fromPacket ? { fromPacket: i.fromPacket } : {}) }));
+    return state.cart.map((i) => ({ product: i.product, variant: i.variant || null, quantity: i.quantity, discount: i.discount || 0, autoDiscount: !!i.autoDiscount, promoApplied: !!i.promoApplied, overridePriceEnabled: !!i.overridePriceEnabled, overridePrice: i.overridePrice == null ? null : i.overridePrice }));
   }
   function parkLocal(label) {
     const list = localHeld();
@@ -3079,7 +3324,7 @@
       try {
         await window.Api.post('/shop/held', {
           branchId: window.AppShell.getActiveBranchId(), label: label || undefined, customerId: state.customer?._id || undefined, cartDiscount: state.cartDiscount || 0,
-          items: state.cart.map((i) => ({ productId: i.product._id, variantId: i.variantId || i.variant?._id || undefined, ...(i.unitId ? { unitId: i.unitId } : {}), quantity: i.quantity, discount: i.discount || 0 })),
+          items: state.cart.map((i) => ({ productId: i.product._id, variantId: i.variantId || i.variant?._id || undefined, quantity: i.quantity, discount: i.discount || 0 })),
         });
         saved = true; onServer = true;
       } catch (e) {
@@ -3116,10 +3361,6 @@
     got.forEach((g) => {
       if (g.skip) { notes.push(`${g.l.name}: ${g.skip}`); return; }
       const item = { product: g.product, variant: g.variant, quantity: g.l.quantity, discount: Number(g.l.discount) || 0, autoDiscount: false, promoApplied: false, overridePriceEnabled: false, overridePrice: null };
-      if (g.l.unitId) {
-        if (!unitByIdOf(g.product, g.l.unitId)) { notes.push(`${g.l.name}: packet / deal no longer available`); return; }
-        item.unitId = String(g.l.unitId); item.key = unitKeyOf(g.product, g.variant, item.unitId);
-      }
       if (item.discount > round2(unitPriceOf(item) * item.quantity)) item.discount = round2(unitPriceOf(item) * item.quantity);
       const same = merge ? state.cart.find((x) => keyOf(x) === keyOf(item)) : null;
       if (same) { same.quantity += item.quantity; same.discount = round2((same.discount || 0) + item.discount); same.autoDiscount = false; } else state.cart.push(item);
@@ -3159,7 +3400,7 @@
       ...localHeld().map((h) => ({
         kind: 'L', id: h.id, label: h.label || 'Held sale', at: h.at, customer: h.customer && h.customer.name ? h.customer.name : '',
         cartDiscount: Number(h.cartDiscount) || 0, expires: 0,
-        lines: h.cart.map((i) => ({ name: nameOf(i.product, i.variant), quantity: i.quantity, discount: Number(i.discount) || 0, price: i.overridePriceEnabled && i.overridePrice != null ? i.overridePrice : unitPriceFor(i.product, i.variant, i.unitId ? unitByIdOf(i.product, i.unitId) : null) })),
+        lines: h.cart.map((i) => ({ name: nameOf(i.product, i.variant), quantity: i.quantity, discount: Number(i.discount) || 0, price: i.overridePriceEnabled && i.overridePrice != null ? i.overridePrice : (i.variant ? i.variant.sellingPrice : i.product.sellingPrice) })),
       })),
     ].sort((a, b) => b.at - a.at);
   }
@@ -3397,7 +3638,7 @@
     window.UI.setButtonLoading(btn, true);
     const list = localHeld();
     const res = await Promise.allSettled(list.map(async (h) => {
-      const items = h.cart.filter((i) => i.product && !String(i.product._id).startsWith('tmp_')).map((i) => ({ productId: i.product._id, variantId: (i.variant && i.variant._id) || undefined, ...(i.unitId ? { unitId: i.unitId } : {}), quantity: i.quantity, discount: i.discount || 0 }));
+      const items = h.cart.filter((i) => i.product && !String(i.product._id).startsWith('tmp_')).map((i) => ({ productId: i.product._id, variantId: (i.variant && i.variant._id) || undefined, quantity: i.quantity, discount: i.discount || 0 }));
       if (!items.length) throw new Error('empty');
       await window.Api.post('/shop/held', { branchId: window.AppShell.getActiveBranchId(), label: h.label || undefined, customerId: (h.customer && h.customer._id) || undefined, cartDiscount: h.cartDiscount || 0, items });
       return h.id;
@@ -3420,7 +3661,7 @@
         const h = localHeld().find((x) => x.id === r.id); if (!h) throw new Error('Not found');
         if (merge) {
           h.cart.forEach((i) => {
-            const same = state.cart.find((x) => keyOf(x) === (i.key || (i.variant ? i.variant._id : i.product._id)));
+            const same = state.cart.find((x) => keyOf(x) === (i.variant ? i.variant._id : i.product._id));
             if (same) { same.quantity += i.quantity; syncAutoDiscount(same); } else state.cart.push({ ...i });
           });
           if (!state.customer && h.customer) state.customer = h.customer;
@@ -3444,7 +3685,7 @@
 
   /* ---- Promotions: ask the server which offer each line earns, apply it as the line discount ---- */
   let promoAnnounce = false; let promoSig = ''; let promoTimer = null; let promoSeq = 0;
-  const promoEligible = (i) => !i.ws && !i.unitId && !(i.discount > 0 && !i.autoDiscount && !i.promoApplied); // a hand-typed discount is never overwritten
+  const promoEligible = (i) => !i.ws && !(i.discount > 0 && !i.autoDiscount && !i.promoApplied); // a hand-typed discount is never overwritten
 
   /* Offers cached on this till so they still apply with no internet. Same rules as the server (promotion.service.js): the best single offer per line. */
   const PROMO_CACHE_KEY = 'pos.promosActive.v1';
@@ -3538,6 +3779,7 @@
     state.cartDiscount = 0;
     state.payments = [];
     state.pendingMpesa = null;
+    state.splitDraft = null;
     state.lastAdded = null;
     checkoutKey = window.Api.newIdempotencyKey();
     const d = $('cart-discount-input');
@@ -3571,11 +3813,10 @@
     const wholesale = isWs();
     const off = window.Offline;
     const offlineNow = isOfflineNow();
-    if (!wholesale && offlineNow && state.cart.some((i) => i.unitId)) { window.UI.toast.error('Packet and deal lines need an internet connection. Switch them to single pieces to sell offline.'); return false; }
     const PT = window.PharmacyTill;
     const pharmacyOffline = PT && PT.active() ? PT.offlineIssue(state.cart) : '';
     if (PT && PT.active() && !wholesale && !offlineNow && state.pharmacy.sig !== PT.sig(state.cart)) { window.UI.toast.error('The cart changed. Review the pharmacy details and try again.'); return false; }
-    const canOffline = !wholesale && !pharmacyOffline && !state.cart.some((i) => i.unitId) && !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
+    const canOffline = !wholesale && !pharmacyOffline && !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
     let onCredit = false;
     if (wholesale) {
       if (offlineNow) { window.UI.toast.error('Wholesale sales need an internet connection.'); return false; }
@@ -3603,7 +3844,7 @@
       cartDiscount: state.cartDiscount || 0,
       items: state.cart.map((item) => ({
         productId: item.product._id, variantId: item.variantId || item.variant?._id, quantity: item.quantity,
-        ...(item.unitId ? { unitId: item.unitId } : {}),
+        ...(wholesale && item.unitId ? { unitId: item.unitId } : {}),
         ...(!wholesale && item.batchId ? { batchId: item.batchId } : {}),
         discount: item.discount || 0, overridePrice: item.overridePriceEnabled ? item.overridePrice : undefined,
       })),

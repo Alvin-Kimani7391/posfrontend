@@ -19,7 +19,8 @@
  * same full-screen viewer.
  */
 (function () {
-  const state = { page: 1, limit: 10 };
+  const state = { page: 1, limit: 10, view: 'list' };
+  let returnsList = null;
   let contentEl;
   let suppliersCache = null;
 
@@ -36,16 +37,51 @@
     if (!contentEl) return;
     contentEl.innerHTML = pageSkeleton();
     document.getElementById('add-purchase-btn').addEventListener('click', openCreateModal);
+    document.getElementById('return-purchase-btn')?.addEventListener('click', () => openReturnWizard());
+    bindTabs();
+    window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
     await fetchAndRender();
+  }
+
+  /* ---------------- returns (goods sent back to the supplier) ---------------- */
+
+  function openReturnWizard(purchaseId) {
+    if (!window.PurchaseReturns) return window.UI.toast.error('Purchase returns did not load. Refresh the page.');
+    window.PurchaseReturns.openWizard({
+      purchaseId: purchaseId || null,
+      onDone: () => { fetchAndRender(); if (state.view === 'returns' && returnsList) returnsList.reload(); },
+    });
+  }
+
+  function bindTabs() {
+    contentEl.querySelectorAll('.tab-btn').forEach((btn) => btn.addEventListener('click', () => {
+      contentEl.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      state.view = btn.dataset.view;
+      document.getElementById('view-list').style.display = state.view === 'list' ? '' : 'none';
+      const rv = document.getElementById('view-returns');
+      rv.style.display = state.view === 'returns' ? '' : 'none';
+      if (state.view === 'returns') {
+        if (!window.PurchaseReturns) { rv.innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Purchase returns did not load', message: 'Refresh the page and try again.' }); return; }
+        returnsList = window.PurchaseReturns.renderList(rv);
+      }
+    }));
   }
 
   function pageSkeleton() {
     return `
       <div class="page-header">
         <div><h1>Purchases</h1><p>Purchase orders from suppliers and stock receiving.</p></div>
-        <button class="btn btn-primary" id="add-purchase-btn" data-requires-permission="purchases.create">${window.Icons.get('plus')} New purchase</button>
+        <div class="flex gap-2" style="flex-wrap:wrap">
+          <button class="btn btn-primary" id="add-purchase-btn" data-requires-permission="purchases.create">${window.Icons.get('plus')} New purchase</button>
+          <button class="btn btn-secondary" id="return-purchase-btn" data-requires-permission="purchases.return">${window.Icons.get('bag')} Return purchase</button>
+        </div>
       </div>
       <div class="card">
+        <div class="tabs" style="padding: 0 var(--space-6)">
+          <button class="tab-btn active" data-view="list">Purchases</button>
+          <button class="tab-btn" data-view="returns" data-requires-permission="purchases.view">Purchase returns</button>
+        </div>
+        <div id="view-list">
         <div class="table-wrap">
           <table class="table">
             <thead><tr><th>PO #</th><th>Supplier</th><th>Date</th><th>Total</th><th>Payment</th><th>Received</th><th></th></tr></thead>
@@ -53,9 +89,13 @@
           </table>
         </div>
         <div class="pagination" id="pagination"></div>
+        </div>
+        <div id="view-returns" style="display:none"></div>
       </div>
     `;
   }
+
+  const RET_BADGE = { PARTIAL: ['badge-info', 'Part returned'], FULL: ['badge-neutral', 'Returned'] };
 
   async function getSuppliers() {
     if (suppliersCache) return suppliersCache;
@@ -323,15 +363,18 @@
             <td class="text-sm">${window.UI.formatDate(p.purchaseDate)}</td>
             <td class="font-semibold">${window.UI.formatMoney(p.total)}</td>
             <td><span class="badge ${PAY_BADGE[p.paymentStatus]}">${p.paymentStatus}</span></td>
-            <td><span class="badge ${RECV_BADGE[p.receivedStatus]}">${p.receivedStatus}</span></td>
-            <td class="actions"><button class="btn btn-secondary btn-sm" data-action="view">View</button></td>
+            <td><span class="badge ${RECV_BADGE[p.receivedStatus]}">${p.receivedStatus}</span>${RET_BADGE[p.returnStatus] ? ` <span class="badge ${RET_BADGE[p.returnStatus][0]}">${RET_BADGE[p.returnStatus][1]}</span>` : ''}</td>
+            <td class="actions"><button class="btn btn-secondary btn-sm" data-action="view">View</button>${p.receivedStatus === 'RECEIVED' && p.returnStatus !== 'FULL' ? '<button class="btn btn-secondary btn-sm" data-action="return" data-requires-permission="purchases.return">Return</button>' : ''}</td>
           </tr>
         `).join('');
       }
       window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; fetchAndRender(); });
       window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
-      document.querySelectorAll('[data-action="view"]').forEach((btn) => {
+      document.querySelectorAll('#purchases-tbody [data-action="view"]').forEach((btn) => {
         btn.addEventListener('click', () => openDetailModal(btn.closest('tr').dataset.id));
+      });
+      document.querySelectorAll('#purchases-tbody [data-action="return"]').forEach((btn) => {
+        btn.addEventListener('click', () => openReturnWizard(btn.closest('tr').dataset.id));
       });
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load purchases', message: err.message })}</td></tr>`;
@@ -350,6 +393,7 @@
 
     const canReceive = purchase.receivedStatus !== 'RECEIVED' && window.Permissions.can(window.AppShell.getUser(), 'purchases.receive');
     const canPay = purchase.balance > 0 && window.Permissions.can(window.AppShell.getUser(), 'purchases.pay');
+    const canReturn = purchase.receivedStatus === 'RECEIVED' && purchase.returnStatus !== 'FULL' && window.Permissions.can(window.AppShell.getUser(), 'purchases.return');
 
     const modal = window.UI.openModal({
       title: `Purchase ${purchase.purchaseNumber}`,
@@ -367,11 +411,13 @@
         <div class="pos-totals-row"><span>Subtotal</span><span>${window.UI.formatMoney(purchase.subtotal)}</span></div>
         <div class="pos-totals-row"><span>Tax</span><span>${window.UI.formatMoney(purchase.tax)}</span></div>
         <div class="pos-totals-row grand"><span>Total</span><span>${window.UI.formatMoney(purchase.total)}</span></div>
+        ${purchase.returnedAmount > 0 ? `<div class="pos-totals-row" style="color:var(--color-info)"><span>Returned to supplier ${purchase.returnStatus === 'FULL' ? '(all goods)' : '(part)'}</span><span>− ${window.UI.formatMoney(purchase.returnedAmount)}</span></div>` : ''}
         <div class="pos-totals-row"><span>Paid</span><span>${window.UI.formatMoney(purchase.amountPaid)}</span></div>
         <div class="pos-totals-row" style="color:${purchase.balance > 0 ? 'var(--color-warning)' : ''}"><span>Balance</span><span>${window.UI.formatMoney(purchase.balance)}</span></div>
       `,
       footerHtml: `
         <button class="btn btn-secondary" data-action="close">Close</button>
+        ${canReturn ? `<button class="btn btn-secondary" data-action="return-goods">Return goods</button>` : ''}
         ${canPay ? `<button class="btn btn-secondary" data-action="pay">Record payment</button>` : ''}
         ${canReceive ? `<button class="btn btn-primary" data-action="receive">Mark received</button>` : ''}
       `,
@@ -381,6 +427,7 @@
     if (gallery) bindCards(gallery, (purchase.attachments || []).map(remoteItem));
 
     modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
+    modal.querySelector('[data-action="return-goods"]')?.addEventListener('click', () => { window.UI.closeModal(); openReturnWizard(purchase._id); });
     modal.querySelector('[data-action="receive"]')?.addEventListener('click', () => { window.UI.closeModal(); openReceiveDialog(purchase); });
     modal.querySelector('[data-action="pay"]')?.addEventListener('click', () => {
       window.UI.closeModal();
