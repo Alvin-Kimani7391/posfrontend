@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.7.2-fast-till';
+const VERSION = 'v5.7.3-fast-till';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [

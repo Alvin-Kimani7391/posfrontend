@@ -29,44 +29,95 @@
   let contentEl;
   const state = { rows: [], selected: new Set(), search: '', categoryId: '', size: 'medium', media: 'sheet', copies: 1, showSku: true, mode: 'all', categories: [], businessName: '' };
 
+  const CACHE_KEY = 'sl_rows_v2';
+  const CACHE_MS = 10 * 60 * 1000;
+  const SHOW_STEP = 150;           // rows drawn on screen at a time (printing still uses every selected product)
+  let shown = SHOW_STEP;
+  let loading = true;
+  let touched = false;             // the user changed the selection by hand: never overwrite it with fresh data
+
   async function init() {
     contentEl = window.AppShell.mount({ title: 'Shelf labels' });
     if (!contentEl) return;
-    contentEl.innerHTML = '<div class="card"><div class="card-body text-muted">Loading products…</div></div>';
-    try {
-      const [rows, cats] = await Promise.all([loadAllProducts(), loadCategories()]);
-      state.rows = rows; state.categories = cats;
-      state.selected = new Set(rows.map((r) => r.id));
-      const prof = await window.AppShell.whenProfileReady();
-      state.businessName = prof?.name || window.AppShell.getUser()?.businessName || '';
-    } catch (err) {
-      contentEl.innerHTML = `<div class="card"><div class="card-body">${esc(err.message || 'Could not load products')}</div></div>`;
-      return;
-    }
+    // The page is drawn at ONCE; products stream in behind it.
     render();
+    window.AppShell.whenProfileReady().then((prof) => { state.businessName = prof?.name || window.AppShell.getUser()?.businessName || ''; }).catch(() => {});
+    loadCategories().then((cats) => {
+      state.categories = cats;
+      const sel = document.getElementById('sl-cat');
+      if (sel) sel.innerHTML = '<option value="">All categories</option>' + cats.map((c) => `<option value="${c._id}">${esc(c.name)}</option>`).join('');
+    });
+
+    // 1) saved copy from a moment ago: show it instantly
+    const cached = readCache();
+    if (cached) { setRows(cached, true); }
+    // 2) fresh copy: first page at once, the other pages in parallel
+    try {
+      const fresh = await loadAllProducts((partial) => { if (!cached) setRows(partial, false); });
+      setRows(fresh, false);
+      writeCache(fresh);
+    } catch (err) {
+      if (!state.rows.length) { loading = false; contentEl.innerHTML = `<div class="card"><div class="card-body">${esc(err.message || 'Could not load products')}</div></div>`; return; }
+    }
+    loading = false;
+    renderBody();
   }
+
+  function setRows(rows, fromCache) {
+    state.rows = rows;
+    if (!touched) state.selected = new Set(rows.map((r) => r.id));
+    else { const ids = new Set(rows.map((r) => r.id)); state.selected.forEach((id) => { if (!ids.has(id)) state.selected.delete(id); }); }
+    if (fromCache) loading = false; // a saved copy is complete enough to print from while the fresh one loads
+    renderBody();
+  }
+
+  function readCache() {
+    try {
+      const o = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
+      if (o && Date.now() - o.t < CACHE_MS && Array.isArray(o.rows) && o.rows.length) return o.rows;
+    } catch { /* no saved copy */ }
+    return null;
+  }
+  function writeCache(rows) { try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ t: Date.now(), rows })); } catch { /* too big / blocked: fine */ } }
 
   async function loadCategories() {
     try { const { data } = await window.Api.get('/categories'); return data.categories || []; }
     catch { return []; }
   }
 
-  async function loadAllProducts() {
-    const out = []; let page = 1, pages = 1;
-    do {
-      const { data } = await window.Api.get('/products', { page, limit: 100, status: 'active' });
-      (data.items || []).forEach((p) => {
-        const variants = p.variants || [];
-        if (p.hasVariants && variants.length) {
-          variants.forEach((v) => {
-            const attrs = v.attributes && typeof v.attributes === 'object' ? Object.values(v.attributes).join(' / ') : '';
-            out.push(row(p, v.sellingPrice, v.barcode, v.sku, attrs ? `${p.name} (${attrs})` : p.name, v._id, v.defaultDiscount));
-          });
-        } else out.push(row(p, p.sellingPrice, p.barcode, p.sku, p.name, p._id));
-      });
-      pages = data.pages || 1; page += 1;
-    } while (page <= pages);
+  function flatten(items) {
+    const out = [];
+    items.forEach((p) => {
+      const variants = p.variants || [];
+      if (p.hasVariants && variants.length) {
+        variants.forEach((v) => {
+          const attrs = v.attributes && typeof v.attributes === 'object' ? Object.values(v.attributes).join(' / ') : '';
+          out.push(row(p, v.sellingPrice, v.barcode, v.sku, attrs ? `${p.name} (${attrs})` : p.name, v._id, v.defaultDiscount));
+        });
+      } else out.push(row(p, p.sellingPrice, p.barcode, p.sku, p.name, p._id));
+    });
     return out;
+  }
+
+  /** Page 1 first (so something shows immediately), then every remaining page at the same time (6 at once). */
+  async function loadAllProducts(onPartial) {
+    const LIMIT = 100;
+    const first = (await window.Api.get('/products', { page: 1, limit: LIMIT, status: 'active' })).data;
+    const pages = first.pages || 1;
+    const chunks = new Array(pages);
+    chunks[0] = flatten(first.items || []);
+    const merged = () => [].concat(...chunks.filter(Boolean));
+    if (onPartial) onPartial(merged());
+    let next = 2;
+    await Promise.all(Array.from({ length: Math.min(6, Math.max(0, pages - 1)) }, async () => {
+      while (next <= pages) {
+        const pg = next++;
+        const { data } = await window.Api.get('/products', { page: pg, limit: LIMIT, status: 'active' });
+        chunks[pg - 1] = flatten(data.items || []);
+        if (onPartial && pg % 3 === 0) onPartial(merged());
+      }
+    }));
+    return merged();
   }
 
   function row(p, price, barcode, sku, name, id, variantDiscount) {
@@ -89,10 +140,6 @@
     : window.UI.formatMoney(r.price);
 
   function render() {
-    if (!state.rows.length) {
-      contentEl.innerHTML = `<div class="card"><div class="card-body"><h3>No products yet</h3><p class="text-secondary">Add your products first, then come back to print the shelf list and labels.</p><a class="btn btn-primary" href="products.html?action=add&from=onboarding&step=products">Add a product</a></div></div>`;
-      return;
-    }
     contentEl.innerHTML = `
       <div class="card" style="margin-bottom:var(--space-4)"><div class="card-body">
         <div class="sl-controls">
@@ -121,34 +168,51 @@
       </div></div>
       <div class="card"><div class="table-wrap"><table class="table">
         <thead><tr><th style="width:36px"><input type="checkbox" id="sl-all" /></th><th>Product</th><th>Barcode</th><th style="text-align:right">Price</th></tr></thead>
-        <tbody id="sl-body"></tbody></table></div></div>`;
+        <tbody id="sl-body"></tbody></table></div><div id="sl-more" style="padding:var(--space-3);text-align:center"></div></div>`;
     bind(); renderBody();
   }
 
   function renderBody() {
+    const body = document.getElementById('sl-body');
+    if (!body) return;
     const rows = visible();
-    document.getElementById('sl-body').innerHTML = rows.map((r) => `
+    const draw = rows.slice(0, shown);
+    if (!rows.length) {
+      body.innerHTML = loading
+        ? `<tr><td colspan="4" class="text-muted" style="padding:var(--space-4)">Loading products…</td></tr>`
+        : (state.rows.length
+          ? `<tr><td colspan="4" class="text-muted" style="padding:var(--space-4)">${state.mode === 'discount' ? 'No discounted products found. Set a "Discount per unit" on a product to see it here.' : 'No matching products.'}</td></tr>`
+          : `<tr><td colspan="4" style="padding:var(--space-4)"><b>No products yet</b><br><span class="text-secondary">Add your products first, then come back to print the shelf list and labels.</span><br><a class="btn btn-primary btn-sm" style="margin-top:8px" href="products.html?action=add&from=onboarding&step=products">Add a product</a></td></tr>`);
+    } else {
+      body.innerHTML = draw.map((r) => `
       <tr><td><input type="checkbox" data-id="${esc(r.id)}" ${state.selected.has(r.id) ? 'checked' : ''} /></td>
       <td>${esc(r.name)}</td><td>${esc(r.barcode)} ${r.fromSku ? '<span class="badge badge-warning">SKU</span>' : ''}</td>
-      <td style="text-align:right">${priceCellHtml(r)}</td></tr>`).join('') || `<tr><td colspan="4" class="text-muted" style="padding:var(--space-4)">${state.mode === 'discount' ? 'No discounted products found. Set a "Discount per unit" on a product to see it here.' : 'No matching products.'}</td></tr>`;
-    document.querySelectorAll('#sl-body input[type=checkbox]').forEach((cb) => cb.addEventListener('change', () => {
-      cb.checked ? state.selected.add(cb.dataset.id) : state.selected.delete(cb.dataset.id); updateCount();
-    }));
+      <td style="text-align:right">${priceCellHtml(r)}</td></tr>`).join('');
+    }
+    const more = document.getElementById('sl-more');
+    if (more) {
+      const left = rows.length - draw.length;
+      more.innerHTML = left > 0 ? `<button class="btn btn-secondary btn-sm" id="sl-show-more">Show ${Math.min(SHOW_STEP, left)} more <span class="text-muted">(${left} hidden - all selected products still print)</span></button>` : (loading && state.rows.length ? '<span class="text-muted text-sm">Loading more products…</span>' : '');
+    }
     const all = document.getElementById('sl-all');
-    all.checked = rows.length > 0 && rows.every((r) => state.selected.has(r.id));
+    if (all) all.checked = rows.length > 0 && rows.every((r) => state.selected.has(r.id));
     updateCount();
   }
 
-  const chosen = () => state.rows.filter((r) => state.selected.has(r.id) && visible().includes(r));
+  // O(n): the old version re-filtered the whole list once per product.
+  function chosen() {
+    const vis = new Set(visible());
+    return state.rows.filter((r) => state.selected.has(r.id) && vis.has(r));
+  }
   function updateCount() { const n = chosen().length; const el = document.getElementById('sl-count');
     if (!el) return;
     const total = state.mode === 'discount' ? state.rows.filter((r) => r.hasDiscount).length : state.rows.length;
-    el.textContent = `${n} of ${total} ${state.mode === 'discount' ? 'discounted ' : ''}products selected`; }
+    el.textContent = loading && !total ? 'Loading products…' : `${n} of ${total} ${state.mode === 'discount' ? 'discounted ' : ''}products selected${loading ? ' (still loading…)' : ''}`; }
 
   function bind() {
-    document.getElementById('sl-search').addEventListener('input', window.UI.debounce((e) => { state.search = e.target.value.trim().toLowerCase(); renderBody(); }));
-    document.getElementById('sl-cat').addEventListener('change', (e) => { state.categoryId = e.target.value; renderBody(); });
-    document.getElementById('sl-mode').addEventListener('change', (e) => { state.mode = e.target.value; renderBody(); });
+    document.getElementById('sl-search').addEventListener('input', window.UI.debounce((e) => { state.search = e.target.value.trim().toLowerCase(); shown = SHOW_STEP; renderBody(); }, 120));
+    document.getElementById('sl-cat').addEventListener('change', (e) => { state.categoryId = e.target.value; shown = SHOW_STEP; renderBody(); });
+    document.getElementById('sl-mode').addEventListener('change', (e) => { state.mode = e.target.value; shown = SHOW_STEP; renderBody(); });
     document.getElementById('sl-size').addEventListener('change', (e) => { state.size = e.target.value; });
     document.getElementById('sl-media').addEventListener('change', (e) => {
       state.media = e.target.value;
@@ -156,7 +220,15 @@
     });
     document.getElementById('sl-copies').addEventListener('change', (e) => { state.copies = Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 1)); e.target.value = state.copies; });
     document.getElementById('sl-sku').addEventListener('change', (e) => { state.showSku = e.target.checked; });
-    document.getElementById('sl-all').addEventListener('change', (e) => { visible().forEach((r) => (e.target.checked ? state.selected.add(r.id) : state.selected.delete(r.id))); renderBody(); });
+    document.getElementById('sl-all').addEventListener('change', (e) => { touched = true; visible().forEach((r) => (e.target.checked ? state.selected.add(r.id) : state.selected.delete(r.id))); renderBody(); });
+    const body = document.getElementById('sl-body');
+    body.addEventListener('change', (e) => {
+      const cb = e.target.closest('input[data-id]'); if (!cb) return;
+      touched = true;
+      cb.checked ? state.selected.add(cb.dataset.id) : state.selected.delete(cb.dataset.id);
+      updateCount();
+    });
+    document.getElementById('sl-more').addEventListener('click', (e) => { if (e.target.closest('#sl-show-more')) { shown += SHOW_STEP; renderBody(); } });
     document.getElementById('sl-print-list').addEventListener('click', () => print('list'));
     document.getElementById('sl-print-labels').addEventListener('click', () => print('labels'));
   }
@@ -164,6 +236,7 @@
   /* ---------------- printing ---------------- */
   function print(mode) {
     const rows = chosen();
+    if (loading) { window.UI.toast.info('Products are still loading - try again in a moment'); return; }
     if (!rows.length) { window.UI.toast.error(state.mode === 'discount' ? 'No discounted products selected' : 'Select at least one product'); return; }
     let pageStyle = null;
     let area = document.getElementById('print-area');
