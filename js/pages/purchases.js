@@ -14,6 +14,13 @@
  * item is sent with updatePrices=true and the backend saves cost price (the
  * real unit cost), selling price and discount together with the purchase.
  *
+ * DRAFT: the purchase being typed is saved on this device as you type (survives refresh / closing), and offered again
+ * via an "Unfinished purchase" banner until it is created or discarded.
+ * SUPPLIER PRODUCTS: every product added under a supplier is remembered (unit, pieces per unit, last price) and
+ * auto-filled the next time that supplier is chosen; products can be removed from the supplier's list.
+ * UNIT CONVERSION: buy in Carton / Bale / Dozen... - enter pieces per unit, quantity and the price per unit (or per
+ * piece); the system works out pieces received and cost per piece. Stock is always sent to the backend in pieces.
+ *
  * Invoices: picked files are previewed locally before upload; saved files
  * are previewed from Cloudinary in the purchase detail. Both open in the
  * same full-screen viewer.
@@ -36,6 +43,7 @@
     contentEl = window.AppShell.mount({ title: 'Purchases' });
     if (!contentEl) return;
     contentEl.innerHTML = pageSkeleton();
+    renderDraftBanner();
     document.getElementById('add-purchase-btn').addEventListener('click', openCreateModal);
     document.getElementById('return-purchase-btn')?.addEventListener('click', () => openReturnWizard());
     bindTabs();
@@ -76,6 +84,7 @@
           <button class="btn btn-secondary" id="return-purchase-btn" data-requires-permission="purchases.return">${window.Icons.get('bag')} Return purchase</button>
         </div>
       </div>
+      <div id="draft-banner"></div>
       <div class="card">
         <div class="tabs" style="padding: 0 var(--space-6)">
           <button class="tab-btn active" data-view="list">Purchases</button>
@@ -608,31 +617,153 @@
 
   /* ---------------- create ---------------- */
 
+  /* ===== Remembered on THIS device =====
+   *  1. DRAFT   - the purchase being typed (saved on every keystroke, survives refresh / closing / phone killing the tab)
+   *  2. SUPPLIER PRODUCTS - every product added under a supplier is remembered with its unit, pieces-per-unit and last price,
+   *     and auto-fills the next time that supplier is chosen (the owner only types quantities).
+   */
+  const UNITS = ['Piece', 'Carton', 'Bale', 'Dozen', 'Pack', 'Packet', 'Box', 'Crate', 'Case', 'Sack', 'Tray', 'Bundle'];
+  const PACK_CHIPS = [6, 10, 12, 20, 24, 30, 48];
+  const userKey = () => { const u = (window.AppShell.getUser && window.AppShell.getUser()) || {}; return String(u._id || u.id || u.email || 'u'); };
+  const branchKey = () => { try { return String(window.AppShell.getActiveBranchId() || 'b'); } catch (e) { return 'b'; } };
+  const DRAFT_KEY = () => `pos.purchaseDraft.v2:${userKey()}:${branchKey()}`;
+  const MEM_KEY = () => `pos.supplierItems.v2:${userKey()}`;
+  function lsGet(k, fb) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch (e) { return fb; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  function lsDel(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
+
+  const leanProduct = (p) => ({ _id: p._id, name: p.name, sku: p.sku, costPrice: p.costPrice, sellingPrice: p.sellingPrice, defaultDiscount: p.defaultDiscount });
+  const leanVariant = (v) => (v ? { _id: v._id, sku: v.sku, attributes: v.attributes, costPrice: v.costPrice, sellingPrice: v.sellingPrice } : null);
+  const itemKey = (it) => `${it.product._id}|${it.variant ? it.variant._id : ''}`;
+  const packOf = (it) => Math.max(1, Math.floor(Number(it.pack) || 1)); // pieces in ONE buying unit (carton, bale...)
+  const round4 = (n) => Math.round(n * 10000) / 10000;
+  const fmtN = (n) => String(Math.round((Number(n) || 0) * 100) / 100);
+  const unitLabel = (it) => (it.unitName || 'unit');
+  const isBulk = (it) => !!it.customUnit || (it.unitName && it.unitName !== 'Piece') || packOf(it) > 1;
+  /** price of ONE buying unit (carton) as entered, whichever way the owner typed it */
+  function packPrice(it) {
+    if (it.canon != null) return it.canon;
+    const p = Number(it.price) || 0;
+    return it.priceMode === 'unit' ? p * packOf(it) : p;
+  }
+
+  function newItem(product, variant, quantity) {
+    return {
+      product: leanProduct(product), variant: leanVariant(variant), quantity,
+      price: (variant ? variant.costPrice : product.costPrice) || 0, priceMode: 'pack', canon: null,
+      pack: 1, unitName: 'Piece', customUnit: false, priceUpdate: null, promptedFor: null,
+    };
+  }
+  const serializeItem = (it) => ({
+    product: it.product, variant: it.variant || null, quantity: it.quantity, price: it.price, priceMode: it.priceMode, canon: it.canon,
+    pack: it.pack, unitName: it.unitName, customUnit: !!it.customUnit, priceUpdate: it.priceUpdate || null, promptedFor: it.promptedFor || null,
+  });
+  const reviveItem = (o) => ({
+    product: o.product, variant: o.variant || null, quantity: Number(o.quantity) || 0, price: Number(o.price) || 0, priceMode: o.priceMode || 'pack',
+    canon: o.canon != null ? o.canon : null, pack: o.pack || 1, unitName: o.unitName || 'Piece', customUnit: !!o.customUnit,
+    priceUpdate: o.priceUpdate || null, promptedFor: o.promptedFor || null,
+  });
+
+  /* supplier memory */
+  function memGet(supId) { const m = (lsGet(MEM_KEY(), {}) || {})[supId]; return m && m.items ? m : { items: {} }; }
+  function memEntry(it) {
+    return { product: it.product, variant: it.variant || null, price: it.price, priceMode: it.priceMode, canon: it.canon, pack: it.pack, unitName: it.unitName, customUnit: !!it.customUnit, ts: Date.now() };
+  }
+  function memUpsert(supId, items, vat) {
+    if (!supId) return;
+    const all = lsGet(MEM_KEY(), {}) || {};
+    const m = all[supId] && all[supId].items ? all[supId] : { items: {} };
+    items.forEach((it) => { m.items[itemKey(it)] = memEntry(it); });
+    if (vat && vat.mode) m.vat = { mode: vat.mode, rate: vat.rate };
+    all[supId] = m; lsSet(MEM_KEY(), all);
+  }
+  function memForget(supId, key) {
+    const all = lsGet(MEM_KEY(), {}) || {};
+    if (all[supId] && all[supId].items) { delete all[supId].items[key]; lsSet(MEM_KEY(), all); }
+  }
+  const fromEntry = (e) => reviveItem({ ...e, quantity: 0, priceUpdate: null, promptedFor: e.price || null });
+
+  /* draft */
+  const getDraft = () => { const d = lsGet(DRAFT_KEY(), null); return d && d.v === 2 && Array.isArray(d.items) ? d : null; };
+  const clearDraft = () => lsDel(DRAFT_KEY());
+  function timeAgo(ts) {
+    const m = Math.round((Date.now() - ts) / 60000);
+    if (m < 1) return 'just now'; if (m < 60) return `${m} min ago`;
+    const h = Math.round(m / 60); if (h < 24) return `${h} hr ago`;
+    return `${Math.round(h / 24)} day(s) ago`;
+  }
+  function renderDraftBanner() {
+    const el = document.getElementById('draft-banner');
+    if (!el) return;
+    const d = getDraft();
+    if (!d || !d.items.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:var(--space-4);border-left:4px solid var(--color-warning,#d97706);padding:var(--space-3) var(--space-4);display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+        <span class="text-sm"><b>Unfinished purchase</b>${d.supplierName ? ` &middot; ${esc(d.supplierName)}` : ''} &middot; ${d.items.length} product${d.items.length === 1 ? '' : 's'} &middot; saved ${timeAgo(d.savedAt || Date.now())}</span>
+        <span class="flex gap-2"><button class="btn btn-primary btn-sm" id="draft-continue">Continue</button><button class="btn btn-secondary btn-sm" id="draft-discard">Discard</button></span>
+      </div>`;
+    el.querySelector('#draft-continue').addEventListener('click', () => openCreateModal());
+    el.querySelector('#draft-discard').addEventListener('click', async () => {
+      const ok = await window.UI.confirmDialog({ title: 'Discard this draft?', message: 'The unfinished purchase will be deleted. Supplier product lists are kept.', confirmText: 'Discard', danger: true });
+      if (ok) { clearDraft(); renderDraftBanner(); }
+    });
+  }
+
+  /** 3-way choice when removing a product that is saved under the supplier. -> 'cancel' | 'once' | 'forget' */
+  function askRemove(name, supplier) {
+    return new Promise((resolve) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'modal-backdrop'; wrap.style.zIndex = 1250;
+      wrap.innerHTML = `
+        <div class="modal" style="max-width:440px" role="dialog" aria-modal="true">
+          <div class="modal-header"><strong>Remove product</strong></div>
+          <div class="modal-body"><p class="text-sm"><b>${esc(name)}</b> is saved under <b>${esc(supplier || 'this supplier')}</b>.</p>
+          <p class="text-sm text-secondary" style="margin-top:8px">Remove it only from this purchase, or from the supplier's saved list so it stops appearing next time?</p></div>
+          <div class="modal-footer" style="flex-wrap:wrap;gap:8px">
+            <button type="button" class="btn btn-secondary" data-r="cancel">Cancel</button>
+            <button type="button" class="btn btn-secondary" data-r="once">This purchase only</button>
+            <button type="button" class="btn btn-primary" data-r="forget">Remove from supplier list</button>
+          </div>
+        </div>`;
+      document.body.appendChild(wrap);
+      const fin = (v) => { wrap.remove(); resolve(v); };
+      wrap.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => fin(b.dataset.r)));
+      wrap.addEventListener('click', (e) => { if (e.target === wrap) fin('cancel'); });
+    });
+  }
 
   const PC_CSS = `
     .pc-top{display:grid;grid-template-columns:2fr 1.2fr 1.2fr .8fr;gap:12px;align-items:end}
     .pc-top .field{margin-bottom:0}
     .pc-sup-row{display:flex;gap:8px}.pc-sup-row select{flex:1;min-width:0}
     .pc-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0 8px;padding:10px 12px;border:1px dashed var(--color-border,#cbd5e1);border-radius:10px;background:var(--color-surface-2,#f8fafc)}
-    .pc-bar .pc-hint{font-size:12px;color:var(--color-text-secondary,#64748b)}
-    .pc-table-wrap{border:1px solid var(--color-border,#e2e8f0);border-radius:10px;overflow:auto;max-height:46vh}
-    .pc-table{width:100%;border-collapse:collapse;min-width:700px;font-size:14px}
-    .pc-table th{position:sticky;top:0;background:var(--color-surface-2,#f1f5f9);text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.03em;padding:8px 10px;color:var(--color-text-secondary,#475569);z-index:1}
-    .pc-table td{padding:10px;border-top:1px solid var(--color-border,#e2e8f0);vertical-align:top}
-    .pc-table .pc-r{text-align:right;white-space:nowrap}
-    .pc-n{width:34px;color:var(--color-text-secondary,#64748b)}
-    .pc-name{font-weight:600}.pc-sku{font-size:12px;color:var(--color-text-secondary,#64748b)}
-    .pc-calc{font-size:12px;color:var(--color-text-secondary,#64748b);margin-top:4px}
-    .pc-table input.input{min-width:90px;text-align:right}
-    .pc-sub{font-size:11px;color:var(--color-text-secondary,#64748b);margin-top:3px;text-align:right}
-    .pc-row-bad td{background:#fff5f4}
+    .pc-bar .pc-hint{font-size:12px;color:var(--color-text-secondary,#64748b);flex:1;min-width:200px}
+    .pc-note{margin:0 0 8px;padding:8px 12px;border-radius:8px;background:#e0f2fe;color:#075985;font-size:13px}
+    .pc-list{max-height:50vh;overflow:auto;padding:2px}
+    .pc-card{border:1px solid var(--color-border,#e2e8f0);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--color-surface,#fff)}
+    .pc-card.pc-skip{opacity:.7;border-style:dashed}
+    .pc-card.pc-row-bad{border-color:#d93025;background:#fff5f4}
+    .pc-head{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
+    .pc-name{font-weight:700}.pc-sku{font-size:12px;color:var(--color-text-secondary,#64748b)}
+    .pc-tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;background:#e0f2fe;color:#075985;margin-left:6px;font-weight:600}
+    .pc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}
+    .pc-grid .field{margin:0}.pc-grid label{font-size:12px;display:block;margin-bottom:3px}
+    .pc-grid .input,.pc-grid .select{width:100%}
+    .pc-seg{display:flex;border:1px solid var(--color-border,#cbd5e1);border-radius:8px;overflow:hidden;margin-top:6px}
+    .pc-seg button{flex:1;padding:8px 6px;border:0;background:transparent;font-size:13px;cursor:pointer;color:inherit}
+    .pc-seg button.on{background:var(--color-primary,#2563eb);color:#fff;font-weight:700}
+    .pc-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+    .pc-chips button{padding:5px 11px;border:1px solid var(--color-border,#cbd5e1);border-radius:999px;background:transparent;font-size:12px;cursor:pointer;color:inherit}
+    .pc-chips button.on{background:var(--color-primary,#2563eb);color:#fff;border-color:transparent}
+    .pc-result{margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--color-surface-2,#f1f5f9);font-size:13px;line-height:1.65}
+    .pc-result .big{font-size:15px}.pc-warn{color:var(--color-warning,#b45309);font-weight:600}
     .pc-empty{padding:28px;text-align:center;color:var(--color-text-secondary,#64748b)}
     .pc-foot{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px}
     .pc-totals{border:1px solid var(--color-border,#e2e8f0);border-radius:10px;padding:12px 14px;background:var(--color-surface-2,#f8fafc);font-size:14px}
     .pc-totals div{display:flex;justify-content:space-between;padding:3px 0}
     .pc-totals .pc-grand{border-top:1px solid var(--color-border,#cbd5e1);margin-top:6px;padding-top:8px;font-size:18px;font-weight:800}
     .pc-vat-need select{border-color:#f0b429;box-shadow:0 0 0 3px rgba(240,180,41,.25)}
-    @media (max-width:760px){.pc-top{grid-template-columns:1fr 1fr}.pc-foot{grid-template-columns:1fr}}
+    @media (max-width:760px){.pc-top{grid-template-columns:1fr 1fr}.pc-foot{grid-template-columns:1fr}.pc-list{max-height:none}}
   `;
   function ensurePcStyle() {
     if (document.getElementById('pc-style')) return;
@@ -709,6 +840,7 @@
     setTimeout(() => form.name.focus(), 30);
   }
 
+
   async function openCreateModal() {
     ensurePcStyle();
     const branchId = window.AppShell.getActiveBranchId();
@@ -716,11 +848,13 @@
     try { suppliers = await getSuppliers(); } catch (err) { window.UI.toast.error(err.message || 'Could not load suppliers'); }
 
     const money = window.UI.formatMoney;
-    // { product, variant, quantity, price, priceUpdate, promptedFor }
-    //   price       = what the owner typed
-    //   priceUpdate = null | { sellingPrice, discount }  (set by the price pop-up)
     const items = [];
     const vat = { mode: '', rate: 16 };
+    let supId = '';
+    let done = false;
+    let timer = null;
+    const draft = getDraft();
+    const supName = () => { const s = (suppliersCache || suppliers).find((x) => x._id === supId); return s ? s.name : ''; };
 
     const modal = window.UI.openModal({
       title: 'New purchase',
@@ -731,7 +865,7 @@
             <div class="field">
               <label>Supplier</label>
               <div class="pc-sup-row">
-                <select class="select" name="supplierId" id="pc-supplier" required>${suppliers.length ? suppliers.map((s) => `<option value="${s._id}">${esc(s.name)}</option>`).join('') : '<option value="">No suppliers yet - add one →</option>'}</select>
+                <select class="select" name="supplierId" id="pc-supplier" required><option value="">${suppliers.length ? 'Choose supplier…' : 'No suppliers yet - add one →'}</option>${suppliers.map((s) => `<option value="${s._id}">${esc(s.name)}</option>`).join('')}</select>
                 <button type="button" class="btn btn-secondary" id="new-supplier-btn" data-requires-permission="suppliers.create">${window.Icons.get('plus')} New supplier</button>
               </div>
             </div>
@@ -753,15 +887,11 @@
 
           <div class="pc-bar">
             <button type="button" class="btn btn-primary" id="add-item-btn">${window.Icons.get('plus')} Add product</button>
-            <span class="pc-hint">Search by name, SKU or scan a barcode. Adding the same product again increases its quantity.</span>
+            <span class="pc-hint">Choose the supplier first. Products you add are saved to that supplier and appear automatically next time - you only type quantities. Progress is saved as you type.</span>
           </div>
+          <div id="pc-fill-note"></div>
 
-          <div class="pc-table-wrap">
-            <table class="pc-table">
-              <thead><tr><th>#</th><th>Product</th><th style="width:130px;text-align:right">Quantity</th><th style="width:170px;text-align:right">Unit cost</th><th style="width:130px;text-align:right">Line total</th><th style="width:44px"></th></tr></thead>
-              <tbody id="purchase-items"></tbody>
-            </table>
-          </div>
+          <div class="pc-list" id="purchase-items"></div>
 
           <div class="pc-foot">
             <div>
@@ -772,57 +902,94 @@
           </div>
         </form>
       `,
-      footerHtml: `<button class="btn btn-secondary" data-action="cancel">Cancel</button><button class="btn btn-primary" data-action="save" id="purchase-save-btn">Create purchase</button>`,
+      footerHtml: `<button class="btn btn-ghost" data-action="discard" style="margin-right:auto">Discard draft</button><button class="btn btn-secondary" data-action="cancel">Close (draft saved)</button><button class="btn btn-primary" data-action="save" id="purchase-save-btn">Create purchase</button>`,
     });
 
     const picker = createInvoicePicker(modal.querySelector('#invoice-picker'));
-
-    /** Real cost per unit (incl. VAT) - the same number the backend stores as the product cost. */
     const liquor = !!(window.LiquorTill && window.LiquorTill.active());
-    const packOf = (it) => Math.max(1, Math.floor(Number(it.pack) || 1)); // bottles / cans in one pack (wines & spirits buy by the case)
-    const realCost = (it) => splitPrice(it.price, vat.mode, vat.rate).inclVat / packOf(it);
+    const form = modal.querySelector('#purchase-form');
+    const supSel = modal.querySelector('#pc-supplier');
+    const list = modal.querySelector('#purchase-items');
 
-    /** Summary / button under an item for the optional price update. */
+    /** Real cost of ONE piece incl. VAT - the number the backend stores as the product cost. */
+    const realCost = (it) => splitPrice(packPrice(it), vat.mode, vat.rate).inclVat / packOf(it);
+    const isActive = (it) => Number(it.quantity) > 0;
+
+    /* ---------- save progress ---------- */
+    function persist() {
+      clearTimeout(timer);
+      if (done || !modal.isConnected) return;
+      if (supId) memUpsert(supId, items, vat);
+      const inv = form.invoiceNumber ? form.invoiceNumber.value : '';
+      const notes = form.notes ? form.notes.value : '';
+      if (!items.length && !supId && !inv && !notes) clearDraft();
+      else lsSet(DRAFT_KEY(), { v: 2, savedAt: Date.now(), supplierId: supId, supplierName: supName(), invoiceNumber: inv, notes, vatMode: vat.mode, vatRate: vat.rate, items: items.map(serializeItem) });
+      renderDraftBanner();
+    }
+    const persistSoon = () => { clearTimeout(timer); timer = setTimeout(persist, 250); };
+    const onHide = () => { if (!modal.isConnected) { window.removeEventListener('pagehide', onHide); document.removeEventListener('visibilitychange', onHide); return; } persist(); };
+    window.addEventListener('pagehide', onHide);
+    document.addEventListener('visibilitychange', onHide);
+    form.addEventListener('input', persistSoon);
+
+    function applyVat(mode, rate) {
+      vat.mode = mode || ''; if (rate != null) vat.rate = Number(rate) || 0;
+      modal.querySelector('#vat-mode').value = vat.mode;
+      modal.querySelector('#vat-rate').value = vat.rate;
+      modal.querySelector('#vat-rate-field').style.visibility = vat.mode === 'INCLUSIVE' || vat.mode === 'EXCLUSIVE' ? 'visible' : 'hidden';
+      modal.querySelector('#vat-field').classList.toggle('pc-vat-need', !vat.mode);
+    }
+
+    /* ---------- labels & maths ---------- */
+    const vatSuffix = () => (vat.mode === 'INCLUSIVE' ? ' incl. VAT' : vat.mode === 'EXCLUSIVE' ? ' excl. VAT' : '');
+    const qtyLabel = (it) => (isBulk(it) ? `How many ${unitLabel(it)}s? (quantity)` : 'Quantity (pieces)');
+    const packLabel = (it) => `Pieces in 1 ${unitLabel(it)}`;
+    const priceFieldLabel = (it) => `${isBulk(it) ? (it.priceMode === 'unit' ? 'Price per piece' : `Price per ${unitLabel(it)}`) : 'Cost per piece'}${vatSuffix()} (KES)`;
+
+    function calcHtml(it) {
+      const n = packOf(it); const q = Number(it.quantity) || 0; const pp = packPrice(it); const u = unitLabel(it);
+      if (!(pp > 0) && !(q > 0)) return '<span class="text-muted">Enter the quantity and price - the system does all the maths.</span>';
+      const { exVat, inclVat } = splitPrice(pp, vat.mode, vat.rate);
+      const out = [];
+      if (isBulk(it) && n === 1 && it.unitName !== 'Piece') out.push(`<div class="pc-warn">Enter how many pieces are in 1 ${esc(u)} (tap a number above).</div>`);
+      if (n > 1) {
+        out.push(`<div>${fmtN(q)} ${esc(u)} &times; ${n} = <b class="big">${fmtN(q * n)} pieces</b> go into stock</div>`);
+        out.push(`<div>1 ${esc(u)} costs <b>${money(inclVat)}</b> &rarr; <b class="big">${money(inclVat / n)} per piece</b></div>`);
+      } else out.push(`<div>Cost per piece: <b class="big">${money(inclVat)}</b></div>`);
+      if (vat.mode && vat.mode !== 'NONE') out.push(`<div class="text-muted">Excl. VAT: ${money(exVat)} per ${n > 1 ? esc(u) : 'piece'} &middot; VAT ${vat.rate}%</div>`);
+      out.push(`<div>Line total: <b class="big">${money(inclVat * q)}</b></div>`);
+      return out.join('');
+    }
+
     function priceBoxHtml(it, i) {
       const pu = it.priceUpdate;
-      if (!pu) {
-        return `<button type="button" class="btn btn-ghost btn-sm" data-edit-prices="${i}">Update selling price &amp; discount</button>`;
-      }
+      if (!pu) return `<button type="button" class="btn btn-ghost btn-sm" data-edit-prices="${i}">Update selling price &amp; discount</button>`;
       return `
         <div class="pu-box">
-          <div class="pu-box-text">
-            <b>Prices will update when saved</b><br>
-            Cost ${money(realCost(it))} &middot; Selling ${money(pu.sellingPrice)}${pu.discount > 0 ? ` &middot; Discount ${money(pu.discount)}/unit` : ''}
-          </div>
+          <div class="pu-box-text"><b>Prices will update when saved</b><br>Cost ${money(realCost(it))}/piece &middot; Selling ${money(pu.sellingPrice)}${pu.discount > 0 ? ` &middot; Discount ${money(pu.discount)}/unit` : ''}</div>
           <button type="button" class="btn btn-secondary btn-sm" data-edit-prices="${i}">Edit</button>
           <button type="button" class="btn btn-ghost btn-sm" data-clear-prices="${i}">Remove</button>
         </div>`;
     }
 
-    /**
-     * Pop-up shown after the owner enters a product's cost.
-     * Own lightweight overlay (does not use UI.openModal / closeModal), so the
-     * "New purchase" window underneath is never closed or reset.
-     */
+    /** Pop-up after the owner enters a cost: offer to update selling price / discount (own overlay, never closes the purchase window). */
     function openPriceDialog(it, onDone) {
       const src = it.variant ? it.variant : it.product;
       const cost = realCost(it);
       const startSell = it.priceUpdate ? it.priceUpdate.sellingPrice : (Number(src.sellingPrice) || 0);
       const startDisc = it.priceUpdate ? it.priceUpdate.discount : (Number(it.product.defaultDiscount) || 0);
-
       const wrap = document.createElement('div');
-      wrap.className = 'modal-backdrop';
-      wrap.style.zIndex = 1250;
+      wrap.className = 'modal-backdrop'; wrap.style.zIndex = 1250;
       wrap.innerHTML = `
         <div class="modal" style="max-width:440px" role="dialog" aria-modal="true">
           <div class="modal-header"><strong>Update prices?</strong></div>
           <div class="modal-body">
             <p class="text-sm text-secondary" style="margin-bottom:var(--space-3)">
               <b>${esc(it.product.name)}</b><br>
-              New cost price: <b>${money(cost)}</b> <span class="text-muted">(was ${money(Number(src.costPrice) || 0)})</span>
+              New cost price: <b>${money(cost)}</b> per piece <span class="text-muted">(was ${money(Number(src.costPrice) || 0)})</span>
             </p>
             <div class="form-row">
-              <div class="field"><label>Selling price (KES)</label><input class="input" id="pd-sell" type="number" min="0" step="0.01" value="${startSell}" /></div>
+              <div class="field"><label>Selling price per piece (KES)</label><input class="input" id="pd-sell" type="number" min="0" step="0.01" value="${startSell}" /></div>
               <div class="field"><label>Discount per unit <span class="text-muted">(optional)</span></label><input class="input" id="pd-disc" type="number" min="0" step="0.01" value="${startDisc || ''}" placeholder="0" /></div>
             </div>
             <div class="text-xs" id="pd-hint" style="min-height:18px"></div>
@@ -834,209 +1001,294 @@
           </div>
         </div>`;
       document.body.appendChild(wrap);
-
-      const sellEl = wrap.querySelector('#pd-sell');
-      const discEl = wrap.querySelector('#pd-disc');
-      const hint = wrap.querySelector('#pd-hint');
-
+      const sellEl = wrap.querySelector('#pd-sell'); const discEl = wrap.querySelector('#pd-disc'); const hint = wrap.querySelector('#pd-hint');
       function check() {
-        const sell = Number(sellEl.value) || 0;
-        const disc = Number(discEl.value) || 0;
-        let msg = '';
-        let bad = false;
+        const sell = Number(sellEl.value) || 0; const disc = Number(discEl.value) || 0;
+        let msg = ''; let bad = false;
         if (disc > sell) { msg = 'Discount cannot be more than the selling price.'; bad = true; }
-        else if (sell < cost) { msg = `Selling price is below cost - loss of ${money(cost - sell)} per unit.`; }
-        else if (cost > 0 && sell > 0) { msg = `Margin: ${money(sell - cost)} per unit (${(((sell - cost) / sell) * 100).toFixed(1)}%)`; }
+        else if (sell < cost) msg = `Selling price is below cost - loss of ${money(cost - sell)} per unit.`;
+        else if (cost > 0 && sell > 0) msg = `Margin: ${money(sell - cost)} per unit (${(((sell - cost) / sell) * 100).toFixed(1)}%)`;
         hint.style.color = bad ? 'var(--color-danger)' : sell < cost ? 'var(--color-warning)' : 'var(--color-text-secondary)';
-        hint.textContent = msg;
-        return !bad;
+        hint.textContent = msg; return !bad;
       }
-      sellEl.addEventListener('input', check);
-      discEl.addEventListener('input', check);
-      check();
-
+      sellEl.addEventListener('input', check); discEl.addEventListener('input', check); check();
       const close = () => { document.removeEventListener('keydown', onKey, true); wrap.remove(); };
       function onKey(e) {
         if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); }
         else if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); wrap.querySelector('#pd-ok').click(); }
       }
       document.addEventListener('keydown', onKey, true);
-
       wrap.querySelector('#pd-skip').addEventListener('click', close);
       wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
       wrap.querySelector('#pd-ok').addEventListener('click', () => {
         if (!check()) return;
-        onDone({ sellingPrice: Number(sellEl.value) || 0, discount: Number(discEl.value) || 0 });
-        close();
+        onDone({ sellingPrice: Number(sellEl.value) || 0, discount: Number(discEl.value) || 0 }); close();
       });
       sellEl.focus(); sellEl.select();
     }
 
-    function priceLabel(it) {
-      const u = it && packOf(it) > 1 ? 'Cost per pack' : 'Unit cost';
-      if (vat.mode === 'INCLUSIVE') return `${u} incl. VAT (KES)`;
-      if (vat.mode === 'EXCLUSIVE') return `${u} excl. VAT (KES)`;
-      return `${u} (KES)`;
-    }
-
-    /* Wines & spirits: buy by the case / crate / tray, stock is kept per bottle. */
     function liquorChip(it) {
       const d = window.LiquorTill.info(it.product._id);
       return d ? ` <span class="lq-chip lq-c-${esc(d.category)}" style="margin-left:6px">${esc(String(d.category).replace(/_/g, ' ').toLowerCase())}</span>${d.abv != null ? ` <span class="lq-abv">${esc(d.abv)}%</span>` : ''}${d.volumeMl ? ` <span class="text-xs text-muted">${esc(d.volumeMl)} ml</span>` : ''}` : '';
     }
-    function liquorRowHtml(it, i) {
-      const n = packOf(it);
-      return `<div class="form-row" style="margin-top:var(--space-2)">
-        <div class="field" style="margin-bottom:0"><label class="text-xs">Bottles / cans in one pack <span class="text-muted">(1 = bought singly)</span></label>
-          <input class="input" type="number" min="1" step="1" value="${n}" data-field="pack" data-idx="${i}" />
-          <div class="lq-pack">${[1, 6, 12, 24].map((x) => `<button type="button" data-packset="${x}" data-idx="${i}">${x === 1 ? 'Single' : `Case of ${x}`}</button>`).join('')}</div></div>
-        <div class="field" style="margin-bottom:0"><label class="text-xs">You receive</label>
-          <div class="text-sm" style="padding-top:8px"><b>${(Number(it.quantity) || 0) * n}</b> bottles/cans${n > 1 ? ` (${Number(it.quantity) || 0} × ${n})` : ''}</div></div>
-      </div>`;
-    }
 
-    function calcHtml(it) {
-      const { exVat, inclVat } = splitPrice(it.price, vat.mode, vat.rate);
-      const n = packOf(it); const per = n > 1 ? ` &middot; <b>Per bottle: ${money(inclVat / n)}</b>` : '';
-      if (vat.mode === 'NONE') return `Line total: <b>${money(inclVat * it.quantity)}</b>${per}`;
-      return `Excl. VAT: ${money(exVat)} &middot; <b>Real cost per ${n > 1 ? 'pack' : 'unit'} (incl. VAT): ${money(inclVat)}</b>${per} &middot; Line total: <b>${money(inclVat * it.quantity)}</b>`;
-    }
-
+    /** Update everything that depends on numbers WITHOUT re-drawing inputs (keeps the keyboard open on phones). */
     function refreshCalc() {
-      modal.querySelectorAll('[data-calc]').forEach((el) => { el.innerHTML = calcHtml(items[Number(el.dataset.calc)]); });
-      modal.querySelectorAll('[data-pricebox]').forEach((el) => { const i = Number(el.dataset.pricebox); el.innerHTML = priceBoxHtml(items[i], i); });
-      modal.querySelectorAll('[data-linetotal]').forEach((el) => {
-        const it = items[Number(el.dataset.linetotal)];
-        el.textContent = vat.mode ? money(splitPrice(it.price, vat.mode, vat.rate).inclVat * it.quantity) : '—';
+      list.querySelectorAll('[data-calc]').forEach((el) => { el.innerHTML = calcHtml(items[Number(el.dataset.calc)]); });
+      list.querySelectorAll('[data-pricebox]').forEach((el) => { const i = Number(el.dataset.pricebox); el.innerHTML = priceBoxHtml(items[i], i); });
+      list.querySelectorAll('[data-lab]').forEach((el) => {
+        const it = items[Number(el.dataset.idx)]; if (!it) return;
+        const k = el.dataset.lab;
+        el.textContent = k === 'qty' ? qtyLabel(it) : k === 'pack' ? packLabel(it) : k === 'price' ? priceFieldLabel(it) : k === 'segpack' ? `Per ${unitLabel(it)}` : '';
       });
-      let ex = 0; let incl = 0; let units = 0;
+      let ex = 0; let incl = 0; let units = 0; let active = 0; let skipped = 0;
       items.forEach((it) => {
-        const p = splitPrice(it.price, vat.mode, vat.rate);
-        ex += p.exVat * it.quantity; incl += p.inclVat * it.quantity; units += it.quantity * packOf(it);
+        if (!isActive(it)) { skipped += 1; return; }
+        const p = splitPrice(packPrice(it), vat.mode, vat.rate);
+        ex += p.exVat * it.quantity; incl += p.inclVat * it.quantity; units += it.quantity * packOf(it); active += 1;
       });
       modal.querySelector('#purchase-summary').innerHTML = `
-        <div><span>Products</span><b>${items.length}</b></div>
-        <div><span>Total units received</span><b>${Math.round(units * 100) / 100}</b></div>
+        <div><span>Products in this purchase</span><b>${active}</b></div>
+        <div><span>Total pieces received</span><b>${fmtN(units)}</b></div>
+        ${skipped ? `<div class="text-muted"><span>Saved lines with no quantity (skipped)</span><span>${skipped}</span></div>` : ''}
         ${vat.mode && vat.mode !== 'NONE' ? `<div><span>Subtotal excl. VAT</span><span>${money(ex)}</span></div><div><span>VAT (${vat.rate}%)</span><span>${money(incl - ex)}</span></div>` : ''}
         <div class="pc-grand"><span>Total</span><span>${money(incl)}</span></div>`;
       const sb = modal.querySelector('#purchase-save-btn');
-      if (sb && !sb.dataset.loading) sb.textContent = items.length ? `Create purchase · ${money(incl)}` : 'Create purchase';
+      if (sb && !sb.dataset.loading) sb.textContent = active ? `Create purchase · ${money(incl)}` : 'Create purchase';
     }
 
-    function renderItems(focusIdx) {
-      const el = modal.querySelector('#purchase-items');
+    function cardHtml(it, i) {
+      const vlabel = it.variant ? Object.values(it.variant.attributes || {}).join(', ') : '';
+      const sku = (it.variant ? it.variant.sku : it.product.sku) || '';
+      const bulk = isBulk(it); const n = packOf(it);
+      const saved = supId && memGet(supId).items[itemKey(it)];
+      const unitOpts = UNITS.map((u) => `<option value="${u}"${!it.customUnit && it.unitName === u ? ' selected' : ''}>${u === 'Piece' ? 'Piece (single)' : u}</option>`).join('') + `<option value="__other"${it.customUnit ? ' selected' : ''}>Other…</option>`;
+      return `
+      <div class="pc-card${isActive(it) ? '' : ' pc-skip'}" data-row="${i}">
+        <div class="pc-head">
+          <div>
+            <div class="pc-name">${esc(it.product.name)}${vlabel ? ` <span class="text-muted">(${esc(vlabel)})</span>` : ''}${liquor ? liquorChip(it) : ''}${saved ? '<span class="pc-tag">saved for supplier</span>' : ''}</div>
+            ${sku ? `<div class="pc-sku">SKU: ${esc(sku)}</div>` : ''}
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm btn-icon" data-remove="${i}" title="Remove" aria-label="Remove">${window.Icons.get('trash')}</button>
+        </div>
+        <div class="pc-grid">
+          <div class="field"><label>Bought in</label>
+            <select class="select" data-unit="${i}">${unitOpts}</select>
+            ${it.customUnit ? `<input class="input" style="margin-top:6px" data-field="unitName" data-idx="${i}" value="${esc(it.unitName)}" placeholder="e.g. Bale, Sack 50kg" maxlength="24" />` : ''}
+          </div>
+          ${bulk ? `<div class="field"><label data-lab="pack" data-idx="${i}">${esc(packLabel(it))}</label>
+            <input class="input" type="number" min="1" step="1" inputmode="numeric" value="${n > 1 ? n : ''}" placeholder="e.g. 24" data-field="pack" data-idx="${i}" />
+            <div class="pc-chips">${PACK_CHIPS.map((x) => `<button type="button" data-packset="${x}" data-idx="${i}" class="${n === x ? 'on' : ''}">${x}</button>`).join('')}</div></div>` : ''}
+          <div class="field"><label data-lab="qty" data-idx="${i}">${esc(qtyLabel(it))}</label>
+            <input class="input" type="number" min="0" step="0.01" inputmode="decimal" value="${it.quantity > 0 ? it.quantity : ''}" placeholder="0" data-field="quantity" data-idx="${i}" /></div>
+          <div class="field"><label data-lab="price" data-idx="${i}">${esc(priceFieldLabel(it))}</label>
+            <input class="input" type="number" min="0" step="0.01" inputmode="decimal" value="${it.price || ''}" placeholder="0" data-field="price" data-idx="${i}" />
+            ${bulk ? `<div class="pc-seg"><button type="button" data-pmode="pack" data-idx="${i}" class="${it.priceMode !== 'unit' ? 'on' : ''}"><span data-lab="segpack" data-idx="${i}">Per ${esc(unitLabel(it))}</span></button><button type="button" data-pmode="unit" data-idx="${i}" class="${it.priceMode === 'unit' ? 'on' : ''}">Per piece</button></div>` : ''}</div>
+        </div>
+        <div class="pc-result" data-calc="${i}"></div>
+        <div data-pricebox="${i}" style="margin-top:8px"></div>
+      </div>`;
+    }
+
+    function renderItems(focusIdx, focusField) {
       if (!items.length) {
-        el.innerHTML = `<tr><td colspan="6"><div class="pc-empty"><b>No products added yet</b><br>Click <b>Add product</b> to search or scan the goods you received.</div></td></tr>`;
+        list.innerHTML = `<div class="pc-empty"><b>No products added yet</b><br>Pick the supplier, then click <b>Add product</b>. Products you add are remembered for that supplier.</div>`;
         refreshCalc(); return;
       }
-      el.innerHTML = items.map((it, i) => {
-        const vlabel = it.variant ? Object.values(it.variant.attributes || {}).join(', ') : '';
-        const sku = (it.variant ? it.variant.sku : it.product.sku) || '';
-        return `
-        <tr data-row="${i}">
-          <td class="pc-n">${i + 1}</td>
-          <td>
-            <div class="pc-name">${esc(it.product.name)}${vlabel ? ` <span class="text-muted">(${esc(vlabel)})</span>` : ''}${liquor ? liquorChip(it) : ''}</div>
-            ${sku ? `<div class="pc-sku">SKU: ${esc(sku)}</div>` : ''}
-            ${liquor ? liquorRowHtml(it, i) : ''}
-            <div class="pc-calc" data-calc="${i}"></div>
-            <div data-pricebox="${i}" style="margin-top:6px"></div>
-          </td>
-          <td><input class="input" type="number" min="0.01" step="0.01" value="${it.quantity}" data-field="quantity" data-idx="${i}" inputmode="decimal" aria-label="Quantity" /></td>
-          <td><input class="input" type="number" min="0" step="0.01" value="${it.price}" data-field="price" data-idx="${i}" inputmode="decimal" aria-label="Unit cost" /><div class="pc-sub">${priceLabel(it)}</div></td>
-          <td class="pc-r"><b data-linetotal="${i}"></b></td>
-          <td><button type="button" class="btn btn-ghost btn-sm btn-icon" data-remove="${i}" title="Remove" aria-label="Remove">${window.Icons.get('trash')}</button></td>
-        </tr>`;
-      }).join('');
-      el.querySelectorAll('input[data-field]').forEach((input) => {
-        input.addEventListener('keydown', (e) => { if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); });
-        input.addEventListener('focus', () => input.select());
-        input.addEventListener('input', () => {
-          const it = items[Number(input.dataset.idx)];
-          it[input.dataset.field] = Number(input.value) || 0;
-          input.closest('tr').classList.remove('pc-row-bad');
-          refreshCalc();
-        });
-        if (input.dataset.field === 'pack' || input.dataset.field === 'quantity') input.addEventListener('change', () => { if (liquor) renderItems(); });
-        // Fires when the owner finishes typing the cost (blur / Enter) -> offer the price pop-up.
-        if (input.dataset.field === 'price') {
-          input.addEventListener('change', () => {
-            const it = items[Number(input.dataset.idx)];
-            if (!(it.price > 0) || it.promptedFor === it.price) return;
-            it.promptedFor = it.price;
-            openPriceDialog(it, (pu) => { it.priceUpdate = pu; refreshCalc(); });
-          });
-        }
-      });
-      el.querySelectorAll('[data-packset]').forEach((b) => b.addEventListener('click', () => { items[Number(b.dataset.idx)].pack = Number(b.dataset.packset); renderItems(); }));
-      el.querySelectorAll('[data-remove]').forEach((btn) => {
-        btn.addEventListener('click', () => { items.splice(Number(btn.dataset.remove), 1); renderItems(); });
-      });
-      // Edit / Remove buttons of the price box (delegated: the box is re-rendered often)
-      el.onclick = (e) => {
-        const edit = e.target.closest('[data-edit-prices]');
-        const clr = e.target.closest('[data-clear-prices]');
-        if (edit) { const it = items[Number(edit.dataset.editPrices)]; openPriceDialog(it, (pu) => { it.priceUpdate = pu; refreshCalc(); }); }
-        if (clr) { items[Number(clr.dataset.clearPrices)].priceUpdate = null; refreshCalc(); }
-      };
+      list.innerHTML = items.map(cardHtml).join('');
       refreshCalc();
       if (focusIdx != null) {
-        const q = el.querySelector(`input[data-field="quantity"][data-idx="${focusIdx}"]`);
-        if (q) { q.focus(); q.select(); q.closest('tr').scrollIntoView({ block: 'nearest' }); }
+        const q = list.querySelector(`input[data-field="${focusField || 'quantity'}"][data-idx="${focusIdx}"]`);
+        const card = list.querySelector(`[data-row="${focusIdx}"]`);
+        if (card) card.scrollIntoView({ block: 'nearest' });
+        if (q) { q.focus(); q.select(); }
       }
     }
-    renderItems();
 
-    modal.querySelector('#vat-mode').addEventListener('change', (e) => {
-      vat.mode = e.target.value;
-      modal.querySelector('#vat-rate-field').style.visibility = vat.mode === 'INCLUSIVE' || vat.mode === 'EXCLUSIVE' ? 'visible' : 'hidden';
-      modal.querySelector('#vat-field').classList.toggle('pc-vat-need', !vat.mode);
-      renderItems(); // labels change with the mode
+    /* ---------- one set of delegated listeners (cards are re-drawn often) ---------- */
+    list.addEventListener('keydown', (e) => { if (e.target.type === 'number' && ['e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); });
+    list.addEventListener('focusin', (e) => { if (e.target.tagName === 'INPUT' && e.target.type === 'number') e.target.select(); });
+    list.addEventListener('input', (e) => {
+      const t = e.target; const f = t.dataset.field; if (!f) return;
+      const it = items[Number(t.dataset.idx)]; if (!it) return;
+      const card = t.closest('.pc-card');
+      if (f === 'unitName') it.unitName = t.value;
+      else it[f] = Number(t.value) || 0;
+      if (f === 'price' || f === 'pack') it.canon = null;
+      if (f === 'pack') card.querySelectorAll('[data-packset]').forEach((b) => b.classList.toggle('on', Number(b.dataset.packset) === packOf(it)));
+      if (f === 'quantity') card.classList.toggle('pc-skip', !isActive(it));
+      card.classList.remove('pc-row-bad');
+      refreshCalc(); persistSoon();
     });
-    modal.querySelector('#vat-rate').addEventListener('input', (e) => { vat.rate = Number(e.target.value) || 0; refreshCalc(); });
+    list.addEventListener('change', (e) => {
+      const t = e.target;
+      if (t.dataset.unit != null) {
+        const i = Number(t.dataset.unit); const it = items[i]; const v = t.value;
+        if (v === '__other') { it.customUnit = true; it.unitName = ''; }
+        else {
+          it.customUnit = false; it.unitName = v;
+          if (v === 'Piece') { it.pack = 1; it.priceMode = 'pack'; }
+          if (v === 'Dozen') it.pack = 12;
+        }
+        it.canon = null; persistSoon();
+        renderItems(i, v === 'Piece' ? 'quantity' : it.customUnit ? 'unitName' : (packOf(it) > 1 ? 'quantity' : 'pack'));
+        return;
+      }
+      if (t.dataset.field === 'price') {
+        const it = items[Number(t.dataset.idx)];
+        if (!it || !(it.price > 0) || it.promptedFor === it.price) return;
+        it.promptedFor = it.price;
+        openPriceDialog(it, (pu) => { it.priceUpdate = pu; refreshCalc(); persistSoon(); });
+      }
+    });
+    list.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.remove != null) { removeRow(items[Number(b.dataset.remove)]); return; }
+      if (b.dataset.packset != null) {
+        const i = Number(b.dataset.idx); const it = items[i];
+        it.pack = Number(b.dataset.packset); it.canon = null;
+        const card = b.closest('.pc-card');
+        card.querySelector('input[data-field="pack"]').value = it.pack;
+        card.querySelectorAll('[data-packset]').forEach((x) => x.classList.toggle('on', x === b));
+        refreshCalc(); persistSoon();
+        const q = card.querySelector('input[data-field="quantity"]'); if (q) q.focus();
+        return;
+      }
+      if (b.dataset.pmode != null) {
+        const i = Number(b.dataset.idx); const it = items[i]; const m = b.dataset.pmode;
+        if (it.priceMode === m) return;
+        const canon = packPrice(it); it.canon = canon; it.priceMode = m;
+        it.price = round4(m === 'unit' ? canon / packOf(it) : canon);
+        const card = b.closest('.pc-card');
+        card.querySelector('input[data-field="price"]').value = it.price || '';
+        card.querySelectorAll('[data-pmode]').forEach((x) => x.classList.toggle('on', x === b));
+        refreshCalc(); persistSoon(); return;
+      }
+      if (b.dataset.editPrices != null) { const it = items[Number(b.dataset.editPrices)]; openPriceDialog(it, (pu) => { it.priceUpdate = pu; refreshCalc(); persistSoon(); }); return; }
+      if (b.dataset.clearPrices != null) { items[Number(b.dataset.clearPrices)].priceUpdate = null; refreshCalc(); persistSoon(); }
+    });
 
+    async function removeRow(it) {
+      if (!it) return;
+      persist();
+      const remembered = supId && memGet(supId).items[itemKey(it)];
+      let choice = 'once';
+      if (remembered) choice = await askRemove(it.product.name, supName());
+      if (choice === 'cancel') return;
+      if (choice === 'forget') memForget(supId, itemKey(it));
+      const idx = items.indexOf(it); if (idx >= 0) items.splice(idx, 1);
+      renderItems(); persist();
+      if (choice === 'forget') window.UI.toast.info(`${it.product.name} removed from ${supName() || 'the supplier'}'s saved list`);
+    }
+
+    /* ---------- supplier: auto-fill remembered products ---------- */
+    async function switchSupplier(newId) {
+      if (newId === supId) return;
+      const entries = newId ? Object.values(memGet(newId).items || {}).sort((a, b) => String(a.product.name).localeCompare(String(b.product.name))) : [];
+      const prev = supId;
+      const hasQty = items.some(isActive);
+      if (prev && entries.length && hasQty) {
+        const ok = await window.UI.confirmDialog({ title: 'Change supplier?', message: `The products you entered stay saved under ${supName()}. ${suppliersName(newId)}'s saved products will be loaded instead.`, confirmText: 'Change supplier' });
+        if (!ok) { supSel.value = prev; return; }
+      }
+      persist(); // keep what was typed under the previous supplier
+      supId = newId;
+      if (entries.length) {
+        if (prev) items.length = 0; // moving between suppliers: start from the new supplier's list
+        const have = new Set(items.map(itemKey));
+        let added = 0;
+        entries.forEach((e) => { const x = fromEntry(e); if (!have.has(itemKey(x))) { items.push(x); added += 1; } });
+        const m = memGet(newId);
+        if (!vat.mode && m.vat && m.vat.mode) applyVat(m.vat.mode, m.vat.rate);
+        modal.querySelector('#pc-fill-note').innerHTML = `<div class="pc-note"><b>${added} product${added === 1 ? '' : 's'}</b> loaded from ${esc(suppliersName(newId))}. Just type the quantities - lines left empty are skipped. Use the bin to remove a product.</div>`;
+      } else {
+        modal.querySelector('#pc-fill-note').innerHTML = newId ? `<div class="pc-note">No saved products for ${esc(suppliersName(newId))} yet - add them once and they will appear every time.</div>` : '';
+      }
+      renderItems(); persist();
+    }
+    const suppliersName = (id) => { const s = (suppliersCache || suppliers).find((x) => x._id === id); return s ? s.name : 'this supplier'; };
+    supSel.addEventListener('change', () => switchSupplier(supSel.value));
+
+    /* ---------- VAT ---------- */
+    modal.querySelector('#vat-mode').addEventListener('change', (e) => { applyVat(e.target.value); refreshCalc(); persist(); });
+    modal.querySelector('#vat-rate').addEventListener('input', (e) => { vat.rate = Number(e.target.value) || 0; refreshCalc(); persistSoon(); });
+
+    /* ---------- add product ---------- */
     modal.querySelector('#add-item-btn').addEventListener('click', () => {
+      if (!supId) { window.UI.toast.error('Choose the supplier first'); supSel.focus(); return; }
       if (!vat.mode) { window.UI.toast.error('Choose the VAT option before adding products'); modal.querySelector('#vat-mode').focus(); return; }
       window.ProductPicker.open({
         onSelect: ({ product, variant }) => {
-          const same = items.findIndex((x) => x.product._id === product._id && (x.variant ? x.variant._id : '') === (variant ? variant._id : ''));
-          if (same >= 0) { items[same].quantity += 1; window.UI.toast.info(`${product.name}: quantity increased to ${items[same].quantity}`); renderItems(same); return; }
-          items.push({ product, variant, quantity: 1, price: (variant ? variant.costPrice : product.costPrice) || 0, priceUpdate: null, promptedFor: null });
-          renderItems(items.length - 1);
+          const probe = newItem(product, variant, 1);
+          const same = items.findIndex((x) => itemKey(x) === itemKey(probe));
+          if (same >= 0) {
+            items[same].quantity = (Number(items[same].quantity) || 0) + 1;
+            window.UI.toast.info(`${product.name}: quantity is now ${fmtN(items[same].quantity)}`);
+            renderItems(same); persist(); return;
+          }
+          const mem = memGet(supId).items[itemKey(probe)];
+          const it = mem ? { ...fromEntry(mem), quantity: 1 } : probe;
+          items.push(it);
+          renderItems(items.length - 1, isBulk(it) ? 'quantity' : 'quantity');
+          persist();
+          if (!mem) window.UI.toast.info(`${product.name} saved under ${supName()} - it will appear next time`);
         },
       });
     });
 
-    const supSel = modal.querySelector('#pc-supplier');
-    const newSupBtn = modal.querySelector('#new-supplier-btn');
-    const openNewSupplier = () => openQuickSupplier((sup, list) => {
-      supSel.innerHTML = list.map((x) => `<option value="${x._id}">${esc(x.name)}</option>`).join('');
-      supSel.value = sup._id;
+    const openNewSupplier = () => openQuickSupplier((sup, l) => {
+      supSel.innerHTML = `<option value="">Choose supplier…</option>${l.map((x) => `<option value="${x._id}">${esc(x.name)}</option>`).join('')}`;
+      supSel.value = sup._id; switchSupplier(sup._id);
     });
-    newSupBtn.addEventListener('click', openNewSupplier);
+    modal.querySelector('#new-supplier-btn').addEventListener('click', openNewSupplier);
     window.Permissions.applyPermissionGates(modal, window.AppShell.getUser());
-    if (!suppliers.length) setTimeout(openNewSupplier, 150); // nothing to pick from: go straight to adding one
+    if (!suppliers.length && !draft) setTimeout(openNewSupplier, 150);
 
-    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { picker.destroy(); window.UI.closeModal(); });
+    /* ---------- restore an unfinished purchase ---------- */
+    if (draft && (draft.items.length || draft.supplierId || draft.invoiceNumber || draft.notes)) {
+      if (draft.supplierId && (suppliers.some((s) => s._id === draft.supplierId))) { supId = draft.supplierId; supSel.value = supId; }
+      if (draft.invoiceNumber) form.invoiceNumber.value = draft.invoiceNumber;
+      if (draft.notes) form.notes.value = draft.notes;
+      if (draft.vatMode) applyVat(draft.vatMode, draft.vatRate);
+      draft.items.forEach((o) => { try { items.push(reviveItem(o)); } catch (e) { /* skip bad line */ } });
+      if (items.length) window.UI.toast.info(`Unfinished purchase restored (${items.length} product${items.length === 1 ? '' : 's'})`);
+    }
+    renderItems();
+
+    /* ---------- close / discard ---------- */
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', () => { persist(); picker.destroy(); window.UI.closeModal(); });
+    modal.querySelector('[data-action="discard"]').addEventListener('click', async () => {
+      const ok = await window.UI.confirmDialog({ title: 'Discard this draft?', message: 'Everything typed in this purchase will be deleted. Supplier product lists are kept.', confirmText: 'Discard', danger: true });
+      if (!ok) return;
+      done = true; clearTimeout(timer); clearDraft(); renderDraftBanner(); picker.destroy(); window.UI.closeModal();
+    });
+
+    /* ---------- create ---------- */
     modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
-      if (!vat.mode) return window.UI.toast.error('Choose the VAT option first');
-      if (!items.length) return window.UI.toast.error('Add at least one item');
-      const form = modal.querySelector('#purchase-form');
       if (!supSel.value) { window.UI.toast.error('Choose a supplier, or add a new one'); supSel.focus(); return; }
-      const rows = modal.querySelectorAll('#purchase-items tr[data-row]');
-      rows.forEach((r) => r.classList.remove('pc-row-bad'));
-      const badQty = items.findIndex((it) => !(Number(it.quantity) > 0));
-      if (badQty >= 0) { rows[badQty] && rows[badQty].classList.add('pc-row-bad'); window.UI.toast.error(`Enter a quantity above 0 for ${items[badQty].product.name}`); return; }
-      const zero = items.findIndex((it) => !(Number(it.price) > 0));
-      if (zero >= 0) {
-        rows[zero] && rows[zero].classList.add('pc-row-bad');
-        const okZero = await window.UI.confirmDialog({ title: 'Cost is 0', message: `${items[zero].product.name} has a unit cost of 0. Is this free stock? Choose Cancel to enter the cost.`, confirmText: 'Yes, cost is 0' });
+      if (!vat.mode) return window.UI.toast.error('Choose the VAT option first');
+      const active = items.filter(isActive);
+      if (!active.length) return window.UI.toast.error(items.length ? 'Enter a quantity for at least one product' : 'Add at least one item');
+      const cards = list.querySelectorAll('.pc-card');
+      cards.forEach((r) => r.classList.remove('pc-row-bad'));
+      const flag = (it) => { const c = cards[items.indexOf(it)]; if (c) { c.classList.add('pc-row-bad'); c.scrollIntoView({ block: 'center' }); } };
+      const odd = active.find((it) => it.unitName !== 'Piece' && packOf(it) === 1);
+      if (odd) {
+        flag(odd);
+        const okOdd = await window.UI.confirmDialog({ title: 'Check the pieces', message: `${odd.product.name}: 1 ${unitLabel(odd) || 'unit'} = 1 piece. Is that right? Choose Cancel to enter how many pieces are inside.`, confirmText: 'Yes, 1 piece' });
+        if (!okOdd) return;
+        cards.forEach((r) => r.classList.remove('pc-row-bad'));
+      }
+      const zero = active.find((it) => !(packPrice(it) > 0));
+      if (zero) {
+        flag(zero);
+        const okZero = await window.UI.confirmDialog({ title: 'Cost is 0', message: `${zero.product.name} has a cost of 0. Is this free stock? Choose Cancel to enter the cost.`, confirmText: 'Yes, cost is 0' });
         if (!okZero) return;
       }
       const raw = window.UI.serializeForm(form);
       const rate = vat.mode === 'NONE' ? 0 : vat.rate;
 
-      // multipart: files + plain fields; items travel as a JSON string
       const fd = new FormData();
       fd.append('branchId', branchId);
       fd.append('supplierId', raw.supplierId);
@@ -1044,34 +1296,33 @@
       if (raw.notes) fd.append('notes', raw.notes);
       fd.append('vatMode', vat.mode);
       fd.append('vatRate', rate);
-      fd.append('items', JSON.stringify(items.map((it) => {
+      fd.append('items', JSON.stringify(active.map((it) => {
         const line = {
           productId: it.product._id,
-          variantId: it.variant?._id,
-          quantity: it.quantity * packOf(it), // stock is kept per bottle / can
-          unitCost: splitPrice(it.price, vat.mode, rate).exVat / packOf(it), // backend adds the VAT back via taxRate
+          variantId: it.variant ? it.variant._id : undefined,
+          quantity: it.quantity * packOf(it), // stock is always kept in single pieces
+          unitCost: splitPrice(packPrice(it), vat.mode, rate).exVat / packOf(it), // ex-VAT cost of ONE piece; backend adds VAT via taxRate
           taxRate: rate,
         };
-        if (it.priceUpdate) {               // owner chose "Update prices"
-          line.updatePrices = true;         // backend sets cost = real unit cost
-          line.sellingPrice = it.priceUpdate.sellingPrice;
-          line.defaultDiscount = it.priceUpdate.discount;
-        }
+        if (it.priceUpdate) { line.updatePrices = true; line.sellingPrice = it.priceUpdate.sellingPrice; line.defaultDiscount = it.priceUpdate.discount; }
         return line;
       })));
       picker.getFiles().forEach((f) => fd.append('invoices', f, f.name));
 
-      const updatedCount = items.filter((it) => it.priceUpdate).length;
+      const updatedCount = active.filter((it) => it.priceUpdate).length;
+      const skipped = items.length - active.length;
       const btn = document.getElementById('purchase-save-btn');
       window.UI.setButtonLoading(btn, true, 'Creating…');
       try {
         await window.Api.upload('/purchases', fd);
-        window.UI.toast.success(updatedCount ? `Purchase created - ${updatedCount} product price${updatedCount > 1 ? 's' : ''} updated` : 'Purchase created');
+        memUpsert(supId, items, vat); // remember latest units & prices for next time
+        done = true; clearTimeout(timer); clearDraft(); renderDraftBanner();
+        window.UI.toast.success(`Purchase created${updatedCount ? ` - ${updatedCount} product price${updatedCount > 1 ? 's' : ''} updated` : ''}${skipped ? ` (${skipped} saved line${skipped > 1 ? 's' : ''} without quantity skipped)` : ''}`);
         picker.destroy();
         window.UI.closeModal();
         fetchAndRender();
       } catch (err) {
-        window.UI.toast.error(err.message);
+        window.UI.toast.error(err.message); // draft is kept - nothing is lost
       } finally {
         window.UI.setButtonLoading(btn, false);
       }
