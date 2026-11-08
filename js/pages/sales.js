@@ -2427,6 +2427,15 @@
   }
 
   /** Which payment tab a confirmed-but-unsaved M-PESA payment belongs to. */
+  // Mobile money code is optional: cashier sees a modal and may continue without it.
+  async function confirmNoMmCode() {
+    return !!(await window.UI.confirmDialog({
+      title: 'Continue without mobile money code?',
+      message: 'No transaction code was entered. The sale will be saved without it and flagged for the manager to check against the mobile money statement.',
+      confirmText: 'Continue without code',
+    }));
+  }
+
   function mpesaMethodIdFor(pending) {
     return pending && pending.mode === 'MANUAL' ? 'MPESA_TILL' : 'MPESA';
   }
@@ -2665,17 +2674,19 @@
         ${offlineNow ? '<div class="pz-note warn">No internet: this payment is saved with the sale and checked when the till reconnects.</div>' : ''}
         <div class="form-row">
           <div class="field"><label for="mm-net">Network</label><select class="select" id="mm-net">${nets.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></div>
-          <div class="field"><label for="mm-ref">Transaction code</label><input class="input pz-code-input" id="mm-ref" maxlength="30" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. UJK1A2B3C4" /></div>
+          <div class="field"><label for="mm-ref">Transaction code <span class="text-muted">(optional)</span></label><input class="input pz-code-input" id="mm-ref" maxlength="30" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. UJK1A2B3C4" /></div>
         </div>
         <div class="form-row">
           <div class="field"><label for="mm-phone">Customer phone <span class="text-muted">(optional)</span></label><input class="input" id="mm-phone" inputmode="tel" placeholder="07XXXXXXXX" /></div>
         </div>`;
       const net = panel.querySelector('#mm-net'); const ref = panel.querySelector('#mm-ref'); const phone = panel.querySelector('#mm-phone');
-      const upd = () => { ref.value = ref.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); setComplete({ enabled: ref.value.length >= 6, label: offlineNow ? 'Save sale offline & print receipt' : 'Complete sale & print receipt' }); };
+      const upd = () => { ref.value = ref.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); setComplete({ enabled: true, label: offlineNow ? 'Save sale offline & print receipt' : 'Complete sale & print receipt' }); };
       ref.addEventListener('input', upd); upd();
       setTimeout(() => ref.focus(), 50);
       onComplete = async () => {
-        state.payments = [{ method: 'MOBILE_MONEY', amount: dueAmount, reference: ref.value, provider: net.value, network: net.value, payerPhone: phone.value.trim() || undefined }];
+        if (ref.value && ref.value.length < 6) return window.UI.toast.error('Code looks too short - fix it or clear it to continue without a code');
+        if (!ref.value && !(await confirmNoMmCode())) return;
+        state.payments = [{ method: 'MOBILE_MONEY', amount: dueAmount, reference: ref.value || undefined, provider: net.value, network: net.value, payerPhone: phone.value.trim() || undefined }];
         await checkout({ btn: completeBtn });
       };
     }
@@ -2952,7 +2963,7 @@
         D.lines.forEach((l) => {
           if (l.method === 'CREDIT') return;
           if (!num(l.amount)) issues.push(`Enter the ${LM[l.method]} amount`);
-          if (l.method === 'MOBILE_MONEY' && l.ref.length < 6) issues.push('Enter the mobile money code');
+          if (l.method === 'MOBILE_MONEY' && l.ref && l.ref.length < 6) issues.push('Mobile money code is too short - fix it or clear it');
         });
         if (mp && !mp.confirmed) issues.push('Confirm the M-PESA payment');
         if (cr) {
@@ -3005,7 +3016,7 @@
             <button type="button" class="sp-rest" data-sp-rest="${l.id}" ${locked ? 'disabled' : ''} title="Put everything that is left on this line">Rest</button></div>`;
           if (l.method === 'CASH') body += `<div class="sp-sub"><label>Customer gave <em>(optional, for change)</em></label><input class="input" data-sp-tend="${l.id}" type="number" inputmode="decimal" step="0.01" min="0" placeholder="e.g. 1000" value="${esc(l.tendered)}" /><div class="sp-change" data-sp-change="${l.id}" style="display:none"></div></div>`;
           if (l.method === 'CARD' || l.method === 'BANK') body += `<div class="sp-sub"><label>Reference / slip no. <em>(optional)</em></label><input class="input" data-sp-ref="${l.id}" placeholder="Transaction code, slip number…" value="${esc(l.ref)}" /></div>`;
-          if (l.method === 'MOBILE_MONEY') body += `<div class="sp-sub sp-two"><div><label>Network</label><select class="select" data-sp-net="${l.id}">${['M-PESA', 'Airtel Money', 'T-Kash', 'Equitel', 'Other'].map((n) => `<option ${n === l.net ? 'selected' : ''}>${n}</option>`).join('')}</select></div><div><label>Transaction code</label><input class="input pz-code-input" data-sp-ref="${l.id}" maxlength="30" autocapitalize="characters" autocomplete="off" placeholder="e.g. UJK1A2B3C4" value="${esc(l.ref)}" /></div></div>`;
+          if (l.method === 'MOBILE_MONEY') body += `<div class="sp-sub sp-two"><div><label>Network</label><select class="select" data-sp-net="${l.id}">${['M-PESA', 'Airtel Money', 'T-Kash', 'Equitel', 'Other'].map((n) => `<option ${n === l.net ? 'selected' : ''}>${n}</option>`).join('')}</select></div><div><label>Transaction code <em>(optional)</em></label><input class="input pz-code-input" data-sp-ref="${l.id}" maxlength="30" autocapitalize="characters" autocomplete="off" placeholder="e.g. UJK1A2B3C4" value="${esc(l.ref)}" /></div></div>`;
           if (l.method === 'MPESA') {
             const both = state.flags.mpesaEnabled && state.flags.mpesaManualEnabled;
             body += `<div class="sp-sub sp-mp">
@@ -3197,6 +3208,7 @@
       onComplete = async () => {
         const issues = validity();
         if (issues.length) return window.UI.toast.error(issues[0]);
+        if (D.lines.some((l) => l.method === 'MOBILE_MONEY' && !l.ref) && !(await confirmNoMmCode())) return;
         const cash = D.lines.find((l) => l.method === 'CASH');
         if (cash && await drawerIsOpen()) return window.UI.toast.error('The cash drawer is open. Close it before taking cash.');
         const pays = [];
@@ -3205,7 +3217,7 @@
           const amount = num(l.amount);
           if (l.method === 'CASH') pays.push({ method: 'CASH', amount, amountTendered: Math.max(amount, num(l.tendered) || amount) });
           else if (l.method === 'MPESA') pays.push({ method: 'MPESA', amount, reference: l.confirmed.reference });
-          else if (l.method === 'MOBILE_MONEY') pays.push({ method: 'MOBILE_MONEY', amount, reference: l.ref, provider: l.net, network: l.net });
+          else if (l.method === 'MOBILE_MONEY') pays.push({ method: 'MOBILE_MONEY', amount, reference: l.ref || undefined, provider: l.net, network: l.net });
           else pays.push({ method: l.method, amount, reference: l.ref || undefined });
         });
         state.payments = pays;

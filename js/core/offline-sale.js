@@ -87,7 +87,6 @@
         if (amountCents <= 0) continue;
         if ((p.method === 'CARD' || p.method === 'BANK') && !caps.allowCard) fail('Card and bank payments cannot be taken offline.');
         if (p.method === 'MPESA' && (!caps.allowManualMpesa || !ctx.mpesaTill)) fail('M-PESA Till payments are not enabled for offline selling.');
-        if (p.method === 'MOBILE_MONEY' && !p.reference) fail('Type the mobile-money transaction code.');
         if (p.method === 'CREDIT') fail('Credit sales are not available offline.');
         const row = { method: p.method, amountCents, reference: p.reference || undefined };
         if (p.method === 'CASH') {
