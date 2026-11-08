@@ -634,6 +634,7 @@
     tickClock();
     clearInterval(clockTimer);
     clockTimer = setInterval(tickClock, 15000);
+    startWarmKeepAlive();
     renderViewButtons();
   }
 
@@ -2040,6 +2041,7 @@
 
   function addToCart(product, variant, qty, unitId) {
     if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before starting the next sale'); return; }
+    if (!state.cart.length) warmConnection(); // first item: the server connection is ready before the cashier reaches Complete
     const add = Number(qty) > 0 ? Number(qty) : 1; // the pharmacy desk loads a whole prescription quantity at once
     if (unitId && !unitByIdOf(product, unitId)) unitId = null;
     const key = unitId ? unitKeyOf(product, variant, unitId) : (variant ? variant._id : product._id);
@@ -2441,6 +2443,7 @@
   }
 
   function openPaymentModal(initialMethod, carry) {
+    warmConnection();
     if (drawerLocked()) return window.UI.toast.error('Close the cash drawer before taking the next payment');
     if (!state.cart.length) return window.UI.toast.error('Cart is empty');
     const wholesale = isWs();
@@ -3445,12 +3448,12 @@
   function saveLocalHeld(list) { try { localStorage.setItem(LOCAL_HELD_KEY, JSON.stringify(list)); return true; } catch { window.UI.toast.error('Could not save on this device (storage full)'); return false; } }
   const isNetErr = (e) => !e || e.status == null || e.status === 0 || /network|failed to fetch|offline|timeout/i.test(String((e && e.message) || ''));
 
-  function snapshotCart() {
-    return state.cart.map((i) => ({ product: i.product, variant: i.variant || null, quantity: i.quantity, discount: i.discount || 0, autoDiscount: !!i.autoDiscount, promoApplied: !!i.promoApplied, overridePriceEnabled: !!i.overridePriceEnabled, overridePrice: i.overridePrice == null ? null : i.overridePrice, ...(i.unitId ? { unitId: i.unitId, key: i.key } : {}), ...(i.fromPacket ? { fromPacket: i.fromPacket } : {}) }));
+  function snapshotCart(cart = state.cart) {
+    return cart.map((i) => ({ product: i.product, variant: i.variant || null, quantity: i.quantity, discount: i.discount || 0, autoDiscount: !!i.autoDiscount, promoApplied: !!i.promoApplied, overridePriceEnabled: !!i.overridePriceEnabled, overridePrice: i.overridePrice == null ? null : i.overridePrice, ...(i.unitId ? { unitId: i.unitId, key: i.key } : {}), ...(i.fromPacket ? { fromPacket: i.fromPacket } : {}) }));
   }
-  function parkLocal(label) {
+  function parkLocal(label, src) {
     const list = localHeld();
-    list.unshift({ id: `L${Date.now().toString(36)}`, label, at: Date.now(), cart: snapshotCart(), customer: state.customer, cartDiscount: state.cartDiscount || 0 });
+    list.unshift({ id: `L${Date.now().toString(36)}`, label, at: Date.now(), cart: snapshotCart(src ? src.cart : state.cart), customer: src ? src.customer : state.customer, cartDiscount: (src ? src.cartDiscount : state.cartDiscount) || 0 });
     return saveLocalHeld(list.slice(0, 30));
   }
 
@@ -3939,18 +3942,123 @@
    * change / tendered / due are only passed for CASH sales; when change > 0 the cash drawer
    * is opened (and the POS locked) the moment the sale is saved.
    */
-  async function saveOffline(ctid) {
+  async function saveOffline(ctid, src = state) { // src: the sale to save (the fast checkout passes its own copy, because the live cart is already cleared)
     // Wines & spirits: the till asks the age check itself (the server cannot while offline). null = refused / cancelled: save nothing.
     let ageCheck;
     if (window.LiquorTill && window.LiquorTill.active()) {
-      const lp = await window.LiquorTill.offlinePrepare(state.cart);
+      const lp = await window.LiquorTill.offlinePrepare(src.cart);
       if (lp === null) { const e = new Error('Sale not saved: the age check was not completed.'); e.code = 'AGE_CHECK_CANCELLED'; throw e; }
       ageCheck = lp.ageCheck;
     }
     const r = await window.Offline.sales.create({
-      cart: state.cart, cartDiscount: state.cartDiscount || 0, payments: state.payments, clientTransactionId: ctid, ageCheck,
+      cart: src.cart, cartDiscount: src.cartDiscount || 0, payments: src.payments, clientTransactionId: ctid, ageCheck,
     });
     return { sale: { receiptNumber: r.receiptNumber, _id: null }, receipt: r.receipt, offline: true };
+  }
+
+
+  /* ================================================================== *
+   * SPEED - "Complete sale" must feel instant
+   *  1. warmConnection(): opens (and keeps open) the connection to the server BEFORE the cashier taps Complete, so the
+   *     sale request does not pay for a new TLS handshake or a sleeping server. Runs when the first item is scanned,
+   *     when the payment window opens, and every 4 minutes while the till is open.
+   *  2. checkoutFast(): for ordinary shop sales (cash / card / bank / mobile-money typed code) the till frees itself the
+   *     moment Complete is tapped: the window closes, the cart clears, "Give change" shows, and the next customer can be
+   *     served while the sale is saved in the background. The server still validates everything. If it refuses (or the
+   *     connection drops) the sale is NOT lost: the cart comes straight back with the reason (or is parked on this
+   *     device when the cashier already started the next customer). Retrying uses the same idempotency key, so a
+   *     sale can never be recorded twice.
+   * ================================================================== */
+  let lastWarm = 0;
+  let warmTimer = null;
+  function warmConnection(force) {
+    const now = Date.now();
+    if ((!force && now - lastWarm < 20000) || isOfflineNow()) return;
+    lastWarm = now;
+    try {
+      const base = new URL(window.APP_CONFIG.API_BASE_URL, window.location.href);
+      fetch(new URL('/health', base).href, { method: 'GET', cache: 'no-store', mode: 'cors', credentials: 'omit' }).catch(() => {});
+    } catch { /* never matters */ }
+  }
+  function startWarmKeepAlive() {
+    clearInterval(warmTimer);
+    warmConnection(true);
+    warmTimer = setInterval(() => { if (!document.hidden) warmConnection(true); }, 4 * 60 * 1000);
+  }
+
+  let savingNow = 0;
+  function paintSaving() {
+    let el = document.getElementById('pz-saving');
+    if (!savingNow) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'pz-saving';
+      el.setAttribute('role', 'status');
+      el.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:99999;background:#111827;color:#fff;padding:8px 14px;border-radius:999px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:.92';
+      document.body.appendChild(el);
+    }
+    el.textContent = savingNow > 1 ? `Saving ${savingNow} sales…` : 'Saving sale…';
+  }
+
+  const FAST_METHODS = ['CASH', 'CARD', 'BANK', 'MOBILE_MONEY'];
+  function canCheckoutFast({ wholesale, offlineNow, PT, change }) {
+    if (wholesale || offlineNow) return false;
+    if (PT && PT.active()) return false;                                    // pharmacy: dispensing rules are checked by the server first
+    if (window.LiquorTill && window.LiquorTill.active()) return false;      // wines & spirits: age check is part of the request
+    if (state.pendingMpesa || !state.payments.length) return false;         // M-PESA codes are verified by the server; credit sales need its limit checks
+    if (!state.payments.every((p) => FAST_METHODS.includes(p.method))) return false;
+    if (state.cart.some((l) => l.batchId)) return false;                    // batch picks live in the batch helper, which resetCart clears
+    if (change > 0 && window.CashDrawer && window.CashDrawer.isEnabled()) return false; // the drawer flow needs the receipt number first
+    return true;
+  }
+
+  function checkoutFast({ payload, ctid, change, canOffline }) {
+    const snap = { cart: state.cart, customer: state.customer, cartDiscount: state.cartDiscount || 0, payments: state.payments, key: checkoutKey, lastAdded: state.lastAdded, dueDate: state.dueDate };
+    const cashOnly = state.payments.length === 1 && state.payments[0].method === 'CASH';
+    if (document.querySelector('.modal-backdrop')) window.UI.closeModal();
+    resetCart(); // the till is free for the next customer from this moment
+    if (change > 0) window.UI.toast.success(`Give change: ${fm(change)}`);
+    savingNow += 1; paintSaving();
+    $('pos-search')?.focus();
+
+    (async () => {
+      try {
+        let data;
+        try {
+          ({ data } = await window.Api.post('/sales', payload, { idempotencyKey: snap.key }));
+        } catch (err) {
+          if (err.code === 'NETWORK_ERROR' && canOffline && cashOnly) {
+            window.UI.toast.warning('Connection lost - saving this sale on the till');
+            data = await saveOffline(ctid, { cart: snap.cart, cartDiscount: snap.cartDiscount, payments: snap.payments });
+          } else throw err;
+        }
+        window.UI.toast.success(data.offline ? `Sale ${data.sale.receiptNumber} saved on this till` : `Sale ${data.sale.receiptNumber} completed`);
+        setTimeout(() => { loadShift().catch(() => {}); }, 1200);
+        retailIndex.refreshSoon(60000);
+        try { if (autoPrintGet()) window.ReceiptView.showReceiptModal(data.receipt, { autoPrint: true }); }
+        catch (receiptErr) { window.UI.toast.error(`Sale saved, but the receipt could not be shown: ${receiptErr.message}`); }
+        lcDrop('h|'); lcDrop('d|'); setTimeout(warmLists, 600);
+      } catch (err) {
+        const netIssue = err && (err.code === 'NETWORK_ERROR' || /network|timeout|failed to fetch/i.test(String(err.message || '')));
+        const why = String((err && err.message) || 'The sale could not be saved');
+        const tail = netIssue ? ' The connection dropped, so check Sales history before charging again.' : '';
+        const idle = !state.cart.length && !document.querySelector('.modal-backdrop') && state.view === 'new-sale' && !state.customer;
+        if (idle) {
+          state.cart = snap.cart; state.customer = snap.customer; state.cartDiscount = snap.cartDiscount; state.lastAdded = snap.lastAdded; state.dueDate = snap.dueDate; state.payments = [];
+          checkoutKey = snap.key; // same key: if the first try did get through, the retry returns that sale instead of making a second one
+          renderCart();
+          window.UI.toast.error(`Sale NOT saved: ${why}. Your cart is back.${tail}`);
+          openPaymentModal();
+        } else {
+          const parked = parkLocal(`NOT SAVED - ${why}`.slice(0, 60), snap);
+          window.UI.toast.error(`Sale NOT saved: ${why}.${tail} ${parked ? 'It is kept in Held sales (F6) - resume it when you are ready.' : 'Please ring it up again.'}`);
+          refreshHeldCount();
+        }
+      } finally {
+        savingNow = Math.max(0, savingNow - 1); paintSaving();
+      }
+    })();
+    return true;
   }
 
   async function checkout({ btn, change, tendered, due } = {}) {
@@ -4003,6 +4111,8 @@
       })),
       ...(canOffline ? { deviceId: off.device.id(), clientTransactionId: ctid } : {}),
     };
+
+    if (canCheckoutFast({ wholesale, offlineNow, PT, change })) return checkoutFast({ payload, ctid, change, canOffline });
 
     checkingOut = true;
     if (btn) window.UI.setButtonLoading(btn, true, 'Completing sale…');
