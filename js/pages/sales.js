@@ -379,7 +379,9 @@
   // Retail product list kept on the device (js/core/fast-search.js): typing answers instantly instead of waiting on the server.
   const retailIndex = window.FastSearch.create({
     params: () => ({ status: 'active', channel: 'retail', branchId: (window.AppShell && window.AppShell.getActiveBranchId && window.AppShell.getActiveBranchId()) || undefined }),
-    ttl: 20000,
+    ttl: 60000,        // quiet refresh at most once a minute (one request); a sale does not throw the list away any more
+    hydrate: true,     // the copy saved on this device is used the moment the page opens: first search / scan is instant
+    serveStale: true,  // while a fresh copy downloads, keep answering from the old one (a miss still asks the server)
   });
   const lookupLocal = (t) => retailIndex.search(t, 15); // array, or null when the server has to answer
   const lookupSearch = (t) => (window.Offline && window.Offline.lookup
@@ -388,6 +390,10 @@
   /** Exact barcode/SKU match from the device copy: instant, no server round trip. Returns { product, variant } or null. */
   function localBarcode(code) {
     const t = String(code || '').trim().toLowerCase();
+    if (t && retailIndex.lookupCode) { // instant Map lookup (works for 5,000 products as fast as for 5)
+      const hit = retailIndex.lookupCode(t);
+      if (hit) return hit;
+    }
     const hits = t ? retailIndex.search(t, 8) : null;
     if (!hits) return null;
     for (const p of hits) {
@@ -4013,10 +4019,11 @@
       if (document.querySelector('.modal-backdrop')) window.UI.closeModal();
       window.UI.toast.success(data.offline ? `Sale ${data.sale.receiptNumber} saved on this till` : `Sale ${data.sale.receiptNumber} completed${onCredit ? ' (balance on credit)' : ''}`);
       if (change > 0 && !drawerDriven) window.UI.toast.success(`Give change: ${fm(change)}`);
-      retailIndex.invalidate(); // stock changed: reload the device copy
       resetCart();
-      loadShift();
-      retailIndex.load();
+      // SPEED: nothing heavy runs while the next customer is being served. The shift banner refreshes a moment later,
+      // and the product list keeps answering instantly (it is refreshed quietly, at most once a minute).
+      setTimeout(() => { loadShift().catch(() => {}); }, 1200);
+      retailIndex.refreshSoon(60000);
       try {
         // Wholesale sales open the professional invoice (receipt is one tap away); retail keeps the auto-printing receipt.
         if (payload.channel === 'WHOLESALE' && !data.offline && data.sale && data.sale._id && window.InvoiceView) {
