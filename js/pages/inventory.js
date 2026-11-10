@@ -21,7 +21,7 @@
  * warehouses.html now redirects to inventory.html?step=warehouses.
  */
 (function () {
-  const state = { view: 'stock', page: 1, limit: 10, search: '', location: '', productId: '', productName: '' };
+  const state = { view: 'stock', page: 1, limit: 10, search: '', location: '', productId: '', productName: '', mv: { search: '', categoryId: '', type: '', from: '', to: '' } };
   // opened from Products > "View stock":  inventory.html?productId=...&search=...
   try {
     const q = new URLSearchParams(window.location.search);
@@ -58,6 +58,7 @@
         adjust: openAdjustModal,
         branchTransfer: openTransferModal,
         returnPurchase: openReturnPurchase,
+        breakDown: openBreakDown,
         /** Draw one of the classic views (overview | stock | lowstock | movements | transfers | locmoves) into #view-toolbar / #view-body / #pagination. */
         showView(view) { state.view = view; state.page = 1; return renderActiveView(); },
         setSearch(v) { state.search = v || ''; },
@@ -102,6 +103,7 @@
         <div class="flex gap-2" style="flex-wrap:wrap">
           <button class="btn btn-secondary" id="adjust-stock-btn" data-requires-permission="inventory.adjust">${window.Icons.get('edit')} Adjust</button>
           <button class="btn btn-secondary" id="receive-stock-btn" data-requires-permission="inventory.receive">${window.Icons.get('plus')} Receive stock</button>
+          ${window.UnitKit ? `<button class="btn btn-secondary" id="break-stock-btn" data-requires-permission="inventory.adjust" title="Break a bag into sellable sizes">${window.Icons.get('inventory')} Break down</button>` : ''}
           <button class="btn btn-secondary" id="return-purchase-btn" data-requires-permission="purchases.return">${window.Icons.get('bag')} Return purchase</button>
           ${wh() ? `<button class="btn btn-secondary" id="move-stock-btn" data-requires-permission="inventory.transfer">${window.Icons.get('truck')} Move stock</button>` : ''}
           <button class="btn btn-secondary" id="low-sms-btn" data-requires-permission="settings.update">${window.Icons.get('bell')} Low stock SMS</button>
@@ -134,6 +136,7 @@
     document.getElementById('receive-stock-btn').addEventListener('click', openReceiveModal);
     window.AppShell.runUrlAction?.('receive-stock-btn'); // opened from the setup guide
     document.getElementById('new-transfer-btn').addEventListener('click', openTransferModal);
+    document.getElementById('break-stock-btn')?.addEventListener('click', openBreakDown);
     document.getElementById('return-purchase-btn')?.addEventListener('click', openReturnPurchase);
     document.getElementById('move-stock-btn')?.addEventListener('click', openMoveModal);
     document.getElementById('low-sms-btn')?.addEventListener('click', openLowStockSmsModal);
@@ -211,26 +214,99 @@
       toolbar.innerHTML = `
         <div class="toolbar-search input-group">
           <span class="input-group-icon">${window.Icons.get('search')}</span>
-          <input class="input" id="search-input" type="text" placeholder="Search by product name or SKU" value="${esc(state.search)}" />
+          <input class="input" id="search-input" type="text" placeholder="Search by product name, SKU or barcode" value="${esc(state.search)}" />
         </div>
         ${state.view === 'overview' ? `<span style="flex:1"></span><button class="btn btn-secondary btn-sm" id="reconcile-btn" type="button">${window.Icons.get('check')} Check books</button>` : ''}
       `;
-      document.getElementById('search-input').addEventListener('input', window.UI.debounce((e) => {
-        state.search = e.target.value.trim();
-        state.page = 1;
+      const runSearch = () => {
         if (state.view === 'stock') renderStockLevels();
         else if (state.view === 'warehouse') renderWarehouseStock();
         else renderOverview();
+      };
+      const searchInput = document.getElementById('search-input');
+      searchInput.addEventListener('input', window.UI.debounce((e) => {
+        state.search = e.target.value.trim();
+        state.page = 1;
+        runSearch();
       }));
+      // Camera icon INSIDE the search bar (same scanner as the Add product window): scan a barcode, the stock list filters to it.
+      if (window.BarcodeGuard) {
+        window.BarcodeGuard.attachSearchScan(searchInput, {
+          title: 'Scan product barcode',
+          onCode: (code) => {
+            searchInput.value = code; state.search = code; state.page = 1;
+            runSearch();
+            window.BarcodeGuard.check(code).then((r) => {
+              if (r.unknown) return;
+              if (r.exists) window.UI.toast.success(`Barcode ${code}: ${r.name || 'product found'}`);
+              else window.UI.toast.info(`No product has barcode ${code}. Add it on the Products or Sales page.`);
+            }).catch(() => {});
+          },
+        });
+      }
       document.getElementById('reconcile-btn')?.addEventListener('click', openReconcileModal);
-    } else if (state.view === 'movements' && wh()) {
+    } else if (state.view === 'movements') {
+      const mv = state.mv;
+      const types = ['SALE', 'PURCHASE', 'RETURN', 'REFUND', 'PURCHASE_RETURN', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'TRANSFER_IN', 'TRANSFER_OUT', 'DAMAGE', 'EXPIRED', 'LOST', 'OPENING_STOCK'];
       toolbar.innerHTML = `
-        <select class="select" id="loc-filter" style="max-width:200px">
-          <option value="">Retail + warehouse</option>
-          <option value="RETAIL" ${state.location === 'RETAIL' ? 'selected' : ''}>Retail only</option>
-          <option value="WAREHOUSE" ${state.location === 'WAREHOUSE' ? 'selected' : ''}>Warehouse only</option>
-        </select>`;
-      document.getElementById('loc-filter').addEventListener('change', (e) => { state.location = e.target.value; state.page = 1; renderMovements(); });
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;width:100%">
+          <div class="toolbar-search input-group" style="min-width:210px;flex:1 1 210px">
+            <span class="input-group-icon">${window.Icons.get('search')}</span>
+            <input class="input" id="mv-search" type="text" placeholder="Product name, SKU or barcode" value="${esc(mv.search)}" />
+          </div>
+          <select class="select" id="mv-category" style="max-width:190px"><option value="">All categories</option></select>
+          <select class="select" id="mv-type" style="max-width:170px">
+            <option value="">All movement types</option>
+            ${types.map((t) => `<option value="${t}" ${mv.type === t ? 'selected' : ''}>${t.replace(/_/g, ' ')}</option>`).join('')}
+          </select>
+          ${wh() ? `<select class="select" id="loc-filter" style="max-width:170px">
+            <option value="">Retail + warehouse</option>
+            <option value="RETAIL" ${state.location === 'RETAIL' ? 'selected' : ''}>Retail only</option>
+            <option value="WAREHOUSE" ${state.location === 'WAREHOUSE' ? 'selected' : ''}>Warehouse only</option>
+          </select>` : ''}
+          <label class="text-sm text-secondary" style="display:flex;flex-direction:column;gap:2px">From<input class="input" type="date" id="mv-from" value="${esc(mv.from)}" /></label>
+          <label class="text-sm text-secondary" style="display:flex;flex-direction:column;gap:2px">To<input class="input" type="date" id="mv-to" value="${esc(mv.to)}" /></label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="btn btn-secondary btn-sm" data-mv-range="0">Today</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-mv-range="7">7 days</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-mv-range="30">30 days</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="mv-clear">Clear filters</button>
+          </div>
+        </div>
+        ${state.productId ? `<div style="margin-top:8px;display:inline-flex;gap:8px;align-items:center;padding:4px 10px;background:#e8f1ff;border:1px solid #9ec1ff;border-radius:999px;color:#0b3d91;font-size:13px">Product: <strong>${esc(state.productName || 'selected product')}</strong><button type="button" id="mv-clear-product" class="btn btn-secondary btn-sm" style="padding:0 8px">×</button></div>` : ''}`;
+
+      // categories (loaded once, then cached)
+      loadMovementCategories().then((cats) => {
+        const sel = document.getElementById('mv-category');
+        if (!sel) return;
+        sel.innerHTML = '<option value="">All categories</option>' + cats.map((c) => `<option value="${esc(c._id)}" ${mv.categoryId === c._id ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+      });
+
+      const reload = () => { state.page = 1; renderMovements(); };
+      document.getElementById('mv-search').addEventListener('input', window.UI.debounce((e) => { mv.search = e.target.value.trim(); reload(); }));
+      document.getElementById('mv-category').addEventListener('change', (e) => { mv.categoryId = e.target.value; reload(); });
+      document.getElementById('mv-type').addEventListener('change', (e) => { mv.type = e.target.value; reload(); });
+      document.getElementById('loc-filter')?.addEventListener('change', (e) => { state.location = e.target.value; reload(); });
+      document.getElementById('mv-from').addEventListener('change', (e) => { mv.from = e.target.value; reload(); });
+      document.getElementById('mv-to').addEventListener('change', (e) => { mv.to = e.target.value; reload(); });
+      const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      toolbar.querySelectorAll('[data-mv-range]').forEach((btn) => btn.addEventListener('click', () => {
+        const days = Number(btn.dataset.mvRange);
+        const start = new Date(); start.setDate(start.getDate() - days);
+        mv.from = ymd(start); mv.to = ymd(new Date());
+        document.getElementById('mv-from').value = mv.from; document.getElementById('mv-to').value = mv.to;
+        reload();
+      }));
+      document.getElementById('mv-clear').addEventListener('click', () => {
+        state.mv = { search: '', categoryId: '', type: '', from: '', to: '' }; state.location = ''; state.productId = ''; state.productName = '';
+        try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+        renderToolbar(); state.page = 1; renderMovements();
+      });
+      document.getElementById('mv-clear-product')?.addEventListener('click', () => {
+        state.productId = ''; state.productName = '';
+        try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+        renderToolbar(); state.page = 1; renderMovements();
+      });
     } else {
       toolbar.innerHTML = '';
     }
@@ -419,32 +495,67 @@
   /* ------------------------------------------------------------------ *
    * Movements
    * ------------------------------------------------------------------ */
+  let movementCategories = null;
+  async function loadMovementCategories() {
+    if (movementCategories) return movementCategories;
+    try { const { data } = await window.Api.get('/categories'); movementCategories = data.categories || []; } catch { movementCategories = []; }
+    return movementCategories;
+  }
+
+  /** Filters of the Movements tab as API parameters. The date range covers whole days in the user's own time zone. */
+  function movementParams(branchId) {
+    const mv = state.mv;
+    const p = { branchId, page: state.page, limit: state.limit };
+    if (wh() && state.location) p.location = state.location;
+    if (state.productId) p.productId = state.productId;
+    if (mv.search) p.search = mv.search;
+    if (mv.categoryId) p.categoryId = mv.categoryId;
+    if (mv.type) p.type = mv.type;
+    if (mv.from) p.from = new Date(`${mv.from}T00:00:00`).toISOString();
+    if (mv.to) p.to = new Date(`${mv.to}T23:59:59.999`).toISOString();
+    return p;
+  }
+
   async function renderMovements() {
     const body = document.getElementById('view-body');
     const showLoc = wh();
-    body.innerHTML = tableShell(showLoc ? ['Date', 'Product', 'Where', 'Type', 'Qty', 'Balance', 'By'] : ['Date', 'Product', 'Type', 'Qty', 'Balance', 'By'], showLoc ? 7 : 6, 6);
+    const cols = showLoc ? 8 : 7;
+    body.innerHTML = tableShell(showLoc ? ['Date', 'Product', 'Where', 'Type', 'Qty', 'Balance', 'Details', 'By'] : ['Date', 'Product', 'Type', 'Qty', 'Balance', 'Details', 'By'], cols, 6);
 
     const branchId = window.AppShell.getActiveBranchId();
+    const ticket = (renderMovements.ticket = (renderMovements.ticket || 0) + 1); // a slower, older answer must never overwrite a newer filter
     try {
-      const { data } = await window.Api.get('/inventory/movements', { branchId, page: state.page, limit: state.limit, location: showLoc ? state.location : undefined });
+      const { data } = await window.Api.get('/inventory/movements', movementParams(branchId));
+      if (ticket !== renderMovements.ticket) return;
       const tbody = body.querySelector('tbody');
+      const sm = data.summary || { count: data.total, unitsIn: 0, unitsOut: 0, net: 0 };
+      const fmt = (n) => (Math.round((Number(n) || 0) * 1000) / 1000).toLocaleString();
+      body.insertAdjacentHTML('afterbegin', `
+        <div class="mk-kv" style="padding: var(--space-4) var(--space-6) 0">
+          <div><dt>Movements found</dt><dd>${fmt(sm.count)}</dd></div>
+          <div><dt>Units in</dt><dd style="color:var(--color-success)">+${fmt(sm.unitsIn)}</dd></div>
+          <div><dt>Units out</dt><dd style="color:var(--color-danger)">−${fmt(sm.unitsOut)}</dd></div>
+          <div><dt>Net change</dt><dd>${sm.net > 0 ? '+' : ''}${fmt(sm.net)}</dd></div>
+        </div>`);
       if (!data.items.length) {
-        tbody.innerHTML = `<tr><td colspan="${showLoc ? 7 : 6}">${window.UI.emptyStateHtml({ icon: 'inventory', title: 'No movements yet' })}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${cols}">${window.UI.emptyStateHtml({ icon: 'inventory', title: 'No movements found', message: 'Try a different product, category or date range.' })}</td></tr>`;
       } else {
         tbody.innerHTML = data.items.map((m) => `
           <tr>
             <td class="text-sm">${window.UI.formatDateTime(m.createdAt)}</td>
             <td class="text-sm">${window.UI.escapeHtml(m.productId?.name || '—')}</td>
-            ${showLoc ? `<td>${locBadge(m.location)}</td>` : ''}
-            <td><span class="badge badge-neutral">${m.type}</span></td>
+            ${showLoc ? `<td>${locBadge(m.location)}${m.location === 'WAREHOUSE' && m.warehouseId?.name ? `<div class="text-sm text-muted">${esc(m.warehouseId.name)}</div>` : ''}</td>` : ''}
+            <td><span class="badge badge-neutral">${esc(String(m.type).replace(/_/g, ' '))}</span></td>
             <td class="text-sm" style="color: ${m.quantity > 0 ? 'var(--color-success)' : 'var(--color-danger)'}">${m.quantity > 0 ? '+' : ''}${m.quantity}</td>
             <td class="text-sm">${m.newStock}</td>
+            <td class="text-sm text-muted" style="max-width:260px">${esc(m.reason || '—')}</td>
             <td class="text-sm text-muted">${window.UI.escapeHtml(m.performedBy?.name || 'System')}</td>
           </tr>
         `).join('');
       }
       window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; renderMovements(); });
     } catch (err) {
+      if (ticket !== renderMovements.ticket) return;
       body.innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load movements', message: err.message });
     }
   }
@@ -690,6 +801,12 @@
     });
   }
 
+  /** Break a bag into sellable sizes (js/core/unit-conversion-kit.js). */
+  function openBreakDown() {
+    if (!window.UnitKit) return window.UI.toast.error('Unit conversion is not available on this page');
+    window.UnitKit.openBreakModal({ onDone: afterChange });
+  }
+
   function openReceiveModal(arg) {
     const preset = arg && arg.product ? arg : null; // (a click event is not a preset)
     const branchId = window.AppShell.getActiveBranchId();
@@ -707,7 +824,7 @@
             <div id="selected-product" class="text-sm" style="margin-top: var(--space-2)"></div>
           </div>
           <div class="form-row">
-            <div class="field"><label>Quantity received</label><input class="input" name="quantity" type="number" min="1" required /></div>
+            <div class="field"><label>Quantity received</label><input class="input" name="quantity" type="number" min="1" step="any" inputmode="decimal" required /></div>
             <div class="field"><label>Cost price (KES, optional)</label><input class="input" name="costPrice" type="number" step="0.01" min="0" /></div>
           </div>
           <div class="form-row">
@@ -729,8 +846,11 @@
     });
 
     modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
+    // Receive in any size (a 25 kg bag, a 1/4 bag, kg...): the unit picker converts to the base unit and updates the average cost.
+    const uk = window.UnitKit ? window.UnitKit.attachQtyUnit({ modal, qtyInput: modal.querySelector('[name="quantity"]'), costInput: modal.querySelector('[name="costPrice"]'), mode: 'receive' }) : null;
     const applySel = ({ product, variant }) => {
           selected = { product, variant };
+          if (uk) uk.setProduct(product);
           const sf = modal.querySelector('#serials-field');
           if (sf) sf.style.display = product.trackSerialNumber ? '' : 'none';
           // Expiry-tracked products must be given an expiry date: it is what feeds the expiry watch.
@@ -777,6 +897,8 @@
           productId: selected.product._id,
           variantId: selected.variant?._id,
           quantity: raw.quantity,
+          unitId: uk ? uk.unitId() : undefined,
+          updateCost: uk && raw.costPrice ? uk.updateCost() : undefined,
           costPrice: raw.costPrice || undefined,
           batchNumber: raw.batchNumber || undefined,
           expiryDate: raw.expiryDate || undefined,
@@ -784,7 +906,7 @@
           location: wh() ? (raw.location || 'RETAIL') : undefined,
           serials: selected.product.trackSerialNumber ? serials : undefined,
         });
-        window.UI.toast.success(wh() && raw.location === 'WAREHOUSE' ? 'Stock received into the warehouse' : 'Stock received');
+        window.UI.toast.success(wh() && raw.location === 'WAREHOUSE' ? 'Stock received into the warehouse' : (uk && uk.factor() !== 1 ? `Stock received: ${uk.base(raw.quantity)} ${selected.product.unit || ''}` : 'Stock received'));
         window.UI.closeModal();
         afterChange();
       } catch (err) {
@@ -858,6 +980,9 @@
     const isAdd = () => typeEl.value === 'ADJUSTMENT_IN';
     const LABELS = { ADJUSTMENT_IN: 'Quantity to add', ADJUSTMENT_OUT: 'Quantity to remove', DAMAGE: 'Quantity damaged', EXPIRED: 'Quantity expired', LOST: 'Quantity lost / stolen' };
     const pool = () => (wh() && locEl ? locEl.value : 'RETAIL');
+    // Adjust in any size / with decimals (12.5 kg, 1/4 bag): the picker converts to the base unit.
+    const uk = window.UnitKit ? window.UnitKit.attachQtyUnit({ modal, qtyInput: qtyEl, mode: 'adjust', onChange: () => recalc() }) : null;
+    const fracOk = () => !!(uk && uk.fractional());
 
     const showMsg = (kind, text) => {
       if (!text) { msgEl.style.display = 'none'; msgEl.textContent = ''; return; }
@@ -875,19 +1000,20 @@
       if (!current) { newEl.value = ''; showMsg('', ''); return result; }
       const raw = String(qtyEl.value).trim();
       if (raw === '') { newEl.value = ''; showMsg('', ''); return result; }
-      const qty = Number(raw);
+      const entered = Number(raw);
+      const qty = uk ? uk.base(entered) : entered;
       const bad = (text) => {
         qtyEl.style.borderColor = '#d93025'; qtyEl.style.boxShadow = '0 0 0 3px rgba(217,48,37,.25)';
         newEl.value = ''; showMsg('error', text); return result;
       };
       if (!Number.isFinite(qty)) return bad('Enter a valid number.');
       if (qty <= 0) return bad('Quantity must be more than 0. Choose "Remove stock" to reduce stock.');
-      if (!Number.isInteger(qty)) return bad('Enter a whole number (no decimals).');
+      if (uk ? !uk.validBase(qty) : !Number.isInteger(qty)) return bad(fracOk() ? 'That makes a part of a single item. Enter a whole number of items.' : 'Enter a whole number (no decimals).');
       if (qty > 1000000) return bad('That quantity is too large. Check the number you typed.');
       const add = isAdd();
       if (!add && qty > current.quantity) return bad(`You cannot remove ${qty}: only ${current.quantity} in stock. New stock cannot go below 0.`);
       const newStock = add ? current.quantity + qty : current.quantity - qty;
-      newEl.value = `${newStock}  (${add ? '+' : '−'}${qty})`;
+      newEl.value = `${Math.round(newStock * 1000) / 1000}  (${add ? '+' : '−'}${qty})`;
       let warn = '';
       if (add && qty >= 1000 && qty > current.quantity * 10) warn = `Large increase: stock goes from ${current.quantity} to ${newStock}. Make sure ${qty} is right.`;
       else if (!add && newStock < current.reserved) warn = `${current.reserved} unit(s) are reserved for orders - new stock ${newStock} is below that.`;
@@ -919,6 +1045,7 @@
 
     const select = ({ product, variant }) => {
       selected = { product, variant: variant || null };
+      if (uk) uk.setProduct(product);
       modal.querySelector('#selected-product').innerHTML = `<span class="badge badge-info">${window.UI.escapeHtml(variant ? `${product.name} (${Object.values(variant.attributes || {}).join(', ')})` : product.name)}</span>`;
       loadCurrent();
       setTimeout(() => qtyEl.focus(), 50);
@@ -932,7 +1059,7 @@
     qtyEl.addEventListener('input', recalc);
     if (locEl) locEl.addEventListener('change', loadCurrent);
     // block characters that make no sense in a whole-number quantity (e, +, -, .)
-    qtyEl.addEventListener('keydown', (e) => { if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault(); });
+    qtyEl.addEventListener('keydown', (e) => { if ((fracOk() ? ['e', 'E', '+', '-'] : ['e', 'E', '+', '-', '.', ',']).includes(e.key)) e.preventDefault(); });
     qtyEl.addEventListener('wheel', () => qtyEl.blur(), { passive: true });
 
     if (preset) {
@@ -972,7 +1099,7 @@
       try {
         await window.Api.post('/inventory/adjust', {
           branchId, productId: selected.product._id, variantId: selected.variant?._id,
-          type: values.type, quantity: r.qty, reason: values.reason,
+          type: values.type, quantity: uk ? uk.entered() : r.qty, unitId: uk ? uk.unitId() : undefined, reason: values.reason,
           location: wh() ? (values.location || 'RETAIL') : undefined,
         });
         window.UI.toast.success(`Stock adjusted: ${current.quantity} → ${r.newStock}`);

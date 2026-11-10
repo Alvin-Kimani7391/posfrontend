@@ -308,6 +308,7 @@
           rows += `<div class="ac-p ${changed ? 'changed' : ''}" data-k="${p.key}">
             <div class="nm"><div class="t">${esc(p.label)} ${p.sensitive ? '<span class="badge badge-warning" title="Handle with care">sensitive</span>' : ''}</div>
               ${p.description ? `<div class="text-xs text-muted">${esc(p.description)}</div>` : ''}
+              ${p.requires && p.requires.length ? `<div class="text-xs text-muted">Also needs: ${esc(p.requires.map((x) => x.replace('.', ' ')).join(', '))}</div>` : ''}
               <div class="r ${r.cls}">${esc(r.text)}</div><div class="k">${p.key}</div></div>
             <div class="ac-seg" data-k="${p.key}"><button data-s="inherit" class="${st === 'inherit' ? 'on' : ''}">${esc(inh)}</button><button data-s="allow" class="${st === 'allow' ? 'on' : ''}">Allow</button><button data-s="deny" class="${st === 'deny' ? 'on' : ''}">Deny</button></div>
           </div>`;
@@ -324,7 +325,13 @@
       saveBtn.disabled = !dirty();
     }
 
-    function setState(k, st) { if (st === 'inherit') states.delete(k); else states.set(k, st); }
+    function setState(k, st) {
+      if (st === 'inherit') { states.delete(k); return; }
+      states.set(k, st);
+      // Allowing something also allows what it needs (server does the same) so it never half-works.
+      if (st === 'allow' && !opts.noBase) (cat().permissions.find((p) => p.key === k)?.requires || []).forEach((r) => { if (stateOf(r) === 'deny') return; if (!opts.getBase().has(r)) states.set(r, 'allow'); });
+      if (st === 'allow' && opts.noBase) (cat().permissions.find((p) => p.key === k)?.requires || []).forEach((r) => { if (stateOf(r) !== 'deny') states.set(r, 'allow'); });
+    }
     function setGroup(gkey, st) { cat().permissions.filter((p) => p.group === gkey).forEach((p) => setState(p.key, st)); }
 
     listEl.addEventListener('click', (e) => {

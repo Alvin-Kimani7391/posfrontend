@@ -14,6 +14,10 @@
  *
  * COPY NAME -> SKU: a small copy icon sits inside the Product name box; one click puts the name into the SKU box.
  *
+ * UNIT CONVERSION (js/core/unit-conversion-kit.js): the "Sold or received in different sizes?" section lets one product be
+ * bought as a bag and sold by the kg, 500 g, 1/4 bag... Stock stays ONE pool in the base unit; every size shows its
+ * cost, price, profit and margin. Row menu: "Sizes, prices & profit" and "Break down stock".
+ *
  * DISCOUNT PER UNIT: each product can carry a standing per-unit discount
  * (field "defaultDiscount", KES). The sales screen pre-fills it on the
  * cart line whenever the product is scanned or searched (x quantity).
@@ -75,8 +79,8 @@
   /** Barcode scanner is ALWAYS listening on this page: a scan fills the search box and filters the list at once. */
   function bindAlwaysOnScanner() {
     const input = document.getElementById('search-input');
-    const run = (code) => {
-      if (document.querySelector('.modal-backdrop')) return; // a form is open: its own barcode field gets the scan
+    const run = (code, fromCamera) => {
+      if (!fromCamera && document.querySelector('.modal-backdrop')) return; // a form is open: its own barcode field gets the scan
       input.value = code; state.search = code; state.page = 1;
       fetchAndRender({ local: true }).then(() => {
         const rows = document.querySelectorAll('#products-tbody tr[data-id]');
@@ -88,6 +92,9 @@
       input.select();
     };
     if (window.BarcodeScanner) window.BarcodeScanner.listenHardwareScanner(run, { minLength: 4 });
+    // Camera icon INSIDE the search bar: scan with the phone / webcam, the list filters to that product;
+    // if no product has the barcode, the Quick add window opens with the barcode already filled in.
+    if (window.BarcodeGuard) window.BarcodeGuard.attachSearchScan(input, { title: 'Scan product barcode', onCode: (code) => run(code, true) });
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       const term = input.value.trim();
@@ -218,62 +225,9 @@
 
   function bindBarcodeLiveCheck(input, scope, ownCodes) {
     if (!input || input._bcLive) return;
-    input._bcLive = true;
-    getUsedBarcodes().catch(() => {}); // warm the in-memory barcode list so the alert is instant
-    const ownList = () => (typeof ownCodes === 'function' ? ownCodes() : ownCodes) || [];
-    const ownHas = (c) => ownList().some((x) => String(x || '').trim() === c);
-    const field = input.closest('.field') || input.parentElement;
-    const msg = document.createElement('div');
-    msg.className = 'bc-dup-msg';
-    msg.setAttribute('role', 'alert');
-    msg.style.cssText = 'display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:#fdecea;border:1px solid #d93025;color:#b3140a;font-weight:600;font-size:13px';
-    field.appendChild(msg);
-    let timer = null, seq = 0, lastToasted = '';
-
-    const setState = (dup, text) => {
-      input._bcDup = dup;
-      input.classList.toggle('bc-dup', dup);
-      input.style.borderColor = dup ? '#d93025' : '';
-      input.style.boxShadow = dup ? '0 0 0 3px rgba(217,48,37,.25)' : '';
-      input.style.background = dup ? '#fff5f4' : '';
-      msg.style.display = dup ? '' : 'none';
-      msg.textContent = dup ? text : '';
-    };
-    const dupText = (name) => `⚠ BARCODE ALREADY EXISTS in the system${name ? ` — product: "${name}"` : ''}. Use a different barcode.`;
-    // final = the scan/typing has finished (pause, Enter, leaving the box): only then toast + select the text
-    const alertDup = (code, name, final) => {
-      setState(true, dupText(name));
-      if (final && lastToasted !== code) { lastToasted = code; window.UI.toast.error(`Barcode ${code} already exists${name ? ` (${name})` : ''}`); }
-      if (final) { try { input.focus(); input.select(); } catch { /* ignore */ } }
-    };
-
-    const check = async (final) => {
-      const code = input.value.trim();
-      const my = ++seq;
-      if (!code || ownHas(code)) { setState(false); return; }
-      const sameForm = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"]'))
-        .some((el) => el !== input && el.value.trim() === code);
-      if (sameForm) { alertDup(code, '', final); msg.textContent = `⚠ Barcode ${code} is already used in another field of this form.`; return; }
-      // 1) INSTANT: in-memory list, no network
-      if (usedBarcodes && usedBarcodes.has(code)) {
-        alertDup(code, '', final);
-        if (final) lookupBarcodeOnServer(code).then((hit) => { if (hit && hit.name && my === seq) msg.textContent = dupText(hit.name); });
-        return;
-      }
-      if (!usedBarcodes) { getUsedBarcodes().then(() => { if (my === seq && usedBarcodes) check(final); }).catch(() => {}); }
-      if (!final) { setState(false); return; }
-      // 2) confirm with the server (catches products added on another till a moment ago)
-      const hit = await lookupBarcodeOnServer(code);
-      if (my !== seq) return;
-      if (hit && !ownHas(input.value.trim())) { if (usedBarcodes) usedBarcodes.add(code); alertDup(code, hit.name, true); }
-      else setState(false);
-    };
-
-    input.addEventListener('input', () => { check(false); clearTimeout(timer); timer = setTimeout(() => check(true), 80); });
-    input.addEventListener('change', () => { clearTimeout(timer); check(true); });
-    input.addEventListener('blur', () => { clearTimeout(timer); check(true); });
-    input._bcCheck = () => check(true);
-    if (input.value.trim()) check(true);
+    // The browser's own list of "used" barcodes is NOT consulted any more (it went stale and said "exists" for deleted
+    // products). BarcodeGuard asks the server, which only counts live (non-archived) products.
+    window.BarcodeGuard.bind(input, { scope, ownCodes });
   }
 
   /** True (and focuses the offending box) when any barcode box in `scope` currently holds a duplicate. */
@@ -340,14 +294,18 @@
     return usedBarcodes;
   }
 
-  /** Puts a freshly generated barcode into a form field. */
+  /** Puts a freshly generated barcode into a form field. The code is confirmed FREE by the server and is never added to the shared list. */
   async function fillGeneratedBarcode(input) {
-    const used = await getUsedBarcodes();
-    // anything typed in the other barcode boxes of the open form counts as used too
-    document.querySelectorAll('#product-form input[name^="v-barcode-"], #product-form input[name="barcode"], #add-variant-form input[name="barcode"]')
-      .forEach((el) => { if (el !== input && el.value.trim()) used.add(el.value.trim()); });
-    input.value = window.BarcodeLabels.generateCode(used);
+    const others = Array.from(document.querySelectorAll('#product-form input[name^="v-barcode-"], #product-form input[name="barcode"], #add-variant-form input[name="barcode"], #p-pk-barcode'))
+      .filter((el) => el !== input).map((el) => el.value.trim()).filter(Boolean);
+    try {
+      input.value = await window.BarcodeGuard.generate(others);
+    } catch (err) {
+      window.UI.toast.error('Could not create a free barcode right now. Check the connection and try again.');
+      return;
+    }
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   function generateButtonHtml(id) {
@@ -1512,6 +1470,8 @@
     const defs = p.status === 'archived' ? [['restore', 'Restore product', E('check')]] : [
       ['edit', 'Edit product', E('edit')],
       ['view-stock', 'View stock & adjust', E('inventory')],
+      ['unit-prices', 'Sizes, prices & profit', E('box')],
+      ['break-stock', 'Break down stock', E('inventory')],
       ['variants', 'Manage variants', E('box')],
       ['sticker', 'Print barcode sticker', E('printer')],
       ['fill-pages', 'Print full A4 pages', E('printer')],
@@ -1547,6 +1507,9 @@
     window.addEventListener('scroll', pmScroll, true);
     setTimeout(() => document.addEventListener('click', function off(e) { if (e.target.closest && e.target.closest('#pm-menu')) return; document.removeEventListener('click', off, true); closeRowMenu(); }, true), 0);
   }
+
+  /** A product with extra sizes (bag / 1/4 / 500g ...): not the pieces-only packet / deal units. */
+  const hasSizes = (p) => !!(window.UnitKit && (p.units || []).some((u) => u.status !== 'inactive' && u.code !== 'PKT' && u.code !== 'DEAL'));
 
   function renderRows(items) {
     const tbody = document.getElementById('products-tbody');
@@ -1592,6 +1555,8 @@
         <td class="actions pm-actions-col">
           ${p.status === 'archived' ? `<button class="btn btn-ghost btn-sm" data-action="restore" data-requires-permission="products.delete">Restore</button>` : ''}
           ${p.hasVariants ? `<button class="btn btn-ghost btn-sm btn-icon" data-action="variants" data-requires-permission="products.update" title="Manage variants">${window.Icons.get('box')}</button>` : ''}
+          ${hasSizes(p) ? `<button class="btn btn-ghost btn-sm" data-action="unit-prices" data-requires-permission="inventory.view" title="Cost, price and profit of every size">Sizes</button>
+          <button class="btn btn-ghost btn-sm" data-action="break-stock" data-requires-permission="inventory.adjust" title="Break a bag into sellable sizes">Break down</button>` : ''}
           <button class="btn btn-ghost btn-sm" data-action="view-stock" data-requires-permission="inventory.view" title="See this product's stock in Inventory (then adjust or receive)">View stock</button>
           <button class="btn btn-ghost btn-sm btn-icon" data-action="sticker" data-requires-permission="products.view" title="Print barcode sticker">${window.Icons.get('printer')}</button>
           <button class="btn btn-ghost btn-sm btn-icon" data-action="fill-pages" data-requires-permission="products.view" title="Print full A4 pages of this product">${window.Icons.get('printer')}</button>
@@ -1614,6 +1579,15 @@
         const tr = btn.closest('tr');
         const prod = items.find((x) => x._id === tr.dataset.id);
         window.location.href = `inventory.html?productId=${encodeURIComponent(tr.dataset.id)}&search=${encodeURIComponent(prod ? prod.name : '')}`;
+      });
+    });
+    tbody.querySelectorAll('[data-action="unit-prices"], [data-action="break-stock"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!window.UnitKit) return;
+        const id = btn.closest('tr').dataset.id;
+        const prod = items.find((x) => x._id === id);
+        if (btn.dataset.action === 'break-stock') window.UnitKit.openBreakModal({ product: prod, onDone: () => { stockCache.delete(String(id)); fetchAndRender(); } });
+        else window.UnitKit.openBreakdown(prod, { onDone: () => { stockCache.delete(String(id)); fetchAndRender(); } });
       });
     });
     tbody.querySelectorAll('[data-action="sticker"]').forEach((btn) => {
@@ -2058,6 +2032,8 @@
     const existingDiscount = isEdit ? Number(product.defaultDiscount) || 0 : 0;
     // Wholesale businesses enter products wholesale-first (retail + unit conversion are optional extras).
     const wf = !!(window.WholesaleProductForm && window.WholesaleProductForm.applies(isEdit ? product : null));
+    // Unit conversion (bag -> kg / 500g / 1/4 bag ...): shown on the normal product form (the wholesale form has its own pack fields).
+    const ukOn = !wf && !!(window.UnitKit && window.UnitKit.applies(isEdit ? product : null));
 
     const bodyHtml = `
       <form id="product-form">
@@ -2153,6 +2129,7 @@
           <label for="p-unitvalue">Size per item <span class="text-muted">(optional, in the unit above - e.g. 200 for a 200g pack)</span></label>
           <input class="input" id="p-unitvalue" name="unitValue" type="number" min="0" step="any" inputmode="decimal" value="${isEdit && product.unitValue > 0 ? product.unitValue : ''}" placeholder="e.g. 200" style="max-width: 200px" />
         </div>`}
+        ${ukOn ? window.UnitKit.sectionHtml(isEdit ? product : null) : ''}
 
         <div class="field">
           <label for="p-lowstock">Low stock threshold</label>
@@ -2280,6 +2257,13 @@
       syncConv();
     }
 
+    // Sizes editor: cost per base unit, price / profit of every size, stock in any size.
+    const unitKit = ukOn ? window.UnitKit.bind(modal, {
+      product: isEdit ? product : null,
+      baseUnit: () => (modal.querySelector('#p-unit') || {}).value || 'piece',
+      generateBarcode: async () => { const used = await getUsedBarcodes(); const code = window.BarcodeLabels.generateCode(used); used.add(code); return code; },
+    }) : null;
+
     if (wf) window.WholesaleProductForm.bind(modal, { product: isEdit ? product : null });
 
     // "Also sell wholesale": the wholesale fields appear only while this box is ticked.
@@ -2368,6 +2352,15 @@
         if (pkRes.touched && !(Number(raw.sellingPrice) > 0) && packetCtl.isOn()) { window.UI.toast.error('Enter the selling price of ONE piece'); modal.querySelector('#p-price').focus(); return; }
       }
 
+      // Sizes (unit conversion): validate, work out the cost per base unit, warn when a size sells below cost.
+      let ukRes = null;
+      if (unitKit) {
+        ukRes = unitKit.collect();
+        if (ukRes.error) { window.UI.toast.error(ukRes.error); if (ukRes.focus) ukRes.focus.focus(); return; }
+        if (ukRes.costPrice !== undefined) raw.costPrice = String(ukRes.costPrice);
+        if (unitKit.active() && ukRes.touched && !(await unitKit.confirmBelowCost())) return;
+      }
+
       // Optional opening stock (simple products only; variants are received from the Inventory page).
       let stockReq = null;
       const stockOn = !!modal.querySelector('#p-add-stock')?.checked && modal.querySelectorAll('.variant-row').length === 0;
@@ -2383,7 +2376,10 @@
         if (!branchId) { window.UI.toast.error('Select a branch first'); return; }
         // Received as packets: stock is kept in pieces, so packets x pieces-per-packet
         const asPackets = !!(packetCtl && packetCtl.isOn() && modal.querySelector('#p-stock-unit') && modal.querySelector('#p-stock-unit').value === 'packets');
-        stockReq = { branchId, quantity: asPackets ? Math.round(qty * packetCtl.factor() * 1000) / 1000 : qty, batchNumber: batchNo || undefined, expiryDate: expiry || undefined, reason: asPackets ? `Initial stock (${qty} packets)` : 'Initial stock' };
+        // Received as a bag / 1/4 bag / any size: stock is kept in the base unit, so convert here (the product has no unit ids yet).
+        const ukBase = unitKit && unitKit.active() ? unitKit.stockBase(qty) : null;
+        const ukLabel = ukBase != null && ukBase !== qty ? unitKit.stockLabel() : '';
+        stockReq = { branchId, quantity: ukBase != null ? ukBase : (asPackets ? Math.round(qty * packetCtl.factor() * 1000) / 1000 : qty), batchNumber: batchNo || undefined, expiryDate: expiry || undefined, reason: ukLabel ? `Initial stock (${qty} ${ukLabel})` : (asPackets ? `Initial stock (${qty} packets)` : 'Initial stock') };
       }
 
       const payload = {
@@ -2410,9 +2406,15 @@
           payload.units = [{ name: wuName, factor: wuFactor, isWholesaleDefault: true }];
         }
       }
+      if (ukRes && ukRes.touched) {
+        payload.units = (payload.units || []).concat(ukRes.units);
+        if (ukRes.costPrice !== undefined) payload.costPrice = raw.costPrice;
+      }
       if (pkRes && pkRes.touched) {
-        // Packet + deal units (other units, e.g. a wholesale carton, are kept as they are)
-        payload.units = (payload.units || []).concat(pkRes.units);
+        // Packet + deal units (other units, e.g. a wholesale carton, are kept as they are). When the sizes editor
+        // changed the other units it already carries them, so only the packet / deal units are taken from here.
+        const pu = ukRes && ukRes.touched ? pkRes.units.filter((u) => u.code === PKT || u.code === DEAL) : pkRes.units;
+        payload.units = (payload.units || []).concat(pu);
         payload.costPrice = raw.costPrice;
       }
       if (wsToggle) {
@@ -2446,7 +2448,7 @@
         // New product with no barcode: the system creates one (also for variants without a barcode).
         const generated = { main: false, variants: new Set() };
         if (!isEdit) {
-          const used = await getUsedBarcodes();
+          const used = new Set(await getUsedBarcodes()); // a COPY: codes made here must not leak into the shared list
           (payload.variants || []).forEach((v) => { if (v.barcode) used.add(String(v.barcode).trim()); });
           if (payload.barcode) used.add(String(payload.barcode).trim());
           (payload.units || []).forEach((u) => { if (u.barcode) used.add(String(u.barcode).trim()); });
@@ -2517,10 +2519,11 @@
     for (let attempt = 0; ; attempt++) {
       try { return await window.Api.post('/products', payload); }
       catch (err) {
+        if (err && err.code === 'BARCODE_RETRY' && attempt < 2) continue; // the server just freed a deleted product's barcode: save again
         const taken = /barcode/i.test(err.message || '') && /(exist|duplicate|already|taken|unique)/i.test(err.message || '');
         const anyGenerated = generated && (generated.main || generated.variants.size);
         if (!taken || attempt >= 2 || !anyGenerated) throw err;
-        const used = await getUsedBarcodes(true);
+        const used = new Set(await getUsedBarcodes(true));
         if (payload.variants) payload.variants.forEach((v, i) => { if (generated.variants.has(i)) v.barcode = window.BarcodeLabels.generateCode(used); });
         else if (generated.main) payload.barcode = window.BarcodeLabels.generateCode(used);
       }
@@ -2631,7 +2634,7 @@
       if (await barcodeBlocked(form)) return;
       const raw = window.UI.serializeForm(form);
       try {
-        if (!raw.barcode) raw.barcode = window.BarcodeLabels.generateCode(await getUsedBarcodes()); // no barcode typed: create one
+        if (!raw.barcode) raw.barcode = await window.BarcodeGuard.generate(); // no barcode typed: create one (confirmed free)
         await window.Api.post(`/products/${product._id}/variants`, {
           sku: raw.sku,
           barcode: raw.barcode || undefined,

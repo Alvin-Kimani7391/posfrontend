@@ -185,6 +185,22 @@
   /* ------------------------------ 3. Quick add ------------------------------ */
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  /** BarcodeGuard (js/core/barcode-guard.js) is normally in the page; if it is not, load it once. */
+  let guardPromise = null;
+  function ensureGuard() {
+    if (window.BarcodeGuard) return Promise.resolve(window.BarcodeGuard);
+    if (!guardPromise) {
+      guardPromise = new Promise((resolve, reject) => {
+        const sc = document.createElement('script');
+        sc.src = 'js/core/barcode-guard.js';
+        sc.onload = () => (window.BarcodeGuard ? resolve(window.BarcodeGuard) : reject(new Error('guard')));
+        sc.onerror = () => reject(new Error('guard'));
+        document.head.appendChild(sc);
+      });
+    }
+    return guardPromise;
+  }
+
   /**
    * Small "add product" window usable from anywhere.
    * opts: { name, barcode, onAdded(product) }
@@ -264,10 +280,25 @@
         catch (e) { window.UI.toast.error(`Category not saved (${e.message}) - product will be added without one`); }
       } else if (catEl.value) payload.categoryId = catEl.value;
       const bc = form.barcode.value.trim();
+      let generatedBc = false;
       if (bc) payload.barcode = bc;
-      else if (window.BarcodeLabels && window.BarcodeLabels.generateCode) { try { payload.barcode = window.BarcodeLabels.generateCode(new Set()); } catch { /* no barcode */ } }
+      else {
+        // No barcode typed: make a NEW one that the server confirmed is free. (This used to be generateCode(new Set()), which
+        // returned the very same code 2000000000017 every time - so the 2nd product always failed with "barcode already exists".)
+        try { const G = await ensureGuard(); payload.barcode = await G.generate(); generatedBc = true; } catch { /* a barcode is optional */ }
+      }
       try {
-        const res = await window.Api.post('/products', payload);
+        let res;
+        for (let attempt = 0; ; attempt++) {
+          try { res = await window.Api.post('/products', payload); break; }
+          catch (e) {
+            if (e && e.code === 'BARCODE_RETRY' && attempt < 2) continue; // the server just freed a deleted product's barcode
+            const taken = /barcode/i.test((e && e.message) || '') && /(exist|already|taken|duplicate|unique)/i.test((e && e.message) || '');
+            if (taken && generatedBc && attempt < 3) { payload.barcode = await window.BarcodeGuard.generate(); continue; }
+            throw e;
+          }
+        }
+        if (generatedBc && payload.barcode && window.BarcodeGuard) window.BarcodeGuard.forget(payload.barcode);
         let product = (res.data && (res.data.product || res.data)) || null;
         if (withExpiry && product && product._id && !res.queued) {
           try {

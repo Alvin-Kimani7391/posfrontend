@@ -19,6 +19,7 @@
         { key: 'sms', label: 'Alerts & SMS', icon: 'bell', href: 'admin-sms.html' },
     { key: 'weekly', label: 'Weekly report', icon: 'reports', href: 'admin-weekly-report.html' },
     { key: 'announcements', label: 'Announcements', icon: 'bell', href: 'admin-announcements.html' },
+    { key: 'infra', label: 'Infrastructure', icon: 'settings', href: 'admin-infra.html' },
   ];
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
 

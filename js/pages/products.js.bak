@@ -1,0 +1,2708 @@
+/**
+ * products.js
+ * Covers Products, Categories, and Variants - all backed by
+ * /api/v1/products and /api/v1/categories. Categories and per-product
+ * variant management open as modals from this same page rather than
+ * getting their own nav entries, since they're both small, closely
+ * related surfaces rather than destinations on their own.
+ *
+ * WHOLESALE: when the business has the "wholesalePricing" feature (Settings -> Business type) a product can be sold
+ * wholesale too: fields wholesaleEnabled, moq (minimum order quantity, in the product's unit) and wholesalePrice
+ * (KES per unit once the sale holds >= moq). Variants may carry their own wholesalePrice. The sales screen switches
+ * price automatically; the backend enforces the rules (FEATURE_DISABLED / INVALID_WHOLESALE_CONFIG).
+ * In the product form the wholesale fields only appear after the "Also sell wholesale" box is ticked.
+ *
+ * COPY NAME -> SKU: a small copy icon sits inside the Product name box; one click puts the name into the SKU box.
+ *
+ * UNIT CONVERSION (js/core/unit-conversion-kit.js): the "Sold or received in different sizes?" section lets one product be
+ * bought as a bag and sold by the kg, 500 g, 1/4 bag... Stock stays ONE pool in the base unit; every size shows its
+ * cost, price, profit and margin. Row menu: "Sizes, prices & profit" and "Break down stock".
+ *
+ * DISCOUNT PER UNIT: each product can carry a standing per-unit discount
+ * (field "defaultDiscount", KES). The sales screen pre-fills it on the
+ * cart line whenever the product is scanned or searched (x quantity).
+ *
+ * POS BOOST (js/core/pos-boost.js): the barcode scanner is always listening on this page, the list and
+ * search work offline from the copy saved on the device, and adding / editing products offline is queued.
+ *
+ * A4 STICKER SHEETS: "Barcode stickers" and "Shelf labels" first ask: receipt printer (the old way) or an A4 sticker
+ * sheet. The A4 dialog has a layout picker (24 / 40 / 65 / 21 / 14 / 8 labels per sheet), a "start at label no." box for
+ * part-used sheets, per-product copies, and a live preview of the sheet exactly as it will print.
+ *
+ * FAST DIALOGS (this version): the A4 dialog opens INSTANTLY - the window shows first and the products fill in a moment
+ * later. The flattened product list is prefetched when the page is idle, when the pointer touches the buttons, and when
+ * the chooser opens, so by the time the dialog opens the data is already in memory. The list is cached for 2 minutes and
+ * dropped whenever products change. Very large jobs are printed with shared barcode symbols so the print document stays small.
+ *
+ * FILL PAGES WITH ONE PRODUCT (this version): in the A4 dialog choose "Fill pages with ONE product", pick the product (or a
+ * variant), type the number of A4 pages (e.g. 3) and it prints exactly that many FULL sheets of the same label, using the
+ * chosen sheet layout. If "Start at label no." skips labels on the first sheet, the total is reduced by the same amount so
+ * the job still ends on exactly the page count you asked for. The same option is in the 3-dots menu of every product
+ * ("Print full A4 pages").
+ */
+(function () {
+  const state = { page: 1, limit: 10, search: '', categoryId: '', status: '' };
+  const productIndex = window.FastSearch.create({ params: () => ({}), ttl: 60000 }); // all products, searched on the device
+  const selected = new Map(); // product id -> name, kept across pages for "print selected stickers"
+  let usedBarcodes = null;    // Set of every barcode already in the catalog (lazy, for auto-generation)
+  let contentEl;
+  let categoriesCache = null;
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  async function init() {
+    contentEl = window.AppShell.mount({ title: 'Products' });
+    if (!contentEl) return;
+
+    contentEl.innerHTML = pageSkeleton();
+    await getCategories(); // warm the cache before first render so filters/forms have data
+    populateCategoryFilter();
+    bindToolbar();
+    bindAlwaysOnScanner();
+    await fetchAndRender();
+    // When the browser is idle, get the sticker data ready so the dialogs open instantly.
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
+    idle(() => { a4LoadAll().catch(() => {}); });
+  }
+
+  /** Full product from the server; with no internet, the copy saved on this device (so prices can still be changed). */
+  async function getProductForEdit(id) {
+    try { return (await window.Api.get(`/products/${id}`)).data; }
+    catch (err) {
+      const local = (productIndex.query({ search: '', page: 1, limit: 100000 }) || { items: [] }).items.find((p) => p._id === id);
+      if (local) return { product: local };
+      window.UI.toast.error(err.message);
+      return null;
+    }
+  }
+
+  /** Barcode scanner is ALWAYS listening on this page: a scan fills the search box and filters the list at once. */
+  function bindAlwaysOnScanner() {
+    const input = document.getElementById('search-input');
+    const run = (code) => {
+      if (document.querySelector('.modal-backdrop')) return; // a form is open: its own barcode field gets the scan
+      input.value = code; state.search = code; state.page = 1;
+      fetchAndRender({ local: true }).then(() => {
+        const rows = document.querySelectorAll('#products-tbody tr[data-id]');
+        if (!rows.length && window.PosBoost) {
+          window.UI.toast.info(`No product with barcode ${code}`);
+          window.PosBoost.quickAdd({ barcode: code, onAdded: () => { productIndex.invalidate(); a4InvalidateEntries(); fetchAndRender(); } });
+        } else if (rows.length === 1) rows[0].classList.add('pb-hit');
+      });
+      input.select();
+    };
+    if (window.BarcodeScanner) window.BarcodeScanner.listenHardwareScanner(run, { minLength: 4 });
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const term = input.value.trim();
+      if (!term) return;
+      e.preventDefault();
+      if (/^\d{6,}$/.test(term)) run(term);
+      else if (!document.querySelector('#products-tbody tr[data-id]') && window.PosBoost) {
+        window.PosBoost.quickAdd({ name: term, onAdded: () => { productIndex.invalidate(); a4InvalidateEntries(); fetchAndRender(); } });
+      }
+    });
+    if (window.PosBoost) {
+      window.PosBoost.keepScannerReady(() => input);
+      window.PosBoost.onChange(() => { productIndex.invalidate(); a4InvalidateEntries(); productIndex.load().then(() => fetchAndRender({ local: true })); });
+    }
+    input.focus();
+  }
+
+  function pageSkeleton() {
+    return `
+      <div class="page-header">
+        <div>
+          <h1>Products</h1>
+          <p>Manage your catalog, categories, and product variants.</p>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary" id="refresh-products-btn" title="Reload products, categories and barcodes from the server">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" id="refresh-products-icon"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Refresh
+          </button>
+          <button class="btn btn-secondary" id="manage-categories-btn" data-requires-permission="categories.view">
+            ${window.Icons.get('box')} Categories
+          </button>
+          <button class="btn btn-secondary" id="barcode-stickers-btn" data-requires-permission="products.view" title="Print barcode stickers (receipt printer or A4 sticker sheet)">
+            ${window.Icons.get('printer')} Barcode stickers
+          </button>
+          <a class="btn btn-secondary" id="shelf-labels-link" href="shelf-labels.html" data-requires-permission="products.view" title="Print shelf labels (standard page or A4 sticker sheet)">
+            ${window.Icons.get('printer')} Shelf labels
+          </a>
+          <button class="btn btn-secondary" id="import-excel-btn" data-requires-permission="products.create" title="Add many products from an Excel sheet">
+            ${window.Icons.get('table')} Import from Excel
+          </button>
+          <button class="btn btn-primary" id="add-product-btn" data-requires-permission="products.create">
+            ${window.Icons.get('plus')} Add product
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <div class="toolbar-search input-group">
+            <span class="input-group-icon">${window.Icons.get('search')}</span>
+            <input class="input" id="search-input" type="text" autocomplete="off" placeholder="Scan a barcode or search by name, SKU, or barcode" />
+          </div>
+          <select class="select" id="category-filter" style="max-width: 220px">
+            <option value="">All categories</option>
+          </select>
+          <select class="select" id="status-filter" style="max-width: 180px" aria-label="Show">
+            <option value="">Active products</option>
+            <option value="archived">Archived products</option>
+          </select>
+        </div>
+        <div class="bl-sel-bar" id="bl-sel-bar" hidden>
+          <span id="bl-sel-count"></span>
+          <button class="btn btn-primary btn-sm" id="bl-print-selected">${window.Icons.get('printer')} Print stickers for selected</button>
+          <button class="btn btn-ghost btn-sm" id="bl-clear-selected">Clear</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="bl-sel-col"><input type="checkbox" id="bl-page-all" title="Select all on this page" /></th>
+                <th>Product</th>
+                <th>SKU / Barcode</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Status</th>
+                <th class="pm-stock-col">Stock</th>
+                <th class="pm-actions-col"></th>
+              </tr>
+            </thead>
+            <tbody id="products-tbody">${window.UI.skeletonRows(7, 4)}</tbody>
+          </table>
+        </div>
+        <div class="pagination" id="pagination"></div>
+      </div>
+    `;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Barcode scanning helpers - shared by every barcode field on this
+   * page (main product form, each dynamic variant row when creating a
+   * product, and the "add variant" form on an existing product).
+   * ------------------------------------------------------------------ */
+  function scanButtonHtml(id) {
+    if (!window.BarcodeScanner) return '';
+    return `<button type="button" class="btn btn-secondary btn-icon" id="${id}" title="Scan barcode">${window.BarcodeScanner.cameraIconSvg}</button>`;
+  }
+
+  function bindBarcodeScanButton(button, input) {
+    if (!button || !input || !window.BarcodeScanner) return;
+    button.addEventListener('click', () => {
+      window.BarcodeScanner.openCameraModal({
+        title: 'Scan barcode',
+        onDetect: (code) => {
+          input.value = code.trim();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.focus();
+        },
+      });
+    });
+  }
+
+
+  /* ------------------------------------------------------------------ *
+   * LIVE DUPLICATE-BARCODE ALERT
+   * The moment a barcode is scanned / typed / generated into ANY barcode box, it is checked against the
+   * catalog (and the server) and a RED alert is shown straight away - before the user clicks Add product.
+   * `ownCodes` = barcodes that belong to the record being edited (they are not duplicates of themselves).
+   * ------------------------------------------------------------------ */
+  /** Server lookup (only used to confirm / add the product name; the instant check below needs no network). */
+  async function lookupBarcodeOnServer(code) {
+    try {
+      const { data } = await window.Api.get(`/products/barcode/${encodeURIComponent(code)}`);
+      const p = data && (data.product || data);
+      if (p && (p._id || p.name)) return { name: p.name || '' };
+    } catch { /* not found */ }
+    return null;
+  }
+
+  function bindBarcodeLiveCheck(input, scope, ownCodes) {
+    if (!input || input._bcLive) return;
+    input._bcLive = true;
+    getUsedBarcodes().catch(() => {}); // warm the in-memory barcode list so the alert is instant
+    const ownList = () => (typeof ownCodes === 'function' ? ownCodes() : ownCodes) || [];
+    const ownHas = (c) => ownList().some((x) => String(x || '').trim() === c);
+    const field = input.closest('.field') || input.parentElement;
+    const msg = document.createElement('div');
+    msg.className = 'bc-dup-msg';
+    msg.setAttribute('role', 'alert');
+    msg.style.cssText = 'display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:#fdecea;border:1px solid #d93025;color:#b3140a;font-weight:600;font-size:13px';
+    field.appendChild(msg);
+    let timer = null, seq = 0, lastToasted = '';
+
+    const setState = (dup, text) => {
+      input._bcDup = dup;
+      input.classList.toggle('bc-dup', dup);
+      input.style.borderColor = dup ? '#d93025' : '';
+      input.style.boxShadow = dup ? '0 0 0 3px rgba(217,48,37,.25)' : '';
+      input.style.background = dup ? '#fff5f4' : '';
+      msg.style.display = dup ? '' : 'none';
+      msg.textContent = dup ? text : '';
+    };
+    const dupText = (name) => `⚠ BARCODE ALREADY EXISTS in the system${name ? ` — product: "${name}"` : ''}. Use a different barcode.`;
+    // final = the scan/typing has finished (pause, Enter, leaving the box): only then toast + select the text
+    const alertDup = (code, name, final) => {
+      setState(true, dupText(name));
+      if (final && lastToasted !== code) { lastToasted = code; window.UI.toast.error(`Barcode ${code} already exists${name ? ` (${name})` : ''}`); }
+      if (final) { try { input.focus(); input.select(); } catch { /* ignore */ } }
+    };
+
+    const check = async (final) => {
+      const code = input.value.trim();
+      const my = ++seq;
+      if (!code || ownHas(code)) { setState(false); return; }
+      const sameForm = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"]'))
+        .some((el) => el !== input && el.value.trim() === code);
+      if (sameForm) { alertDup(code, '', final); msg.textContent = `⚠ Barcode ${code} is already used in another field of this form.`; return; }
+      // 1) INSTANT: in-memory list, no network
+      if (usedBarcodes && usedBarcodes.has(code)) {
+        alertDup(code, '', final);
+        if (final) lookupBarcodeOnServer(code).then((hit) => { if (hit && hit.name && my === seq) msg.textContent = dupText(hit.name); });
+        return;
+      }
+      if (!usedBarcodes) { getUsedBarcodes().then(() => { if (my === seq && usedBarcodes) check(final); }).catch(() => {}); }
+      if (!final) { setState(false); return; }
+      // 2) confirm with the server (catches products added on another till a moment ago)
+      const hit = await lookupBarcodeOnServer(code);
+      if (my !== seq) return;
+      if (hit && !ownHas(input.value.trim())) { if (usedBarcodes) usedBarcodes.add(code); alertDup(code, hit.name, true); }
+      else setState(false);
+    };
+
+    input.addEventListener('input', () => { check(false); clearTimeout(timer); timer = setTimeout(() => check(true), 80); });
+    input.addEventListener('change', () => { clearTimeout(timer); check(true); });
+    input.addEventListener('blur', () => { clearTimeout(timer); check(true); });
+    input._bcCheck = () => check(true);
+    if (input.value.trim()) check(true);
+  }
+
+  /** True (and focuses the offending box) when any barcode box in `scope` currently holds a duplicate. */
+  async function barcodeBlocked(scope) {
+    const inputs = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"], #p-pk-barcode'));
+    for (const el of inputs) { if (el._bcCheck && el.value.trim()) await el._bcCheck(); }
+    const bad = inputs.find((el) => el._bcDup);
+    if (bad) { window.UI.toast.error('This barcode already exists in the system - change it first'); bad.focus(); return true; }
+    return false;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Categories (cached, shared by the filter dropdown and product forms)
+   * ------------------------------------------------------------------ */
+  async function getCategories(force = false) {
+    if (categoriesCache && !force) return categoriesCache;
+    try {
+      const { data } = await window.Api.get('/categories');
+      categoriesCache = data.categories;
+    } catch {
+      categoriesCache = [];
+    }
+    return categoriesCache;
+  }
+
+  function populateCategoryFilter() {
+    const select = document.getElementById('category-filter');
+    select.innerHTML = '<option value="">All categories</option>' +
+      categoriesCache.map((c) => `<option value="${c._id}">${window.UI.escapeHtml(c.name)}</option>`).join('');
+  }
+
+  /**
+   * Personalised tracking options: an option shows only when the business has that feature on
+   * (Settings -> Business type), or when this product already uses it (so nothing is ever lost on edit).
+   */
+  function trackingOption(name, label, feature, checked) {
+    const profile = window.AppShell.getBusinessProfile?.();
+    const known = !!(profile && profile.featureSettings);
+    if (known && !window.AppShell.hasFeature(feature) && !checked) return '';
+    return `<label class="checkbox-row"><input type="checkbox" name="${name}" ${checked ? 'checked' : ''} /> <span class="text-sm">${label}</span></label>`;
+  }
+
+  function categoryOptionsHtml(selectedId) {
+    return '<option value="">No category</option>' +
+      categoriesCache.map((c) => `<option value="${c._id}" ${c._id === selectedId ? 'selected' : ''}>${window.UI.escapeHtml(c.name)}</option>`).join('');
+  }
+
+  function updateSelectionBar(pageItems) {
+    const bar = document.getElementById('bl-sel-bar');
+    if (!bar) return;
+    bar.hidden = selected.size === 0;
+    document.getElementById('bl-sel-count').textContent = `${selected.size} product${selected.size === 1 ? '' : 's'} selected`;
+    const all = document.getElementById('bl-page-all');
+    if (all && pageItems) all.checked = pageItems.length > 0 && pageItems.every((p) => selected.has(p._id));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Barcode generation (products that have no barcode get a store EAN-13)
+   * ------------------------------------------------------------------ */
+  async function getUsedBarcodes(force = false) {
+    if (usedBarcodes && !force) return usedBarcodes;
+    try { usedBarcodes = (await window.BarcodeLabels.loadCatalog()).used; }
+    catch { const empty = new Set(); usedBarcodes = null; return empty; }
+    return usedBarcodes;
+  }
+
+  /** Puts a freshly generated barcode into a form field. */
+  async function fillGeneratedBarcode(input) {
+    const used = await getUsedBarcodes();
+    // anything typed in the other barcode boxes of the open form counts as used too
+    document.querySelectorAll('#product-form input[name^="v-barcode-"], #product-form input[name="barcode"], #add-variant-form input[name="barcode"]')
+      .forEach((el) => { if (el !== input && el.value.trim()) used.add(el.value.trim()); });
+    input.value = window.BarcodeLabels.generateCode(used);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function generateButtonHtml(id) {
+    return `<button type="button" class="btn btn-secondary" id="${id}" title="Generate a barcode for this product">Generate</button>`;
+  }
+  function bindGenerateButton(button, input) {
+    if (!button || !input) return;
+    button.addEventListener('click', () => fillGeneratedBarcode(input));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * A4 STICKER SHEETS (barcode stickers + shelf labels) with live preview
+   * Flow: Barcode stickers / Shelf labels  ->  chooser (receipt printer | A4 sheet)  ->  A4 dialog (layout, copies, preview).
+   * The A4 dialog opens first and loads its data afterwards; the data is prefetched and cached (see a4LoadAll).
+   * ------------------------------------------------------------------ */
+  const A4_LAYOUTS = [
+    { id: '3x8',  label: '24 labels - 63.5 x 33.9 mm (3 x 8)',   cols: 3, rows: 8,  w: 63.5, h: 33.9 },
+    { id: '4x10', label: '40 labels - 48.5 x 25.4 mm (4 x 10)',  cols: 4, rows: 10, w: 48.5, h: 25.4 },
+    { id: '5x13', label: '65 labels - 38.1 x 21.2 mm (5 x 13)',  cols: 5, rows: 13, w: 38.1, h: 21.2 },
+    { id: '3x7',  label: '21 labels - 63.5 x 38.1 mm (3 x 7)',   cols: 3, rows: 7,  w: 63.5, h: 38.1 },
+    { id: '2x7',  label: '14 labels - 99.1 x 38.1 mm (2 x 7)',   cols: 2, rows: 7,  w: 99.1, h: 38.1 },
+    { id: '2x4',  label: '8 labels - 99.1 x 67.7 mm (2 x 4)',    cols: 2, rows: 4,  w: 99.1, h: 67.7 },
+  ];
+  const A4_MAX_PAGES = 200;      // most full pages one "fill" job may print
+  const A4_COMPACT_ABOVE = 300;  // above this many labels the print document shares one copy of each barcode drawing
+  const a4Clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const a4Money = (n) => `KES ${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  const a4SvgCache = new Map();
+  let a4JsBarcodePromise = null;
+
+  // Flattened label list (one entry per product / variant), cached so the dialog never waits for it.
+  let a4All = null;
+  let a4AllAt = 0;
+  let a4AllP = null;
+  function a4InvalidateEntries() { a4All = null; a4AllAt = 0; a4AllP = null; }
+
+  function a4InjectStyles() {
+    if (document.getElementById('a4-styles')) return;
+    const st = document.createElement('style'); st.id = 'a4-styles';
+    st.textContent = `
+      .a4-wrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;align-items:start}
+      @media (max-width:860px){.a4-wrap{grid-template-columns:1fr}}
+      .a4-items{max-height:280px;overflow:auto;border:1px solid var(--color-border,#e5e7eb);border-radius:10px}
+      .a4-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--color-border,#e5e7eb);content-visibility:auto;contain-intrinsic-size:auto 46px}
+      .a4-row:last-child{border-bottom:0}
+      .a4-row .a4-nm{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .a4-row .a4-nm small{display:block;color:var(--color-text-muted,#6b7280);font-size:11px}
+      .a4-row input[type=number]{width:64px;height:32px}
+      .a4-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 6px;font-size:13px}
+      .a4-pvbox{background:#e9ebf0;border-radius:12px;padding:10px;display:flex;flex-direction:column;align-items:center;gap:8px}
+      .a4-pv{background:#fff;box-shadow:0 4px 18px rgba(16,24,40,.25);overflow:hidden;position:relative}
+      .a4-nav{display:flex;align-items:center;gap:10px;font-size:13px}
+      .a4-empty{padding:60px 10px;color:#6b7280;font-size:13px;text-align:center}
+      .a4-opts{display:flex;gap:16px;flex-wrap:wrap;margin-top:4px}
+      .a4-seg{display:flex;gap:6px;background:var(--color-surface-2,#f1f2f6);padding:4px;border-radius:12px}
+      .a4-segbtn{flex:1;min-height:38px;border:0;border-radius:9px;background:transparent;font:inherit;font-size:13px;font-weight:600;color:var(--color-text-secondary,#5b6475);cursor:pointer;transition:background .12s,color .12s,box-shadow .12s}
+      .a4-segbtn.on{background:var(--color-surface,#fff);color:var(--color-primary,#4f46e5);box-shadow:0 1px 4px rgba(16,24,40,.15)}
+      .a4-pick{max-height:190px;overflow:auto;border:1px solid var(--color-border,#e5e7eb);border-radius:10px;margin-top:6px}
+      .a4-pk{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border:0;border-bottom:1px solid var(--color-border,#e5e7eb);background:transparent;font:inherit;font-size:13px;text-align:left;cursor:pointer;color:inherit}
+      .a4-pk:last-child{border-bottom:0}
+      .a4-pk small{display:block;color:var(--color-text-muted,#6b7280);font-size:11px}
+      .a4-pk .a4-pkp{font-weight:700;white-space:nowrap}
+      .a4-pk:hover{background:var(--color-primary-50,#eef2ff)}
+      .a4-pk.on{background:var(--color-primary-50,#eef2ff);box-shadow:inset 3px 0 0 var(--color-primary,#4f46e5)}
+      .a4-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+      .a4-chip{min-height:32px;padding:0 12px;border:1px solid var(--color-border,#e5e7eb);border-radius:999px;background:var(--color-surface,#fff);font:inherit;font-size:13px;font-weight:600;cursor:pointer;color:inherit}
+      .a4-chip:hover,.a4-chip.on{border-color:var(--color-primary,#4f46e5);color:var(--color-primary,#4f46e5);background:var(--color-primary-50,#eef2ff)}
+      .a4-total{padding:9px 12px;border-radius:10px;background:var(--color-primary-50,#eef2ff);font-size:13px;font-weight:600;min-height:40px;display:flex;align-items:center}
+      .a4-sel{margin-top:6px;font-size:12px;color:var(--color-text-muted,#6b7280)}
+    `;
+    document.head.appendChild(st);
+  }
+
+  /** EAN-13 (or UPC-A) as an SVG string; null when the code is not a valid EAN-13. */
+  function a4Ean13Svg(code) {
+    let d = String(code || '').replace(/\D/g, '');
+    if (d.length === 12) d = '0' + d;
+    if (!/^\d{13}$/.test(d)) return null;
+    let t = 0; for (let i = 0; i < 12; i++) t += Number(d[i]) * (i % 2 ? 3 : 1);
+    if ((10 - (t % 10)) % 10 !== Number(d[12])) return null;
+    const L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
+    const G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'];
+    const R = L.map((s) => s.split('').map((c) => (c === '1' ? '0' : '1')).join(''));
+    const P = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
+    let bits = '101';
+    for (let i = 1; i <= 6; i++) bits += (P[Number(d[0])][i - 1] === 'L' ? L : G)[Number(d[i])];
+    bits += '01010';
+    for (let i = 7; i <= 12; i++) bits += R[Number(d[i])];
+    bits += '101';
+    let path = '';
+    for (let i = 0; i < bits.length;) {
+      if (bits[i] === '1') { let j = i; while (j < bits.length && bits[j] === '1') j++; path += `M${i} 0h${j - i}v50h-${j - i}z`; i = j; } else i++;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-6 0 107 50" preserveAspectRatio="none"><path d="${path}" fill="#000"/></svg>`;
+  }
+
+  function a4LoadJsBarcode() {
+    if (window.JsBarcode) return Promise.resolve(true);
+    if (a4JsBarcodePromise) return a4JsBarcodePromise;
+    a4JsBarcodePromise = new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
+      s.onload = () => resolve(!!window.JsBarcode);
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+    });
+    return a4JsBarcodePromise;
+  }
+
+  /** Barcode picture for any code: EAN-13 drawn here (works offline); other codes use Code 128 (JsBarcode, loaded on demand). */
+  async function a4BarcodeSvg(code) {
+    code = String(code || '').trim();
+    if (!code) return '';
+    if (a4SvgCache.has(code)) return a4SvgCache.get(code);
+    let svg = a4Ean13Svg(code);
+    if (!svg && await a4LoadJsBarcode()) {
+      try {
+        const el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        window.JsBarcode(el, code, { format: 'CODE128', displayValue: false, margin: 0, height: 50 });
+        const w = el.getAttribute('width'); const h = el.getAttribute('height');
+        el.removeAttribute('width'); el.removeAttribute('height');
+        el.setAttribute('viewBox', `0 0 ${parseFloat(w)} ${parseFloat(h)}`);
+        el.setAttribute('preserveAspectRatio', 'none');
+        svg = el.outerHTML;
+      } catch { svg = ''; }
+    }
+    svg = svg || '';
+    a4SvgCache.set(code, svg);
+    return svg;
+  }
+
+  async function a4Barcodes(list) {
+    const map = new Map();
+    const codes = Array.from(new Set(list.filter((e) => e && e.barcode).map((e) => e.barcode)));
+    await Promise.all(codes.map(async (c) => map.set(c, await a4BarcodeSvg(c))));
+    return map;
+  }
+
+  /**
+   * Huge jobs (e.g. 100 pages of the same label): draw each barcode ONCE as a shared symbol and let every label point at it,
+   * so the print document stays small and prints fast. Returns { map, defs } - `defs` goes at the top of the document body.
+   */
+  function a4CompactMap(map) {
+    const out = new Map(); let defs = ''; let i = 0;
+    map.forEach((svg, code) => {
+      const vb = svg ? /viewBox="([^"]+)"/.exec(svg) : null;
+      if (!vb) { out.set(code, svg); return; }
+      const id = `bcs${i++}`;
+      const inner = svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+      defs += `<symbol id="${id}" viewBox="${vb[1]}" preserveAspectRatio="none">${inner}</symbol>`;
+      out.set(code, `<svg width="100%" height="100%"><use href="#${id}" width="100%" height="100%"></use></svg>`);
+    });
+    return { map: out, defs: defs ? `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>${defs}</defs></svg>` : '' };
+  }
+
+  /** Every active product / variant as a flat label entry. Cached for 2 minutes; shared by every dialog opening. */
+  function a4LoadAll() {
+    if (a4All && Date.now() - a4AllAt < 120000) return Promise.resolve(a4All);
+    if (a4AllP) return a4AllP;
+    const p = (async () => {
+      let all = [];
+      try {
+        if (!productIndex.isReady()) await productIndex.load();
+        const r = productIndex.query({ search: '', page: 1, limit: 100000 });
+        all = (r && r.items) || [];
+      } catch { /* fall through */ }
+      if (!all.length) { try { const { data } = await window.Api.get('/products', { page: 1, limit: 1000 }); all = data.items || []; } catch { /* nothing */ } }
+      const priceOf = (p) => {
+        let price = Number(p.sellingPrice) || 0;
+        if (p.pricingMode === 'WHOLESALE_FIRST' && window.WholesaleProductForm) {
+          try { const s = window.WholesaleProductForm.summarize(p); price = s.retailOn ? s.retail : s.wholesale; } catch { /* keep */ }
+        }
+        return Number(price) || 0;
+      };
+      const out = [];
+      all.forEach((p) => {
+        if (p.status === 'archived') return;
+        const vars = (p.hasVariants && p.variants ? p.variants : []).filter((v) => v.status !== 'inactive' && v.status !== 'archived');
+        if (vars.length) {
+          vars.forEach((v) => {
+            const attrs = Object.values(v.attributes || {}).join(' / ');
+            out.push({ name: attrs ? `${p.name} (${attrs})` : p.name, barcode: v.barcode || '', price: Number(v.sellingPrice) || 0, sku: v.sku || p.sku || '', pid: p._id, vid: v._id });
+          });
+        } else out.push({ name: p.name, barcode: p.barcode || '', price: priceOf(p), sku: p.sku || '', pid: p._id, vid: '' });
+      });
+      a4All = out; a4AllAt = Date.now();
+      return out;
+    })();
+    a4AllP = p;
+    const clear = () => { if (a4AllP === p) a4AllP = null; };
+    p.then(clear, clear);
+    return p;
+  }
+
+  /** The products to print as flat label entries (variants get their own label). Fresh copies, safe to edit. */
+  async function a4LoadEntries(selectedIds) {
+    const base = await a4LoadAll();
+    const ids = new Set((selectedIds || []).map(String));
+    const src = ids.size ? base.filter((e) => ids.has(String(e.pid))) : base;
+    return src.map((e) => ({ ...e })); // products with no barcode are kept: the sticker dialog can create one for them
+  }
+
+  /** True when a barcode was created by the system (store EAN-13). Uses BarcodeLabels.isGenerated when it exists, else the starting digits. */
+  function a4IsGenerated(code, prefix) {
+    code = String(code || '').trim();
+    if (!code) return false;
+    try { if (window.BarcodeLabels && typeof window.BarcodeLabels.isGenerated === 'function') return !!window.BarcodeLabels.isGenerated(code); } catch { /* use the prefix rule */ }
+    return /^\d{13}$/.test(code) && !!prefix && code.startsWith(prefix);
+  }
+
+  /** First digits shared by every code the system's own generator makes (so "system-generated" is detected, not guessed). */
+  function a4DetectGenPrefix() {
+    try {
+      const BL = window.BarcodeLabels;
+      if (!BL || typeof BL.generateCode !== 'function') return '';
+      const used = new Set(); const codes = [];
+      for (let i = 0; i < 8; i++) { const c = String(BL.generateCode(used) || ''); if (!/^\d{13}$/.test(c)) return ''; codes.push(c); used.add(c); }
+      let pre = codes[0];
+      codes.forEach((c) => { while (pre && !c.startsWith(pre)) pre = pre.slice(0, -1); });
+      return pre.slice(0, 3);
+    } catch { return ''; }
+  }
+
+  function a4Css(L, o) {
+    const ml = (210 - L.cols * L.w) / 2; const mt = (297 - L.rows * L.h) / 2;
+    const nm = o.shelf ? a4Clamp(L.h * 0.11, 3, 9) : a4Clamp(L.h * 0.1, 2.2, 4);
+    const pr = o.shelf ? a4Clamp(L.h * 0.26, 6, 22) : a4Clamp(L.h * 0.14, 2.8, 5);
+    const num = o.shelf ? 3 : a4Clamp(L.h * 0.075, 1.8, 3);
+    return `
+      .a4-sheet{width:210mm;height:297mm;position:relative;background:#fff;overflow:hidden;box-sizing:border-box}
+      .a4-grid{position:absolute;left:${ml.toFixed(2)}mm;top:${mt.toFixed(2)}mm;display:grid;grid-template-columns:repeat(${L.cols},${L.w}mm);grid-auto-rows:${L.h}mm}
+      .a4-lb{width:${L.w}mm;height:${L.h}mm;box-sizing:border-box;padding:1.2mm 1.8mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4mm;text-align:center;overflow:hidden;font-family:Arial,Helvetica,sans-serif;color:#000;line-height:1.1}
+      .a4-lb.g{outline:.2mm dashed #888;outline-offset:-.2mm}
+      .a4-lb .nm{font-weight:700;font-size:${nm.toFixed(2)}mm;max-height:2.3em;overflow:hidden;width:100%;word-break:break-word}
+      .a4-lb .bc{flex:1 1 auto;min-height:0;width:100%;display:flex}
+      .a4-lb .bc svg{width:100%;height:100%;display:block}
+      .a4-lb.shelf .bc{flex:0 0 26%}
+      .a4-lb .num{font-size:${num.toFixed(2)}mm;letter-spacing:.2mm}
+      .a4-lb .pr{font-weight:700;font-size:${pr.toFixed(2)}mm}
+      .a4-lb .sku{font-size:${(num * 0.9).toFixed(2)}mm;color:#444}
+    `;
+  }
+
+  function a4LabelHtml(e, o, map) {
+    const g = o.guides ? ' g' : '';
+    if (!e) return `<div class="a4-lb${g}"></div>`;
+    const esc = window.UI.escapeHtml;
+    const svg = e.barcode ? (map.get(e.barcode) || '') : '';
+    const bc = e.barcode ? `<div class="bc">${svg}</div><div class="num">${esc(e.barcode)}</div>` : '';
+    const price = o.price ? `<div class="pr">${esc(a4Money(e.price))}</div>` : '';
+    if (o.shelf) return `<div class="a4-lb shelf${g}"><div class="nm">${esc(e.name)}</div>${price}${bc}${e.sku ? `<div class="sku">${esc(e.sku)}</div>` : ''}</div>`;
+    return `<div class="a4-lb${g}"><div class="nm">${esc(e.name)}</div>${bc}${price}</div>`;
+  }
+
+  function a4SheetBody(pageLabels, o, map) {
+    return `<div class="a4-sheet"><div class="a4-grid">${pageLabels.map((e) => a4LabelHtml(e, o, map)).join('')}</div></div>`;
+  }
+
+  /** Prints an HTML document through a hidden iframe (no pop-up blockers). */
+  function a4PrintHtml(html) {
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentDocument;
+    doc.open(); doc.write(html); doc.close();
+    setTimeout(() => {
+      try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch { window.UI.toast.error('Could not open the print window'); }
+      setTimeout(() => iframe.remove(), 60000);
+    }, 350);
+  }
+
+  /** First step: receipt printer (the existing way) or an A4 sticker sheet. Opens instantly and starts loading the data. */
+  function openPrintChooser(mode, selectedIds) {
+    const shelf = mode === 'shelf';
+    a4LoadAll().catch(() => {}); // start loading while the person reads the two choices
+    a4InjectStyles();
+    const modal = window.UI.openModal({
+      title: shelf ? 'Print shelf labels' : 'Print barcode stickers',
+      maxWidth: '460px',
+      bodyHtml: `
+        <div style="display:grid;gap:10px">
+          <button type="button" class="btn btn-primary" data-pick="a4" style="height:auto;padding:14px;text-align:left;display:block">
+            <div style="font-weight:700">A4 sticker sheet</div>
+            <div class="text-xs" style="opacity:.9;margin-top:2px">Choose the sheet layout, print many products or fill whole pages with one product, with a live preview.</div>
+          </button>
+          <button type="button" class="btn btn-secondary" data-pick="std" style="height:auto;padding:14px;text-align:left;display:block">
+            <div style="font-weight:700">${shelf ? 'Standard shelf labels page' : 'Receipt printer'}</div>
+            <div class="text-xs text-muted" style="margin-top:2px">${shelf ? 'Open the existing shelf labels screen.' : 'Print on the receipt / sticker roll printer as before.'}</div>
+          </button>
+        </div>`,
+      footerHtml: '<button class="btn btn-secondary" data-action="cancel">Cancel</button>',
+    });
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
+    const a4Btn = modal.querySelector('[data-pick="a4"]');
+    a4Btn.addEventListener('click', () => { window.UI.closeModal(); openA4Dialog({ mode, selectedIds }); });
+    try { a4Btn.focus({ preventScroll: true }); } catch { /* optional */ }
+    modal.querySelector('[data-pick="std"]').addEventListener('click', () => {
+      window.UI.closeModal();
+      if (shelf) window.location.href = 'shelf-labels.html';
+      else window.BarcodeLabels.openPrintDialog({ selectedIds });
+    });
+  }
+
+  /**
+   * The A4 dialog. It is shown at once; the products load in behind it (usually already cached, so it is instant).
+   *  fill    - open in "fill pages with ONE product" mode
+   *  fillPid - product id to pre-select in that mode
+   */
+  async function openA4Dialog({ mode, selectedIds, fill, fillPid }) {
+    const shelf = mode === 'shelf';
+    const esc = window.UI.escapeHtml;
+    a4InjectStyles();
+
+    const prefKey = `a4Layout_${mode}`;
+    let savedLayout = shelf ? '2x4' : '3x8';
+    try { const v = window.Storage.getPref(prefKey, savedLayout); if (A4_LAYOUTS.some((l) => l.id === v)) savedLayout = v; } catch { /* default */ }
+    let savedPrefix = '';
+    try { savedPrefix = String(window.Storage.getPref('a4GenPrefix', '') || ''); } catch { /* none saved */ }
+    let autoPrefix = null; // detected only when the "system-generated" filter is first used
+    const getAutoPrefix = () => { if (autoPrefix === null) autoPrefix = shelf ? '' : a4DetectGenPrefix(); return autoPrefix; };
+    const st = {
+      layout: savedLayout, start: 1, price: true, guides: false, page: 0, copiesMode: 'manual', extra: 0, src: 'all', filter: 'all', prefix: savedPrefix,
+      rows: [], entries: [], loaded: false,
+      mode: fill ? 'fill' : 'list', pages: 1, fillEntry: null, fillQuery: '',
+    };
+
+    const modal = window.UI.openModal({
+      title: shelf ? 'Shelf labels - A4 sticker sheet' : 'Barcode stickers - A4 sticker sheet',
+      maxWidth: '980px',
+      bodyHtml: `
+        <div class="a4-wrap">
+          <div>
+            <div class="field">
+              <label>What do you want to print?</label>
+              <div class="a4-seg" id="a4-modes">
+                <button type="button" class="a4-segbtn" data-mode="list">Chosen products</button>
+                <button type="button" class="a4-segbtn" data-mode="fill">Fill pages with ONE product</button>
+              </div>
+            </div>
+
+            <div id="a4-fill" style="display:none">
+              <div class="field">
+                <label for="a4-fq">Product</label>
+                <input class="input" id="a4-fq" type="text" autocomplete="off" placeholder="Search by name, SKU or barcode" />
+                <div class="a4-pick" id="a4-pick"></div>
+                <div class="a4-sel" id="a4-sel">No product chosen yet</div>
+              </div>
+              <div class="form-row">
+                <div class="field">
+                  <label for="a4-pages">Number of A4 pages</label>
+                  <input class="input" id="a4-pages" type="number" min="1" max="${A4_MAX_PAGES}" value="1" inputmode="numeric" />
+                  <div class="a4-chips" id="a4-chips">
+                    ${[1, 2, 3, 5, 10, 20].map((n) => `<button type="button" class="a4-chip" data-pg="${n}">${n}</button>`).join('')}
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Result</label>
+                  <div class="a4-total" id="a4-filltotal"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="a4-layout">Sticker sheet layout (A4 paper)</label>
+              <select class="select" id="a4-layout">${A4_LAYOUTS.map((l) => `<option value="${l.id}" ${l.id === st.layout ? 'selected' : ''}>${l.label}</option>`).join('')}</select>
+              <span class="field-hint">Pick the one that matches the labels on your sticker paper.</span>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="a4-start">Start at label no.</label>
+                <input class="input" id="a4-start" type="number" min="1" value="1" />
+                <span class="field-hint">Re-using a part-used sheet? Skip the labels already used.</span>
+              </div>
+              <div class="field">
+                <label>Options</label>
+                <div class="a4-opts">
+                  <label class="checkbox-row"><input type="checkbox" id="a4-price" checked /> <span class="text-sm">Show price</span></label>
+                  <label class="checkbox-row"><input type="checkbox" id="a4-guides" /> <span class="text-sm">Cut guides</span></label>
+                </div>
+              </div>
+            </div>
+
+            <div id="a4-list-wrap">
+              ${shelf ? '' : `
+              <div class="form-row">
+                <div class="field">
+                  <label for="a4-filter">Which products</label>
+                  <select class="select" id="a4-filter">
+                    <option value="all">All products</option>
+                    <option value="gen">Only system-generated barcodes</option>
+                    <option value="none">Only products with NO barcode (create one)</option>
+                  </select>
+                </div>
+                <div class="field" id="a4-prefix-wrap" style="display:none">
+                  <label for="a4-prefix">System barcodes start with</label>
+                  <input class="input" id="a4-prefix" value="${esc(savedPrefix)}" maxlength="6" inputmode="numeric" style="max-width:120px" />
+                  <span class="field-hint">Detected from your barcode generator; change it if yours differs.</span>
+                </div>
+              </div>
+              <span class="field-hint" id="a4-fhint" style="display:none"></span>`}
+              ${shelf ? '' : `
+              <div class="form-row">
+                <div class="field">
+                  <label for="a4-cmode">Stickers per product</label>
+                  <select class="select" id="a4-cmode">
+                    <option value="manual">As typed in the list (default 1)</option>
+                    <option value="stock">Same as current stock</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="a4-extra">Extra stickers for EVERY product</label>
+                  <input class="input" id="a4-extra" type="number" min="0" max="20" value="0" style="max-width:120px" />
+                </div>
+                <div class="field" id="a4-src-wrap" style="display:none">
+                  <label for="a4-src">Count stock from</label>
+                  <select class="select" id="a4-src"><option value="all">Shop + warehouse</option><option value="shop">Shop only</option></select>
+                </div>
+              </div>
+              <span class="field-hint" id="a4-chint">"Same as current stock" prints one sticker per unit in stock (shop + warehouse), e.g. soap dish with 7 in stock = 7 stickers. Extra stickers are added on top to cover counting errors (7 + 2 extra = 9).</span>`}
+              <div class="a4-head">
+                <label class="checkbox-row"><input type="checkbox" id="a4-all" checked disabled /> <span class="text-sm font-semibold" id="a4-ptitle">Products</span></label>
+                <span class="text-muted" id="a4-count"></span>
+              </div>
+              <div class="a4-items" id="a4-items"><div class="a4-empty">Loading products…</div></div>
+            </div>
+          </div>
+          <div class="a4-pvbox">
+            <div class="a4-nav">
+              <button type="button" class="btn btn-secondary btn-sm" id="a4-prev">&lsaquo;</button>
+              <span id="a4-pageinfo"></span>
+              <button type="button" class="btn btn-secondary btn-sm" id="a4-next">&rsaquo;</button>
+            </div>
+            <div id="a4-preview"></div>
+            <div class="text-xs text-muted" style="text-align:center">Preview of the A4 sheet. Print with <b>Scale: 100%</b> / "Actual size" so labels line up.</div>
+          </div>
+        </div>`,
+      footerHtml: `
+        <button class="btn btn-secondary" data-action="cancel">Cancel</button>
+        <button class="btn btn-primary" data-action="print" id="a4-print-btn" disabled>${window.Icons.get('printer')} Print A4 sheet</button>`,
+    });
+    const $ = (q) => modal.querySelector(q);
+    let seq = 0;
+    let R = [];
+    const setPrintLabel = (txt) => { const b = $('#a4-print-btn'); if (b && !b.dataset.loading) b.innerHTML = `${window.Icons.get('printer')} ${txt}`; };
+
+    const layout = () => A4_LAYOUTS.find((l) => l.id === st.layout) || A4_LAYOUTS[0];
+    const perSheet = () => { const L = layout(); return L.cols * L.rows; };
+    const skipCount = () => Math.min(Math.max(1, st.start), perSheet()) - 1;
+    const opts = () => ({ shelf, price: st.price, guides: st.guides });
+    const baseCopies = (r) => (st.copiesMode === 'stock' && r.stock != null ? Math.max(0, Math.ceil(r.stock - 1e-9)) : r.copies);
+    const effCopies = (r) => Math.min(1000, baseCopies(r) + st.extra);
+    /** The label list for the sheets: blank spots to skip first, then the labels. In fill mode: enough copies for EXACTLY `pages` full sheets. */
+    const labels = () => {
+      const per = perSheet(); const skip = skipCount(); const out = [];
+      for (let i = 0; i < skip; i++) out.push(null);
+      if (st.mode === 'fill') {
+        if (st.fillEntry) { const n = Math.max(0, st.pages * per - skip); for (let c = 0; c < n; c++) out.push(st.fillEntry); }
+        return out;
+      }
+      st.rows.forEach((r) => { if (r.on) for (let c = 0, n = effCopies(r); c < n; c++) out.push(r.e); });
+      return out;
+    };
+    const pagesOf = (list, L) => { const n = L.cols * L.rows; const pages = []; for (let i = 0; i < list.length; i += n) pages.push(list.slice(i, i + n)); return pages; };
+
+    const renderPreview = async () => {
+      const my = ++seq;
+      const countEl = $('#a4-count'); const info = $('#a4-pageinfo'); const box = $('#a4-preview');
+      if (!st.loaded) {
+        info.textContent = '';
+        $('#a4-prev').disabled = true; $('#a4-next').disabled = true;
+        box.innerHTML = '<div class="a4-empty">Loading products…</div>';
+        return;
+      }
+      const L = layout(); const list = labels();
+      const real = list.filter(Boolean).length;
+      if (!real) {
+        countEl.textContent = st.mode === 'fill' ? 'Choose a product' : 'Nothing selected';
+        info.textContent = '';
+        $('#a4-prev').disabled = true; $('#a4-next').disabled = true;
+        box.innerHTML = `<div class="a4-empty">${st.mode === 'fill' ? 'Choose the product to fill the pages with' : 'Tick at least one product'}</div>`;
+        return;
+      }
+      const pages = pagesOf(list, L);
+      st.page = Math.min(st.page, pages.length - 1);
+      countEl.textContent = `${real} label${real === 1 ? '' : 's'} on ${pages.length} sheet${pages.length === 1 ? '' : 's'}`;
+      info.textContent = `Sheet ${st.page + 1} of ${pages.length}`;
+      $('#a4-prev').disabled = st.page === 0;
+      $('#a4-next').disabled = st.page >= pages.length - 1;
+      const pg = pages[st.page];
+      const map = await a4Barcodes(pg);
+      if (my !== seq) return;
+      const avail = Math.max(220, Math.min(340, (($('.a4-pvbox') && $('.a4-pvbox').clientWidth) || 360) - 24));
+      const scale = avail / 793.7;
+      box.innerHTML = `<div class="a4-pv" style="width:${Math.round(avail)}px;height:${Math.round(1122.5 * scale)}px"><style>${a4Css(L, opts())}</style><div style="transform:scale(${scale.toFixed(4)});transform-origin:0 0;width:210mm;height:297mm">${a4SheetBody(pg, opts(), map)}</div></div>`;
+    };
+
+    let pvTimer = null;
+    const schedulePreview = () => { clearTimeout(pvTimer); pvTimer = setTimeout(renderPreview, 70); };
+
+    /* ---------- fill-pages mode ---------- */
+    const updateFillTotal = () => {
+      const el = $('#a4-filltotal'); if (!el) return;
+      const per = perSheet(); const skip = skipCount(); const total = Math.max(0, st.pages * per - skip);
+      el.innerHTML = st.fillEntry
+        ? `${total} labels &middot; ${per} per sheet &times; ${st.pages} sheet${st.pages === 1 ? '' : 's'}${skip ? ` &minus; ${skip} skipped` : ''}`
+        : `${per} labels per sheet &times; ${st.pages} sheet${st.pages === 1 ? '' : 's'}`;
+      $('#a4-chips').querySelectorAll('[data-pg]').forEach((c) => c.classList.toggle('on', Number(c.dataset.pg) === st.pages));
+      if (st.mode === 'fill') setPrintLabel(`Print ${st.pages} A4 page${st.pages === 1 ? '' : 's'}`);
+    };
+    const updateSel = () => {
+      const el = $('#a4-sel'); const e = st.fillEntry;
+      el.innerHTML = e
+        ? `Selected: <b>${esc(e.name)}</b> &middot; ${e.barcode ? esc(e.barcode) + (e.pending ? ' (new barcode)' : '') : 'no barcode'} &middot; ${esc(a4Money(e.price))}`
+        : 'No product chosen yet';
+    };
+    const renderPick = () => {
+      const pickEl = $('#a4-pick');
+      if (!st.loaded) { pickEl.innerHTML = '<div class="a4-empty" style="padding:24px 10px">Loading products…</div>'; return; }
+      const q = st.fillQuery.trim().toLowerCase();
+      const src = q ? st.entries.filter((e) => `${e.name} ${e.sku} ${e.barcode}`.toLowerCase().includes(q)) : st.entries;
+      const list = src.slice(0, 30);
+      pickEl.innerHTML = list.length
+        ? list.map((e) => `<button type="button" class="a4-pk${st.fillEntry === e ? ' on' : ''}" data-pk="${e._i}"><span style="min-width:0"><span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.name)}</span><small>${esc(e.barcode || 'No barcode')}${e.sku ? ' &middot; ' + esc(e.sku) : ''}</small></span><span class="a4-pkp">${esc(a4Money(e.price))}</span></button>`).join('') + (src.length > list.length ? `<div class="text-xs text-muted" style="padding:8px 12px">${src.length - list.length} more - type to narrow the search</div>` : '')
+        : '<div class="a4-empty" style="padding:24px 10px">No product matches</div>';
+    };
+    const selectFill = async (e) => {
+      st.fillEntry = e;
+      renderPick(); updateSel(); updateFillTotal(); st.page = 0; renderPreview();
+      if (e && e.missing && !e.pending) {
+        // no barcode yet: create one now (saved to the product when you print) so the label scans at the till
+        try {
+          const used = await getUsedBarcodes(true);
+          if (!usedBarcodes) throw new Error('offline');
+          if (e.pending) return;
+          const c = String(window.BarcodeLabels.generateCode(used)); e.pending = c; e.barcode = c; used.add(c);
+        } catch { window.UI.toast.error('This product has no barcode and a new one could not be created safely. Check the connection and try again.'); return; }
+        if (st.fillEntry !== e) return;
+        renderPick(); updateSel(); st.page = 0; renderPreview();
+      }
+    };
+
+    const applyMode = () => {
+      const fillOn = st.mode === 'fill';
+      $('#a4-list-wrap').style.display = fillOn ? 'none' : '';
+      $('#a4-fill').style.display = fillOn ? '' : 'none';
+      modal.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === st.mode));
+      if (fillOn) { renderPick(); updateSel(); updateFillTotal(); }
+      else setPrintLabel('Print A4 sheet');
+      st.page = 0; renderPreview();
+      if (fillOn && st.loaded) setTimeout(() => { const f = $('#a4-fq'); if (f) f.focus(); }, 0);
+    };
+
+    $('#a4-modes').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mode]'); if (!b || st.mode === b.dataset.mode) return;
+      st.mode = b.dataset.mode; applyMode();
+    });
+    $('#a4-fq').addEventListener('input', (e) => { st.fillQuery = e.target.value; renderPick(); });
+    $('#a4-fq').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const q = st.fillQuery.trim().toLowerCase();
+      const first = (q ? st.entries.filter((x) => `${x.name} ${x.sku} ${x.barcode}`.toLowerCase().includes(q)) : st.entries)[0];
+      if (first) selectFill(first);
+    });
+    $('#a4-pick').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-pk]'); if (!b) return;
+      const entry = st.entries[Number(b.dataset.pk)]; if (entry) selectFill(entry);
+    });
+    const setPages = (n) => {
+      st.pages = Math.min(A4_MAX_PAGES, Math.max(1, parseInt(n, 10) || 1));
+      updateFillTotal(); st.page = 0; schedulePreview();
+    };
+    $('#a4-pages').addEventListener('input', (e) => {
+      const v = parseInt(e.target.value, 10);
+      if (!Number.isFinite(v)) return;
+      if (v > A4_MAX_PAGES) e.target.value = A4_MAX_PAGES;
+      setPages(v);
+    });
+    $('#a4-pages').addEventListener('blur', (e) => { e.target.value = st.pages; });
+    $('#a4-chips').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-pg]'); if (!c) return;
+      setPages(c.dataset.pg); $('#a4-pages').value = st.pages;
+    });
+
+    /* ---------- common controls ---------- */
+    $('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
+    $('#a4-layout').addEventListener('change', (e) => {
+      st.layout = e.target.value; st.page = 0;
+      try { window.Storage.setPref(prefKey, st.layout); } catch { /* optional */ }
+      updateFillTotal(); renderPreview();
+    });
+    $('#a4-start').addEventListener('input', (e) => { st.start = Math.max(1, parseInt(e.target.value, 10) || 1); st.page = 0; updateFillTotal(); schedulePreview(); });
+    $('#a4-price').addEventListener('change', (e) => { st.price = e.target.checked; renderPreview(); });
+    $('#a4-guides').addEventListener('change', (e) => { st.guides = e.target.checked; renderPreview(); });
+    $('#a4-prev').addEventListener('click', () => { st.page = Math.max(0, st.page - 1); renderPreview(); });
+    $('#a4-next').addEventListener('click', () => { st.page += 1; renderPreview(); });
+    $('#a4-all').addEventListener('change', (e) => {
+      st.rows.forEach((r, i) => { if (r.show) { r.on = e.target.checked; R[i].cb.checked = r.on; } }); refreshRows(false);
+      st.page = 0; renderPreview();
+    });
+
+    // Filter: all / only system-generated barcodes / only products with no barcode (a new one is created and saved on print)
+    const applyFilter = async () => {
+      const f = st.filter;
+      if (f === 'none') {
+        const known = await getUsedBarcodes(true); // fresh from the server: a new barcode must never repeat an existing one
+        if (!usedBarcodes) {
+          window.UI.toast.error('Could not load the existing barcodes, so new ones cannot be created safely. Check the connection and try again.');
+          st.filter = 'all'; const fs = $('#a4-filter'); if (fs) fs.value = 'all';
+          return applyFilter();
+        }
+        const used = new Set(known);
+        st.rows.forEach((r) => { if (r.e.barcode) used.add(String(r.e.barcode).trim()); });
+        let invalid = 0;
+        st.rows.forEach((r) => { if (r.e.missing && !r.e.pending) { const c = String(window.BarcodeLabels.generateCode(used)); r.e.pending = c; used.add(c); if (!a4Ean13Svg(c)) invalid++; } });
+        if (invalid) window.UI.toast.warning(`${invalid} generated barcode${invalid === 1 ? ' is' : 's are'} not a valid EAN-13 and may not scan on every scanner.`);
+      }
+      let n = 0;
+      st.rows.forEach((r, i) => {
+        const e = r.e; const x = R[i];
+        if (!x) return;
+        if (e.missing) e.barcode = f === 'none' ? e.pending : '';
+        r.show = f === 'none' ? !!e.missing : (!e.missing && (f === 'all' || a4IsGenerated(e.barcode, st.prefix)));
+        r.on = r.show;
+        if (r.show) n++;
+        x.row.style.display = r.show ? '' : 'none';
+        x.cb.checked = r.on;
+        if (r.show) x.sub.textContent = `${e.barcode ? e.barcode + (e.pending && e.missing ? ' (new)' : '') : 'No barcode'} · ${a4Money(e.price)}`;
+      });
+      const allCb = $('#a4-all'); if (allCb) allCb.checked = n > 0;
+      const pt = $('#a4-ptitle'); if (pt) pt.textContent = `Products (${n})`;
+      const wrap = $('#a4-prefix-wrap'); if (wrap) wrap.style.display = f === 'gen' ? '' : 'none';
+      const hint = $('#a4-fhint');
+      if (hint) {
+        hint.style.display = f === 'all' ? 'none' : '';
+        if (f === 'none') hint.textContent = n ? `${n} product${n === 1 ? ' has' : 's have'} no barcode. The new barcodes shown here are saved to the products when you print.` : 'Every product already has a barcode.';
+        else if (n) hint.textContent = `${n} product${n === 1 ? ' has' : 's have'} a system-generated barcode.`;
+        else hint.textContent = `No products match "${st.prefix}". Barcodes in your list look like: ${st.rows.filter((r) => !r.e.missing).slice(0, 3).map((r) => r.e.barcode).join(', ') || '-'}. Type the first digits of a generated one in the box above.`;
+      }
+      refreshRows(true);
+      st.page = 0; renderPreview();
+    };
+    if ($('#a4-filter')) {
+      $('#a4-filter').addEventListener('change', (e) => {
+        st.filter = e.target.value;
+        if (st.filter === 'gen' && !st.prefix) { st.prefix = getAutoPrefix() || '2'; const pi = $('#a4-prefix'); if (pi) pi.value = st.prefix; }
+        applyFilter();
+      });
+      $('#a4-prefix').addEventListener('input', (e) => {
+        st.prefix = e.target.value.trim();
+        try { window.Storage.setPref('a4GenPrefix', st.prefix); } catch { /* optional */ }
+        clearTimeout(st._pt); st._pt = setTimeout(applyFilter, 120);
+      });
+    }
+    $('#a4-items').addEventListener('change', (e) => {
+      const cb = e.target.closest('[data-a4on]');
+      if (cb) { st.rows[Number(cb.dataset.a4on)].on = cb.checked; refreshRows(false); st.page = 0; renderPreview(); }
+    });
+    $('#a4-items').addEventListener('input', (e) => {
+      const c = e.target.closest('[data-a4c]');
+      if (c) { const v = parseInt(c.value, 10); st.rows[Number(c.dataset.a4c)].copies = Number.isFinite(v) ? Math.min(500, Math.max(0, v)) : 1; refreshRows(false); st.page = 0; schedulePreview(); }
+    });
+
+    // Stickers per product: manual, or the current stock (read fresh from the server) + extra stickers for every product
+    const refreshRows = (syncInputs) => {
+      const stockMode = st.copiesMode === 'stock';
+      st.rows.forEach((r, i) => {
+        if (!r.show) return;
+        const x = R[i]; if (!x) return;
+        const useStock = stockMode && r.stock != null;
+        if (syncInputs || useStock) x.inp.value = baseCopies(r);
+        x.inp.disabled = useStock;
+        x.stk.textContent = !stockMode ? '' : (r.stock != null ? `Stock: ${r.stock}${st.src !== 'shop' && r.wh > 0 ? ` (shop ${r.qty} + warehouse ${r.wh})` : ''}` : (r.e.vid ? 'Variant: no stock figure - set copies by hand' : 'Stock not tracked - set copies by hand'));
+        x.eff.textContent = (stockMode || st.extra) ? `= ${effCopies(r)}` : '';
+      });
+      const hint = $('#a4-chint');
+      if (hint) {
+        const noStock = stockMode ? st.rows.filter((r) => r.show && r.stock == null).length : 0;
+        const on = st.rows.filter((r) => r.show && r.on);
+        const base = on.reduce((t, r) => t + baseCopies(r), 0);
+        const all = on.reduce((t, r) => t + effCopies(r), 0);
+        hint.textContent = (stockMode ? `One sticker per unit in stock (${st.src === 'shop' ? 'shop only' : 'shop + warehouse'}). ` : '')
+          + `${on.length} product${on.length === 1 ? '' : 's'}: ${base}${all - base ? ` + ${all - base} extra` : ''} = ${all} sticker${all === 1 ? '' : 's'} in total.`
+          + (noStock ? ` ${noStock} item${noStock === 1 ? ' has' : 's have'} no stock figure (variants / not tracked): copies stay as typed.` : '');
+      }
+    };
+    // Stock is fetched in parallel batches (so choosing "Same as current stock" is instant) and
+    // re-read when the figures are older than a minute, including right before printing.
+    let stockP = null; let stockAt = 0;
+    const loadStock = (force) => {
+      if (!force && stockP && Date.now() - stockAt < 60000) return stockP;
+      stockAt = Date.now();
+      stockP = (async () => {
+        const ids = Array.from(new Set(st.rows.filter((r) => !r.e.vid && r.e.pid && !String(r.e.pid).startsWith('tmp_')).map((r) => String(r.e.pid))));
+        const branchId = window.AppShell.getActiveBranchId() || undefined;
+        const fresh = new Map();
+        const chunks = []; for (let i = 0; i < ids.length; i += 150) chunks.push(ids.slice(i, i + 150));
+        let ci = 0;
+        await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, async () => {
+          while (ci < chunks.length) {
+            const ch = chunks[ci++];
+            const { data } = await window.Api.get('/products/stock-levels', { ids: ch.join(','), branchId });
+            Object.entries((data && data.stock) || {}).forEach(([id, v]) => { fresh.set(id, v); stockCache.set(id, v); });
+          }
+        }));
+        st.rows.forEach((r) => {
+          const v = (!r.e.vid && r.e.pid) ? fresh.get(String(r.e.pid)) : null;
+          r.tracked = !!(v && v.tracked); r.qty = v ? Number(v.quantity) || 0 : 0; r.wh = v ? Number(v.warehouse) || 0 : 0;
+          r.stock = r.tracked ? Math.round((r.qty + (st.src === 'shop' ? 0 : r.wh)) * 1000) / 1000 : null;
+        });
+      })();
+      stockP.catch(() => { stockP = null; });
+      return stockP;
+    };
+    if ($('#a4-cmode')) {
+      $('#a4-cmode').addEventListener('change', async (e) => {
+        const sel = e.target;
+        if (sel.value === 'stock') {
+          sel.disabled = true;
+          try { const h = $('#a4-chint'); if (h) h.textContent = 'Loading stock…'; await loadStock(); st.copiesMode = 'stock'; }
+          catch (err) { window.UI.toast.error(`Could not load the stock (${err.message || 'offline'}). Stickers stay as typed.`); sel.value = 'manual'; st.copiesMode = 'manual'; }
+          sel.disabled = false;
+        } else st.copiesMode = 'manual';
+        const sw = $('#a4-src-wrap'); if (sw) sw.style.display = st.copiesMode === 'stock' ? '' : 'none';
+        refreshRows(true); st.page = 0; renderPreview();
+      });
+      $('#a4-src').addEventListener('change', (e) => {
+        st.src = e.target.value;
+        st.rows.forEach((r) => { r.stock = r.tracked ? Math.round((r.qty + (st.src === 'shop' ? 0 : r.wh)) * 1000) / 1000 : null; });
+        refreshRows(true); st.page = 0; renderPreview();
+      });
+      $('#a4-extra').addEventListener('input', (e) => {
+        st.extra = Math.min(20, Math.max(0, parseInt(e.target.value, 10) || 0));
+        refreshRows(false); st.page = 0; schedulePreview();
+      });
+    }
+
+    /** Saves a newly created barcode onto the product / variant (retries with a fresh code if another till took it meanwhile). */
+    const savePendingBarcode = async (e) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          if (e.vid) await window.Api.put(`/products/${e.pid}/variants/${e.vid}`, { barcode: e.pending });
+          else await window.Api.put(`/products/${e.pid}`, { barcode: e.pending });
+          e.barcode = e.pending; e.missing = false; e.pending = '';
+          return;
+        } catch (err) {
+          const taken = /barcode/i.test(err.message || '') && /(exist|duplicate|already|taken|unique)/i.test(err.message || '');
+          if (!taken || attempt >= 2) throw err;
+          const used = await getUsedBarcodes(true);
+          e.pending = String(window.BarcodeLabels.generateCode(used)); e.barcode = e.pending; used.add(e.pending);
+        }
+      }
+    };
+
+    /** Builds the print document and prints it. Big jobs share one drawing per barcode so they stay light. */
+    const doPrint = async (list, L) => {
+      const btn = $('#a4-print-btn');
+      window.UI.setButtonLoading(btn, true, 'Preparing…');
+      try {
+        let map = await a4Barcodes(list);
+        let defs = '';
+        const o = opts();
+        if (list.filter(Boolean).length > A4_COMPACT_ABOVE) { const c = a4CompactMap(map); map = c.map; defs = c.defs; }
+        const body = pagesOf(list, L).map((pg) => a4SheetBody(pg, o, map)).join('');
+        a4PrintHtml(`<!doctype html><html><head><meta charset="utf-8"><title>${shelf ? 'Shelf labels' : 'Barcode stickers'}</title><style>@page{size:A4;margin:0}html,body{margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.a4-sheet{page-break-after:always;break-after:page}.a4-sheet:last-child{page-break-after:auto;break-after:auto}${a4Css(L, o)}</style></head><body>${defs}${body}</body></html>`);
+      } finally {
+        window.UI.setButtonLoading(btn, false);
+        updateFillTotal();
+      }
+    };
+
+    $('#a4-print-btn').addEventListener('click', async () => {
+      if (!st.loaded) return;
+      const btn = $('#a4-print-btn');
+      const L = layout();
+
+      /* ---- fill pages with ONE product ---- */
+      if (st.mode === 'fill') {
+        const e = st.fillEntry;
+        if (!e) { window.UI.toast.error('Choose the product to print'); $('#a4-fq').focus(); return; }
+        if (e.missing && !e.pending) { window.UI.toast.error('This product has no barcode yet - wait a moment for a new one to be created, then print'); return; }
+        if (e.missing && e.pending) {
+          const ok = await window.UI.confirmDialog({
+            title: 'Save new barcode?',
+            message: `"${e.name}" has no barcode. The new barcode ${e.pending} on the labels will be saved to the product so the stickers scan at the till.`,
+            confirmText: 'Save and print',
+          });
+          if (!ok) return;
+          window.UI.setButtonLoading(btn, true, 'Saving barcode…');
+          try { await savePendingBarcode(e); }
+          catch (err) { window.UI.setButtonLoading(btn, false); updateFillTotal(); window.UI.toast.error(`The barcode could not be saved (${err.message || 'error'}). Nothing was printed.`); return; }
+          a4InvalidateEntries(); productIndex.invalidate(); usedBarcodes = null; getUsedBarcodes(true).catch(() => {});
+          updateSel(); renderPick(); fetchAndRender();
+        }
+        const list = labels();
+        if (!list.some(Boolean)) { window.UI.toast.error('Nothing to print'); return; }
+        await doPrint(list, L);
+        return;
+      }
+
+      /* ---- chosen products ---- */
+      if (st.copiesMode === 'stock' && Date.now() - stockAt > 60000) {
+        window.UI.setButtonLoading(btn, true, 'Refreshing stock…');
+        try { await loadStock(true); refreshRows(true); } catch { /* keep the last figures */ }
+        window.UI.setButtonLoading(btn, false);
+      }
+      let list = labels();
+      if (!list.some(Boolean)) { window.UI.toast.error('Tick at least one product'); return; }
+      if (st.copiesMode === 'stock') {
+        const on = st.rows.filter((r) => r.show && r.on);
+        const known = on.filter((r) => r.stock != null);
+        const unknown = on.length - known.length;
+        const zero = known.filter((r) => effCopies(r) === 0).length;
+        const stockSum = known.reduce((t, r) => t + baseCopies(r), 0);
+        const total = list.filter(Boolean).length;
+        const ok = await window.UI.confirmDialog({
+          title: 'Check before printing',
+          message: `${on.length} product${on.length === 1 ? '' : 's'}: stock ${stockSum}${st.extra ? ` + ${st.extra} extra on each` : ''} = ${total} sticker${total === 1 ? '' : 's'} on ${pagesOf(list, L).length} sheet${pagesOf(list, L).length === 1 ? '' : 's'}.${unknown ? ` ${unknown} item${unknown === 1 ? ' has' : 's have'} no stock figure and print as typed.` : ''}${zero ? ` ${zero} product${zero === 1 ? ' has' : 's have'} 0 stickers.` : ''}`,
+          confirmText: 'Print',
+        });
+        if (!ok) return;
+      }
+      // Products with no barcode: save the new barcodes shown on the labels so the stickers scan at the till.
+      const pendingRows = st.filter === 'none' ? st.rows.filter((r) => r.on && r.e.missing && r.e.pending && effCopies(r) > 0) : [];
+      if (pendingRows.length) {
+        const ok = await window.UI.confirmDialog({
+          title: 'Save new barcodes?',
+          message: `${pendingRows.length} product${pendingRows.length === 1 ? ' has' : 's have'} no barcode. The new barcodes on the labels will be saved to the product${pendingRows.length === 1 ? '' : 's'} so the stickers scan at the till.`,
+          confirmText: 'Save and print',
+        });
+        if (!ok) return;
+        window.UI.setButtonLoading(btn, true, 'Saving barcodes…');
+        let failed = 0; let lastErr = '';
+        for (const r of pendingRows) {
+          try { await savePendingBarcode(r.e); }
+          catch (err) { failed++; lastErr = err.message || ''; r.on = false; const cb = modal.querySelector(`[data-a4on="${st.rows.indexOf(r)}"]`); if (cb) cb.checked = false; }
+        }
+        a4InvalidateEntries(); productIndex.invalidate(); usedBarcodes = null; getUsedBarcodes(true).catch(() => {});
+        if (failed) window.UI.toast.error(`${failed} product${failed === 1 ? '' : 's'} could not be saved and ${failed === 1 ? 'was' : 'were'} skipped${lastErr ? ` (${lastErr})` : ''}`);
+        list = labels();
+        if (!list.some(Boolean)) { window.UI.setButtonLoading(btn, false); renderPreview(); return; }
+        fetchAndRender();
+      }
+      await doPrint(list, L);
+    });
+
+    /* ---------- build the product rows once the data is in ---------- */
+    const setEntries = (entries) => {
+      entries.forEach((e, i) => { e._i = i; e.missing = !e.barcode; });
+      st.entries = entries;
+      st.rows = entries.map((e) => { const show = shelf || !e.missing; return { e, on: show, copies: 1, show }; });
+      $('#a4-items').innerHTML = st.rows.map((r, i) => `
+        <div class="a4-row" data-a4row="${i}" style="${r.show ? '' : 'display:none'}">
+          <input type="checkbox" data-a4on="${i}" ${r.on ? 'checked' : ''} />
+          <div class="a4-nm">${esc(r.e.name)}<small data-a4sub>${esc(r.e.barcode || 'No barcode')} · ${esc(a4Money(r.e.price))}</small><small data-a4stk></small></div>
+          <span class="text-xs" data-a4eff style="font-weight:700;white-space:nowrap"></span>
+          <label class="text-xs text-muted">Copies <input class="input" type="number" min="0" max="500" value="1" data-a4c="${i}" /></label>
+        </div>`).join('');
+      R = Array.from(modal.querySelectorAll('[data-a4row]')).map((row) => ({
+        row, cb: row.querySelector('[data-a4on]'), sub: row.querySelector('[data-a4sub]'),
+        inp: row.querySelector('[data-a4c]'), eff: row.querySelector('[data-a4eff]'), stk: row.querySelector('[data-a4stk]'),
+      }));
+      const shown = st.rows.filter((r) => r.show).length;
+      $('#a4-ptitle').textContent = `Products (${shown})`;
+      const allCb = $('#a4-all'); allCb.disabled = false; allCb.checked = shown > 0;
+    };
+
+    applyMode(); // sets the mode buttons / panels and shows the loading preview - the dialog is already on screen
+
+    let entries = [];
+    try { entries = await a4LoadEntries(selectedIds); } catch { entries = []; }
+    if (!modal.isConnected) return; // closed while loading
+    if (!entries.length) { window.UI.toast.info('No products to print'); window.UI.closeModal(); return; }
+
+    setEntries(entries);
+    st.loaded = true;
+    $('#a4-print-btn').disabled = false;
+    if (st.mode !== 'fill') setPrintLabel('Print A4 sheet');
+
+    // pre-select the product for fill mode: the one asked for, or the only one there is
+    const pre = fillPid ? entries.find((e) => String(e.pid) === String(fillPid)) : (entries.length === 1 ? entries[0] : null);
+    if (pre) selectFill(pre);
+    else { renderPick(); updateFillTotal(); renderPreview(); }
+    if (st.mode === 'fill') setTimeout(() => { const f = $('#a4-fq'); if (f && !pre) f.focus(); }, 0);
+    if ($('#a4-cmode') && st.mode !== 'fill') setTimeout(() => { if (modal.isConnected) loadStock().catch(() => {}); }, 400); // warm the stock figures after the first paint
+  }
+
+  function bindToolbar() {
+    const refreshBtn = document.getElementById('refresh-products-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', async () => {
+      if (refreshBtn.disabled) return;
+      refreshBtn.disabled = true;
+      const icon = document.getElementById('refresh-products-icon');
+      if (icon) icon.animate([{ transform: 'rotate(0)' }, { transform: 'rotate(360deg)' }], { duration: 700, iterations: Infinity });
+      try {
+        usedBarcodes = null; getUsedBarcodes(true).catch(() => {});
+        a4InvalidateEntries();
+        await getCategories(true);
+        populateCategoryFilter();
+        const sel = document.getElementById('category-filter');
+        if (sel) sel.value = state.categoryId || '';
+        await fetchAndRender();
+        window.UI.toast.success('Products refreshed');
+      } catch (err) {
+        window.UI.toast.error(err.message || 'Could not refresh');
+      } finally {
+        refreshBtn.disabled = false;
+        if (icon) icon.getAnimations().forEach((a) => a.cancel());
+      }
+    });
+    // Start getting the sticker data ready the moment the pointer / finger reaches a sticker button.
+    const warmStickers = () => { a4LoadAll().catch(() => {}); };
+    ['barcode-stickers-btn', 'shelf-labels-link', 'bl-print-selected'].forEach((id) => {
+      const el = document.getElementById(id); if (!el) return;
+      ['pointerenter', 'focus', 'touchstart'].forEach((ev) => el.addEventListener(ev, warmStickers, { passive: true }));
+    });
+    document.getElementById('barcode-stickers-btn').addEventListener('click', () => {
+      openPrintChooser('sticker', []); // everything ticked: untick what you do not need
+    });
+    const shelfLink = document.getElementById('shelf-labels-link');
+    if (shelfLink) shelfLink.addEventListener('click', (e) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey) return; // let "open in new tab" work as normal
+      e.preventDefault();
+      openPrintChooser('shelf', Array.from(selected.keys()));
+    });
+    document.getElementById('bl-print-selected').addEventListener('click', () => {
+      openPrintChooser('sticker', Array.from(selected.keys()));
+    });
+    document.getElementById('bl-clear-selected').addEventListener('click', () => {
+      selected.clear();
+      document.querySelectorAll('#products-tbody [data-select]').forEach((cb) => { cb.checked = false; });
+      updateSelectionBar([]);
+    });
+    document.getElementById('bl-page-all').addEventListener('change', (e) => {
+      document.querySelectorAll('#products-tbody [data-select]').forEach((cb) => {
+        cb.checked = e.target.checked;
+        const name = cb.closest('tr').querySelector('.cell-primary')?.textContent || '';
+        if (e.target.checked) selected.set(cb.dataset.select, name); else selected.delete(cb.dataset.select);
+      });
+      updateSelectionBar();
+    });
+
+    document.getElementById('import-excel-btn')?.addEventListener('click', () => window.ProductImport.open({ onDone: () => window.location.reload() }));
+    document.getElementById('add-product-btn').addEventListener('click', () => {
+      // Pharmacies add medicines through their own form (drug details + opening batch); other goods use the normal form.
+      // Wines & spirits add drinks through their own form (category, ABV, size, photo, packs, empties, opening stock).
+      if (window.LiquorProductForm && window.LiquorProductForm.applies()) { window.LiquorProductForm.open({ onDone: () => fetchAndRender() }); return; }
+      if (window.PharmacyProductForm && window.AppShell.hasFeature && window.AppShell.hasFeature('pharmacyDispensing') && window.Permissions.can(window.AppShell.getUser(), 'medicines.manage')) {
+        window.PharmacyProductForm.chooser({ onDone: () => fetchAndRender(), onOther: () => openProductModal() });
+      } else openProductModal();
+    });
+    window.AppShell.runUrlAction?.('add-product-btn'); // opened from the setup guide
+    document.getElementById('manage-categories-btn').addEventListener('click', openCategoriesModal);
+
+    // Instant when the product list is already on the device (js/core/fast-search.js); otherwise a short debounce + server.
+    const searchLater = window.UI.debounce(() => fetchAndRender({ local: true }), 250);
+    document.getElementById('search-input').addEventListener('input', (e) => {
+      state.search = e.target.value.trim();
+      state.page = 1;
+      if (productIndex.isReady()) fetchAndRender({ local: true }); else searchLater();
+    });
+
+    document.getElementById('status-filter').addEventListener('change', (e) => {
+      state.status = e.target.value;
+      state.page = 1;
+      fetchAndRender(); // archived products live on the server: always a fresh load
+    });
+
+    document.getElementById('category-filter').addEventListener('change', (e) => {
+      state.categoryId = e.target.value;
+      state.page = 1;
+      fetchAndRender({ local: true });
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * List + table
+   * ------------------------------------------------------------------ */
+  async function fetchAndRender(opts) {
+    const tbody = document.getElementById('products-tbody');
+    const local = !!(opts && opts.local) && state.status !== 'archived';
+    if (!local) { productIndex.invalidate(); stockCache.clear(); a4InvalidateEntries(); } // something changed (or first load): the device copy, stock and sticker data must reload
+
+    if (local) {
+      // Search / filter / page change answered from the in-memory list: no skeleton, no waiting.
+      const res = productIndex.query({ search: state.search, categoryId: state.categoryId, page: state.page, limit: state.limit });
+      if (res) {
+        state.page = res.page;
+        renderRows(res.items);
+        window.UI.renderPagination(document.getElementById('pagination'), res, (p) => { state.page = p; fetchAndRender({ local: true }); });
+        window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+        return;
+      }
+    }
+
+    tbody.innerHTML = window.UI.skeletonRows(7, 4);
+
+    try {
+      if (window.LiquorTill && window.LiquorTill.active()) await window.LiquorTill.refresh(); // category / ABV / size beside each drink
+      const { data } = await window.Api.get('/products', {
+        page: state.page, limit: state.limit, search: state.search, categoryId: state.categoryId, status: state.status || undefined,
+      });
+      renderRows(data.items);
+      window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; fetchAndRender({ local: true }); });
+      window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+      if (state.status !== 'archived') productIndex.load(); // warm the device copy so the next search is instant
+    } catch (err) {
+      // No internet / server down: show the copy saved on this device (plus anything waiting to upload).
+      await productIndex.load();
+      const res = productIndex.query({ search: state.search, categoryId: state.categoryId, page: state.page, limit: state.limit });
+      if (res) {
+        state.page = res.page;
+        renderRows(res.items);
+        window.UI.renderPagination(document.getElementById('pagination'), res, (p) => { state.page = p; fetchAndRender({ local: true }); });
+        window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+        window.UI.toast.info('Offline: showing products saved on this device');
+        return;
+      }
+      tbody.innerHTML = `<tr><td colspan="8">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
+    }
+  }
+
+  /** Price cell for a wholesale-first product: the wholesale price leads, retail (if any) follows. */
+  function wholesalePriceCell(p) {
+    const s = window.WholesaleProductForm.summarize(p);
+    const esc = window.UI.escapeHtml;
+    return `
+          <div class="cell-primary">${window.UI.formatMoney(s.wholesale)} <span class="text-xs text-muted">/ ${esc(s.unit || '')} wholesale</span></div>
+          ${s.retailOn
+            ? `<div class="text-xs text-muted">Retail ${window.UI.formatMoney(s.retail)} / ${esc(s.retailUnit || '')}</div>`
+            : '<div class="text-xs text-muted">Wholesale only</div>'}`;
+  }
+
+  /** Wines & spirits: photo (or a coloured initial), category chip, ABV and bottle size beside the name. Cashier-safe: reads the cached till rules. */
+  function liquorCell(p) {
+    const LT = window.LiquorTill; if (!LT || !LT.active()) return '';
+    const e = window.UI.escapeHtml; const d = LT.info(p._id);
+    const thumb = p.image ? `<img class="lq-thumb" src="${e(p.image)}" alt="" loading="lazy" />` : `<span class="lq-thumb-ph lq-c-${d ? e(d.category) : 'OTHER'}">${e((p.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+    const size = d && d.volumeMl ? (d.volumeMl >= 1000 ? `${d.volumeMl / 1000} L` : `${d.volumeMl} ml`) : '';
+    const meta = d ? `<span class="lq-chip lq-c-${e(d.category)}">${e(String(d.category).replace(/_/g, ' ').toLowerCase())}</span>${d.abv != null ? ` <span class="lq-abv">${e(d.abv)}%</span>` : ''}${size ? ` <span class="text-xs text-muted">${size}</span>` : ''}` : '<span class="text-xs text-muted">No drink details yet</span>';
+    return `<div class="lq-pcell">${thumb}<div><div class="cell-primary">${e(p.name)}</div><small>${meta}</small></div></div>`;
+  }
+
+
+  /* ------------------------------------------------------------------ *
+   * STOCK beside every product (one request per page) + the row action menu (3 dots)
+   * ------------------------------------------------------------------ */
+  const stockCache = new Map(); // product id -> { quantity, warehouse, low, out, tracked, threshold }
+  let stockSeq = 0;
+
+  (function injectMenuStyles() {
+    if (document.getElementById('pm-styles')) return;
+    const st = document.createElement('style'); st.id = 'pm-styles';
+    st.textContent = `
+      .pm-namecell{display:flex;align-items:flex-start;gap:8px;min-width:0}
+      .pm-namebody{min-width:0;flex:1}
+      .pm-kebab{flex:none;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--color-text-secondary,#5b6475);cursor:pointer;transition:background .15s,border-color .15s,color .15s;-webkit-tap-highlight-color:transparent}
+      .pm-kebab svg{width:20px;height:20px;transform:rotate(90deg)}
+      .pm-kebab:hover,.pm-kebab[aria-expanded="true"]{background:var(--color-primary-50,#eef2ff);border-color:var(--color-border,#e5e7eb);color:var(--color-primary,#4f46e5)}
+      .pm-kebab:focus-visible{outline:2px solid var(--color-primary,#4f46e5);outline-offset:1px}
+      .pm-actions-col{display:none !important}
+      .pm-stock{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.5;white-space:nowrap;background:#ecfdf3;color:#047857;font-variant-numeric:tabular-nums}
+      .pm-stock.low{background:#fff7e6;color:#b45309}
+      .pm-stock.out{background:#fdecea;color:#b3140a}
+      .pm-stock.off{background:#f1f2f6;color:#6b7280;font-weight:500}
+      .pm-stock .pm-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+      .pm-stock-sub{display:block;font-size:11px;color:var(--color-text-muted,#6b7280);margin-top:2px;font-weight:400}
+      .pm-skel{min-width:64px;background:linear-gradient(90deg,#eef0f4,#f7f8fa,#eef0f4);background-size:200% 100%;animation:pm-sh 1.2s infinite;color:transparent}
+      @keyframes pm-sh{from{background-position:200% 0}to{background-position:-200% 0}}
+      .pm-stock-inline{display:none;margin-top:4px}
+      @media (max-width:900px){.pm-stock-col{display:none !important}.pm-stock-inline{display:block}}
+      #pm-menu{position:fixed;z-index:1400;min-width:240px;max-width:min(320px,calc(100vw - 16px));background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e7eb);border-radius:14px;box-shadow:0 18px 48px rgba(16,24,40,.22),0 2px 8px rgba(16,24,40,.08);padding:6px;opacity:0;transform:translateY(-4px) scale(.98);transform-origin:top left;transition:opacity .12s,transform .12s}
+      #pm-menu.open{opacity:1;transform:none}
+      #pm-menu .pm-head{padding:10px 12px 8px;border-bottom:1px solid var(--color-border,#e5e7eb);margin:0 0 6px}
+      #pm-menu .pm-title{font-weight:700;font-size:14px;color:var(--color-text,#111827);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #pm-menu .pm-sub{margin-top:5px}
+      #pm-menu .pm-item{display:flex;align-items:center;gap:12px;width:100%;min-height:42px;padding:0 12px;border:0;border-radius:9px;background:transparent;font:inherit;font-size:14px;font-weight:500;color:var(--color-text,#111827);text-align:left;cursor:pointer}
+      #pm-menu .pm-item svg{width:18px;height:18px;flex:none;color:var(--color-text-secondary,#5b6475)}
+      #pm-menu .pm-item:hover,#pm-menu .pm-item:focus-visible{background:var(--color-primary-50,#eef2ff);outline:none}
+      #pm-menu .pm-item.danger,#pm-menu .pm-item.danger svg{color:#b3140a}
+      #pm-menu .pm-item.danger:hover,#pm-menu .pm-item.danger:focus-visible{background:#fdecea}
+      #pm-menu .pm-sep{height:1px;background:var(--color-border,#e5e7eb);margin:6px 4px}
+      #pm-back{position:fixed;inset:0;z-index:1399;background:rgba(15,23,42,.45);opacity:0;transition:opacity .15s}
+      #pm-back.open{opacity:1}
+      @media (max-width:560px){
+        #pm-menu{left:0 !important;right:0;top:auto !important;bottom:0;max-width:none;min-width:0;border-radius:18px 18px 0 0;padding:8px 8px calc(10px + env(safe-area-inset-bottom));transform:translateY(24px);transform-origin:bottom}
+        #pm-menu.open{transform:none}
+        #pm-menu .pm-item{min-height:50px;font-size:15px}
+        #pm-menu::before{content:"";display:block;width:38px;height:4px;border-radius:4px;background:#d5d9e0;margin:2px auto 8px}
+      }
+      @media (prefers-reduced-motion:reduce){#pm-menu,#pm-back{transition:none}}
+    `;
+    document.head.appendChild(st);
+  })();
+
+  function stockHtml(p, st) {
+    if (!st) return '<span class="pm-stock pm-skel">&nbsp;</span>';
+    if (!st.tracked) return '<span class="pm-stock off">Not tracked</span>';
+    const unit = (p && p.unit) || 'pcs';
+    const unitLabel = unit === 'piece' ? 'pcs' : unit;
+    const total = Math.round((st.quantity + (st.warehouse || 0)) * 1000) / 1000;
+    const cls = st.out || total <= 0 ? 'out' : st.low ? 'low' : '';
+    const label = cls === 'out' ? 'Out of stock' : `${total.toLocaleString('en-KE')} ${window.UI.escapeHtml(unitLabel)}${cls === 'low' ? ' · low' : ''}`;
+    let sub = '';
+    const pk = ((p && p.units) || []).find((u) => u.code === 'PKT' && u.status !== 'inactive' && u.factor > 1);
+    if (pk && total > 0) { const full = Math.floor(total / pk.factor); const loose = Math.round((total - full * pk.factor) * 1000) / 1000; sub = `${full} ${window.UI.escapeHtml(pk.name)}${full === 1 ? '' : 's'}${loose ? ` + ${loose} loose` : ''}`; }
+    else if (st.warehouse > 0) sub = `${st.quantity} shop · ${st.warehouse} warehouse`;
+    return `<span class="pm-stock ${cls}"><span class="pm-dot"></span>${label}</span>${sub ? `<span class="pm-stock-sub">${sub}</span>` : ''}`;
+  }
+
+  function paintStock(items) {
+    items.forEach((p) => {
+      const html = stockHtml(p, stockCache.get(String(p._id)));
+      const cell = document.querySelector(`[data-stock-cell="${p._id}"]`); if (cell) cell.innerHTML = html;
+      const inl = document.querySelector(`[data-stock-inline="${p._id}"]`); if (inl) inl.innerHTML = html;
+    });
+  }
+
+  async function loadStock(items) {
+    const ids = items.filter((p) => !p._pending && !String(p._id).startsWith('tmp_')).map((p) => p._id);
+    if (!ids.length) return;
+    const my = ++stockSeq;
+    try {
+      const { data } = await window.Api.get('/products/stock-levels', { ids: ids.join(','), branchId: window.AppShell.getActiveBranchId() || undefined }, { background: true });
+      if (my !== stockSeq) return;
+      Object.entries(data.stock || {}).forEach(([id, v]) => stockCache.set(id, v));
+      paintStock(items);
+    } catch {
+      // no permission / offline: show a dash instead of a spinner that never ends
+      if (my !== stockSeq) return;
+      items.forEach((p) => { if (!stockCache.has(String(p._id))) { ['data-stock-cell', 'data-stock-inline'].forEach((a) => { const el = document.querySelector(`[${a}="${p._id}"]`); if (el) el.innerHTML = '<span class="text-muted">-</span>'; }); } });
+    }
+  }
+
+  let pmOpenBtn = null;
+  function closeRowMenu() {
+    const m = document.getElementById('pm-menu'); const b = document.getElementById('pm-back');
+    if (m) m.remove(); if (b) b.remove();
+    if (pmOpenBtn) { pmOpenBtn.setAttribute('aria-expanded', 'false'); pmOpenBtn = null; }
+    document.removeEventListener('keydown', pmKey, true);
+    window.removeEventListener('resize', closeRowMenu);
+    window.removeEventListener('scroll', pmScroll, true);
+  }
+  function pmScroll(e) { if (e.target && e.target.closest && e.target.closest('#pm-menu')) return; closeRowMenu(); }
+  function pmKey(e) {
+    const m = document.getElementById('pm-menu'); if (!m) return;
+    if (e.key === 'Escape') { e.preventDefault(); const b = pmOpenBtn; closeRowMenu(); if (b) b.focus(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const its = Array.from(m.querySelectorAll('.pm-item')); const i = its.indexOf(document.activeElement);
+      its[(i + (e.key === 'ArrowDown' ? 1 : -1) + its.length) % its.length].focus();
+    }
+  }
+
+  function openRowMenu(btn, items) {
+    if (pmOpenBtn === btn) { closeRowMenu(); return; }
+    closeRowMenu();
+    const tr = btn.closest('tr'); const p = items.find((x) => String(x._id) === tr.dataset.id); if (!p) return;
+    // only actions this user may do (the hidden row buttons carry the permission gates and the existing handlers)
+    const act = (name) => { const b = tr.querySelector(`td.actions [data-action="${name}"]`); return b && !b.classList.contains('hidden') ? b : null; };
+    const E = window.Icons.get;
+    const defs = p.status === 'archived' ? [['restore', 'Restore product', E('check')]] : [
+      ['edit', 'Edit product', E('edit')],
+      ['view-stock', 'View stock & adjust', E('inventory')],
+      ['unit-prices', 'Sizes, prices & profit', E('box')],
+      ['break-stock', 'Break down stock', E('inventory')],
+      ['variants', 'Manage variants', E('box')],
+      ['sticker', 'Print barcode sticker', E('printer')],
+      ['fill-pages', 'Print full A4 pages', E('printer')],
+      ['sep'],
+      ['archive', 'Archive product', E('trash'), 'danger'],
+    ].filter((d) => d[0] === 'sep' || act(d[0]));
+    while (defs.length && defs[0][0] === 'sep') defs.shift();
+    while (defs.length && defs[defs.length - 1][0] === 'sep') defs.pop();
+    if (!defs.length) { window.UI.toast.info('You do not have any actions for this product'); return; }
+
+    const m = document.createElement('div');
+    m.id = 'pm-menu'; m.setAttribute('role', 'menu');
+    m.innerHTML = `<div class="pm-head"><div class="pm-title">${window.UI.escapeHtml(p.name)}</div><div class="pm-sub">${stockHtml(p, stockCache.get(String(p._id)))}</div></div>`
+      + defs.map((d) => d[0] === 'sep' ? '<div class="pm-sep" role="separator"></div>' : `<button type="button" role="menuitem" class="pm-item ${d[3] || ''}" data-pm="${d[0]}">${d[2]}<span>${d[1]}</span></button>`).join('');
+    const narrow = window.matchMedia('(max-width: 560px)').matches;
+    if (narrow) { const back = document.createElement('div'); back.id = 'pm-back'; back.addEventListener('click', closeRowMenu); document.body.appendChild(back); requestAnimationFrame(() => back.classList.add('open')); }
+    document.body.appendChild(m);
+    btn.setAttribute('aria-expanded', 'true'); pmOpenBtn = btn;
+    if (!narrow) {
+      const r = btn.getBoundingClientRect(); const w = m.offsetWidth; const h = m.offsetHeight;
+      let left = r.left; if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
+      let top = r.bottom + 6; if (top + h > window.innerHeight - 8) { top = Math.max(8, r.top - h - 6); m.style.transformOrigin = 'bottom left'; }
+      m.style.left = `${left}px`; m.style.top = `${top}px`;
+    }
+    requestAnimationFrame(() => { m.classList.add('open'); const f = m.querySelector('.pm-item'); if (f) f.focus({ preventScroll: true }); });
+    m.addEventListener('click', (e) => {
+      const it = e.target.closest('.pm-item'); if (!it) return;
+      const target = act(it.dataset.pm); closeRowMenu();
+      if (target) target.click();
+    });
+    document.addEventListener('keydown', pmKey, true);
+    window.addEventListener('resize', closeRowMenu);
+    window.addEventListener('scroll', pmScroll, true);
+    setTimeout(() => document.addEventListener('click', function off(e) { if (e.target.closest && e.target.closest('#pm-menu')) return; document.removeEventListener('click', off, true); closeRowMenu(); }, true), 0);
+  }
+
+  /** A product with extra sizes (bag / 1/4 / 500g ...): not the pieces-only packet / deal units. */
+  const hasSizes = (p) => !!(window.UnitKit && (p.units || []).some((u) => u.status !== 'inactive' && u.code !== 'PKT' && u.code !== 'DEAL'));
+
+  function renderRows(items) {
+    const tbody = document.getElementById('products-tbody');
+
+    if (!items.length) {
+      tbody.innerHTML = `<tr><td colspan="8">${window.UI.emptyStateHtml({
+        icon: 'products',
+        title: state.search || state.categoryId ? 'No products match your filters' : 'No products yet',
+        message: state.search || state.categoryId ? '' : 'Add your first product to start building your catalog.',
+      })}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = items.map((p) => {
+      const discount = Number(p.defaultDiscount) || 0;
+      return `
+      <tr data-id="${p._id}">
+        <td class="bl-sel-col"><input type="checkbox" data-select="${p._id}" ${selected.has(p._id) ? 'checked' : ''} /></td>
+        <td>
+          <div class="pm-namecell">
+            <button type="button" class="pm-kebab" data-pm-open aria-haspopup="menu" aria-label="Product actions" title="Actions">${window.Icons.get('dots')}</button>
+            <div class="pm-namebody">
+              ${liquorCell(p) || `<div class="cell-primary">${window.UI.escapeHtml(p.name)}${p._pending ? '<span class="pb-pending">waiting to upload</span>' : ''}</div>`}
+              ${p.hasVariants ? `<div class="text-xs text-muted">${p.variants.length} variant${p.variants.length === 1 ? '' : 's'}</div>` : ''}
+              <div class="pm-stock-inline" data-stock-inline="${p._id}"></div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div class="text-sm">${window.UI.escapeHtml(p.sku)}</div>
+          ${p.unitValue > 0 ? `<div class="text-xs text-muted">${window.UI.escapeHtml(`${p.unitValue}${/^(g|kg|ml|l|litre)$/.test(p.unit || '') ? '' : ' '}${p.unit === 'litre' ? 'L' : (p.unit || '')}`)} per item</div>` : ''}
+          ${p.barcode ? `<div class="text-xs text-muted">${window.UI.escapeHtml(p.barcode)}</div>` : (p.hasVariants ? '' : '<div class="text-xs"><span class="badge badge-warning">No barcode</span></div>')}
+        </td>
+        <td class="text-sm">${p.categoryId ? window.UI.escapeHtml(p.categoryId.name) : '<span class="text-muted">Uncategorized</span>'}</td>
+        <td>
+          ${p.pricingMode === 'WHOLESALE_FIRST' ? wholesalePriceCell(p) : `
+          <div class="cell-primary">${p.hasVariants ? 'Varies' : window.UI.formatMoney(p.sellingPrice)}</div>
+          ${discount > 0 ? `<div class="text-xs text-muted">${window.UI.formatMoney(discount)} off / unit</div>` : ''}
+          ${p.wholesaleEnabled && p.moq ? `<div class="text-xs text-muted">${p.wholesalePrice ? window.UI.formatMoney(p.wholesalePrice) : 'Per variant'} wholesale from ${p.moq} ${window.UI.escapeHtml(p.unit || '')}</div>` : ''}`}
+        </td>
+        <td><span class="badge ${p.status === 'active' ? 'badge-success' : 'badge-neutral'}">${p.status}</span></td>
+        <td class="pm-stock-col" data-stock-cell="${p._id}"><span class="pm-stock pm-skel">&nbsp;</span></td>
+        <td class="actions pm-actions-col">
+          ${p.status === 'archived' ? `<button class="btn btn-ghost btn-sm" data-action="restore" data-requires-permission="products.delete">Restore</button>` : ''}
+          ${p.hasVariants ? `<button class="btn btn-ghost btn-sm btn-icon" data-action="variants" data-requires-permission="products.update" title="Manage variants">${window.Icons.get('box')}</button>` : ''}
+          ${hasSizes(p) ? `<button class="btn btn-ghost btn-sm" data-action="unit-prices" data-requires-permission="inventory.view" title="Cost, price and profit of every size">Sizes</button>
+          <button class="btn btn-ghost btn-sm" data-action="break-stock" data-requires-permission="inventory.adjust" title="Break a bag into sellable sizes">Break down</button>` : ''}
+          <button class="btn btn-ghost btn-sm" data-action="view-stock" data-requires-permission="inventory.view" title="See this product's stock in Inventory (then adjust or receive)">View stock</button>
+          <button class="btn btn-ghost btn-sm btn-icon" data-action="sticker" data-requires-permission="products.view" title="Print barcode sticker">${window.Icons.get('printer')}</button>
+          <button class="btn btn-ghost btn-sm btn-icon" data-action="fill-pages" data-requires-permission="products.view" title="Print full A4 pages of this product">${window.Icons.get('printer')}</button>
+          <button class="btn btn-ghost btn-sm btn-icon" data-action="edit" data-requires-permission="products.update" title="Edit">${window.Icons.get('edit')}</button>
+          <button class="btn btn-ghost btn-sm btn-icon" data-action="archive" data-requires-permission="products.delete" title="Archive">${window.Icons.get('trash')}</button>
+        </td>
+      </tr>
+    `;
+    }).join('');
+
+    tbody.querySelectorAll('[data-select]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const prod = items.find((p) => p._id === cb.dataset.select);
+        if (cb.checked) selected.set(cb.dataset.select, prod ? prod.name : ''); else selected.delete(cb.dataset.select);
+        updateSelectionBar(items);
+      });
+    });
+    tbody.querySelectorAll('[data-action="view-stock"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tr = btn.closest('tr');
+        const prod = items.find((x) => x._id === tr.dataset.id);
+        window.location.href = `inventory.html?productId=${encodeURIComponent(tr.dataset.id)}&search=${encodeURIComponent(prod ? prod.name : '')}`;
+      });
+    });
+    tbody.querySelectorAll('[data-action="unit-prices"], [data-action="break-stock"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!window.UnitKit) return;
+        const id = btn.closest('tr').dataset.id;
+        const prod = items.find((x) => x._id === id);
+        if (btn.dataset.action === 'break-stock') window.UnitKit.openBreakModal({ product: prod, onDone: () => { stockCache.delete(String(id)); fetchAndRender(); } });
+        else window.UnitKit.openBreakdown(prod, { onDone: () => { stockCache.delete(String(id)); fetchAndRender(); } });
+      });
+    });
+    tbody.querySelectorAll('[data-action="sticker"]').forEach((btn) => {
+      btn.addEventListener('click', () => openPrintChooser('sticker', [btn.closest('tr').dataset.id]));
+    });
+    // "Print full A4 pages": straight into the A4 dialog in fill mode with this product already chosen.
+    tbody.querySelectorAll('[data-action="fill-pages"]').forEach((btn) => {
+      btn.addEventListener('click', () => openA4Dialog({ mode: 'sticker', selectedIds: [], fill: true, fillPid: btn.closest('tr').dataset.id }));
+    });
+    updateSelectionBar(items);
+    paintStock(items);
+    loadStock(items);
+    tbody.querySelectorAll('[data-pm-open]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); openRowMenu(b, items); }));
+
+    tbody.querySelectorAll('[data-action="edit"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.closest('tr').dataset.id;
+        const data = await getProductForEdit(id);
+        if (!data) return;
+        if (window.LiquorProductForm && window.LiquorProductForm.applies()) { window.LiquorProductForm.open({ product: data.product, onDone: () => fetchAndRender() }); return; }
+        openProductModal(data.product);
+      });
+    });
+
+    tbody.querySelectorAll('[data-action="variants"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.closest('tr').dataset.id;
+        const { data } = await window.Api.get(`/products/${id}`);
+        openVariantsModal(data.product);
+      });
+    });
+
+    tbody.querySelectorAll('[data-action="restore"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.closest('tr').dataset.id;
+        try {
+          await window.Api.post(`/products/${id}/restore`, {});
+          window.UI.toast.success('Product restored - it is back in the catalog and sellable');
+          fetchAndRender();
+        } catch (err) { window.UI.toast.error(err.message); }
+      });
+    });
+
+    tbody.querySelectorAll('[data-action="archive"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('tr');
+        const product = items.find((p) => p._id === row.dataset.id);
+        const ok = await window.UI.confirmDialog({
+          title: 'Archive product?',
+          message: `"${product.name}" will no longer appear in the catalog or be sellable.`,
+          confirmText: 'Archive',
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await window.Api.delete(`/products/${product._id}`);
+          window.UI.toast.success('Product archived');
+          fetchAndRender();
+        } catch (err) {
+          window.UI.toast.error(err.message);
+        }
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Categories modal
+   * ------------------------------------------------------------------ */
+  async function openCategoriesModal() {
+    await getCategories(true);
+
+    const modal = window.UI.openModal({
+      title: 'Categories',
+      maxWidth: '480px',
+      bodyHtml: `
+        <form id="new-category-form" class="flex gap-2" style="margin-bottom: var(--space-4)">
+          <input class="input" name="name" placeholder="New category name" required style="flex:1" />
+          <button type="submit" class="btn btn-primary btn-sm">${window.Icons.get('plus')} Add</button>
+        </form>
+        <div id="category-list"></div>
+      `,
+      footerHtml: `<button class="btn btn-secondary" data-action="close">Close</button>`,
+    });
+
+    modal.querySelector('[data-action="close"]').addEventListener('click', async () => {
+      window.UI.closeModal();
+      populateCategoryFilter();
+      fetchAndRender();
+    });
+
+    renderCategoryList(modal);
+
+    modal.querySelector('#new-category-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const payload = window.UI.serializeForm(form);
+      try {
+        await window.Api.post('/categories', payload);
+        form.reset();
+        await getCategories(true);
+        renderCategoryList(modal);
+      } catch (err) {
+        window.UI.toast.error(err.message);
+      }
+    });
+  }
+
+  function renderCategoryList(modal) {
+    const listEl = modal.querySelector('#category-list');
+    if (!categoriesCache.length) {
+      listEl.innerHTML = window.UI.emptyStateHtml({ icon: 'box', title: 'No categories yet' });
+      return;
+    }
+
+    listEl.innerHTML = `
+      <div class="table-wrap" style="max-height: 280px; overflow-y: auto">
+        <table class="table">
+          <tbody>
+            ${categoriesCache.map((c) => `
+              <tr data-id="${c._id}">
+                <td class="cell-primary">${window.UI.escapeHtml(c.name)}</td>
+                <td class="actions">
+                  <button class="btn btn-ghost btn-sm btn-icon" data-action="archive-cat" title="Archive">${window.Icons.get('trash')}</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    listEl.querySelectorAll('[data-action="archive-cat"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.closest('tr').dataset.id;
+        const ok = await window.UI.confirmDialog({ title: 'Archive category?', confirmText: 'Archive', danger: true });
+        if (!ok) return;
+        try {
+          await window.Api.delete(`/categories/${id}`);
+          await getCategories(true);
+          renderCategoryList(modal);
+        } catch (err) {
+          window.UI.toast.error(err.message);
+        }
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Create / edit product modal
+   * ------------------------------------------------------------------ */
+  let variantRowCount = 0;
+
+  /** Wholesale section is offered only when the business has the feature, or the product already uses it. */
+  function wholesaleAllowed(product) {
+    const t = window.AppShell.getBusinessProfile?.()?.businessType;
+    // Shops and supermarkets always get the option (the server switches the feature on the first time it is used).
+    return window.AppShell.hasFeature('wholesalePricing') || t === 'supermarket' || t === 'general_shop' || !!(product && product.wholesaleEnabled);
+  }
+
+  /**
+   * "Also sell wholesale" checkbox is always shown; the wholesale fields (MOQ, price, pack)
+   * are revealed only while the box is ticked (see the wsToggle handler in openProductModal).
+   */
+  function wholesaleSectionHtml(product) {
+    const on = !!(product && product.wholesaleEnabled);
+    const hasVariants = !!(product && product.hasVariants);
+    return `
+        <div class="field" id="wholesale-section" style="border:1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3)">
+          <label class="checkbox-row"><input type="checkbox" name="wholesaleEnabled" id="p-wholesale-on" ${on ? 'checked' : ''} /> <span class="text-sm font-semibold">Also sell wholesale</span></label>
+          <div id="wholesale-fields" style="${on ? '' : 'display:none;'}">
+          <span class="field-hint">Once a sale holds at least the minimum order quantity (MOQ) of this product, the till charges the wholesale price automatically. Below it, the normal selling price applies.</span>
+          <div class="form-row" style="margin-top: var(--space-2)">
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label for="p-moq">Minimum order quantity (MOQ)</label>
+              <input class="input" id="p-moq" name="moq" type="number" step="any" min="0" inputmode="decimal" value="${product && product.moq ? product.moq : ''}" placeholder="e.g. 12" ${on ? '' : 'disabled'} />
+            </div>
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label for="p-wprice">Wholesale price per unit (KES)${hasVariants ? ' <span class="text-muted">(default for variants)</span>' : ''}</label>
+              <input class="input" id="p-wprice" name="wholesalePrice" type="number" step="0.01" min="0" inputmode="decimal" value="${product && product.wholesalePrice ? product.wholesalePrice : ''}" placeholder="Lower than the selling price" ${on ? '' : 'disabled'} />
+            </div>
+          </div>
+          ${!product || !(product.units && product.units.length) ? `
+          <div class="form-row" style="margin-top: var(--space-1)">
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label for="p-wu-name">Wholesale pack <span class="text-muted">(optional, e.g. Carton)</span></label>
+              <input class="input" id="p-wu-name" name="wuName" placeholder="Carton, Dozen, Bale" maxlength="30" ${on ? '' : 'disabled'} />
+            </div>
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label for="p-wu-factor">Items in one pack</label>
+              <input class="input" id="p-wu-factor" name="wuFactor" type="number" step="any" min="0" inputmode="decimal" placeholder="e.g. 24" ${on ? '' : 'disabled'} />
+            </div>
+          </div>
+          <span class="field-hint">Lets you buy, stock and sell by the pack as well as by single items.</span>` : ''}
+          </div>
+        </div>`;
+  }
+
+
+  /* ------------------------------------------------------------------ *
+   * PACKETS / BULK PACKS  (sweets: 1 packet = 50 pieces)
+   * Stock is always counted in PIECES. The packet is a "unit" of the product (code PKT) with its own barcode and price;
+   * extra selling deals (e.g. 3 pieces for KES 5) are units too (code DEAL). Cost per piece = packet cost / pieces,
+   * so profit is exact whether a packet is sold whole or broken and sold piece by piece.
+   * ------------------------------------------------------------------ */
+  const PKT = 'PKT';
+  const DEAL = 'DEAL';
+  const pkUnits = (product) => (product && product.units ? product.units.filter((u) => u.status !== 'inactive') : []);
+  const pkPacketOf = (product) => pkUnits(product).find((u) => u.code === PKT) || null;
+  const pkDealsOf = (product) => pkUnits(product).filter((u) => u.code === DEAL);
+  const pkMoney = (n) => `KES ${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
+  function pkDealRowHtml(d) {
+    const q = d && d.factor ? d.factor : '';
+    const pr = d && d.retailPrice != null ? d.retailPrice : '';
+    return `
+      <div class="pk-deal-row form-row" style="align-items:flex-end;margin-bottom:var(--space-2)">
+        <div class="field" style="margin-bottom:0"><label>Pieces in the deal</label><input class="input pk-deal-qty" type="number" min="2" step="1" inputmode="numeric" placeholder="3" value="${q}" /></div>
+        <div class="field" style="margin-bottom:0"><label>Deal price (KES)</label><input class="input pk-deal-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="5" value="${pr}" /></div>
+        <button type="button" class="btn btn-ghost btn-sm pk-deal-del" aria-label="Remove deal" title="Remove deal">${window.Icons.get('trash')}</button>
+      </div>`;
+  }
+
+  function packetSectionHtml(product) {
+    const pk = pkPacketOf(product);
+    const on = !!pk;
+    const factor = pk ? pk.factor : '';
+    const packCost = pk && product ? Math.round((Number(product.costPrice) || 0) * pk.factor * 100) / 100 : '';
+    const deals = pkDealsOf(product);
+    return `
+        <div class="field" id="packet-section" style="border:1.5px solid var(--color-primary, #2563eb); background:color-mix(in srgb, var(--color-primary, #2563eb) 5%, transparent); border-radius: var(--radius-md); padding: var(--space-3)">
+          <label class="checkbox-row" style="align-items:flex-start"><input type="checkbox" id="p-pk-on" ${on ? 'checked' : ''} style="margin-top:3px" /> <span class="text-sm font-semibold">Sold in packets? <span class="text-muted" style="font-weight:400">Tick if the supplier gives you packets (e.g. 50 sweets) that you can sell whole or break and sell single pieces. Packet cost and price are entered here; the cost price below is then worked out for you.</span></span></label>
+          <div id="pk-fields" style="${on ? '' : 'display:none;'}">
+            <span class="field-hint">Receive and sell the whole packet by scanning its barcode, or break it and sell single pieces. Stock is counted in pieces, so nothing is ever double counted.</span>
+            <div class="form-row" style="margin-top: var(--space-2)">
+              <div class="field" style="margin-bottom: var(--space-2)">
+                <label for="p-pk-name">Packet name</label>
+                <input class="input" id="p-pk-name" maxlength="30" placeholder="Packet" value="${pk ? window.UI.escapeHtml(pk.name) : 'Packet'}" />
+              </div>
+              <div class="field" style="margin-bottom: var(--space-2)">
+                <label for="p-pk-factor">Pieces in one packet</label>
+                <input class="input" id="p-pk-factor" type="number" min="2" step="1" inputmode="numeric" placeholder="e.g. 50" value="${factor}" />
+              </div>
+            </div>
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label for="p-pk-barcode">Packet barcode <span class="text-muted">(the code printed on the supplier's packet)</span></label>
+              <div class="input-button-row">
+                <input class="input" id="p-pk-barcode" value="${pk ? window.UI.escapeHtml(pk.barcode || '') : ''}" placeholder="Scan, type or Generate" autocomplete="off" />
+                ${scanButtonHtml('p-pk-scan-btn')}
+                ${generateButtonHtml('p-pk-gen-btn')}
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field" style="margin-bottom: var(--space-2)">
+                <label for="p-pk-cost">Packet cost price (KES) <span class="text-muted">(what the supplier charges)</span></label>
+                <input class="input" id="p-pk-cost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 200" value="${packCost}" />
+              </div>
+              <div class="field" style="margin-bottom: var(--space-2)">
+                <label for="p-pk-price">Packet selling price (KES)</label>
+                <input class="input" id="p-pk-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 300" value="${pk && pk.retailPrice != null ? pk.retailPrice : ''}" />
+              </div>
+            </div>
+            <div class="field" style="margin-bottom: var(--space-2)">
+              <label>Piece deals <span class="text-muted">(optional, e.g. 3 pieces for KES 5)</span></label>
+              <div id="pk-deals">${deals.map(pkDealRowHtml).join('')}</div>
+              <button type="button" class="btn btn-secondary btn-sm" id="pk-add-deal">${window.Icons.get('plus')} Add a deal</button>
+            </div>
+            <div id="pk-summary" class="text-sm" style="padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);background:var(--color-surface-2, rgba(127,127,127,.08))"></div>
+          </div>
+        </div>`;
+  }
+
+  /** Wires the packet section: live cost-per-piece, profit lines, add/remove deals. Returns { collect(), isOn() }. */
+  function bindPacketSection(modal, product) {
+    const on = modal.querySelector('#p-pk-on');
+    if (!on) return null;
+    const $q = (q) => modal.querySelector(q);
+    const fields = $q('#pk-fields');
+    const costEl = $q('#p-cost');
+    const priceEl = $q('#p-price');
+    const own = pkPacketOf(product);
+
+    bindBarcodeScanButton($q('#p-pk-scan-btn'), $q('#p-pk-barcode'));
+    bindGenerateButton($q('#p-pk-gen-btn'), $q('#p-pk-barcode'));
+    bindBarcodeLiveCheck($q('#p-pk-barcode'), modal, () => [own && own.barcode, product && product.barcode, $q('#p-barcode') && $q('#p-barcode').value]);
+
+    const num = (q) => Number($q(q).value) || 0;
+    const refresh = () => {
+      const isOn = on.checked;
+      fields.style.display = isOn ? '' : 'none';
+      if (costEl) { costEl.readOnly = isOn; const cf = costEl.closest('.field'); if (cf) cf.style.display = isOn ? 'none' : ''; } // one cost only: the packet cost
+      const pl = modal.querySelector('label[for="p-price"]'); if (pl) pl.textContent = isOn ? 'Selling price of ONE piece (KES)' : 'Selling price (KES)';
+      const stockUnit = $q('#p-stock-unit-wrap'); if (stockUnit) stockUnit.style.display = isOn ? '' : 'none';
+      const sum = $q('#pk-summary');
+      if (!isOn) { if (sum) sum.innerHTML = ''; return; }
+      const n = num('#p-pk-factor');
+      const packCost = num('#p-pk-cost');
+      const perPiece = n > 0 ? packCost / n : 0;
+      if (costEl && n > 0) costEl.value = String(Math.round(perPiece * 10000) / 10000);
+      const piecePrice = priceEl ? Number(priceEl.value) || 0 : 0;
+      const packPrice = num('#p-pk-price');
+      const lines = [];
+      if (n > 1 && packCost > 0) lines.push(`Cost per piece: <b>${pkMoney(Math.round(perPiece * 100) / 100)}</b> (${pkMoney(packCost)} &divide; ${n})`);
+      if (n > 1 && packPrice > 0 && packCost > 0) lines.push(`Whole packet profit: <b style="color:${packPrice >= packCost ? 'inherit' : '#b3140a'}">${pkMoney(packPrice - packCost)}</b>${packPrice < packCost ? ' &mdash; selling below cost!' : ''}`);
+      if (n > 1 && piecePrice > 0 && packCost > 0) lines.push(`Profit per piece sold alone: <b style="color:${piecePrice >= perPiece ? 'inherit' : '#b3140a'}">${pkMoney(piecePrice - perPiece)}</b>${piecePrice < perPiece ? ' &mdash; selling below cost!' : ''}`);
+      modal.querySelectorAll('.pk-deal-row').forEach((row) => {
+        const q = Number(row.querySelector('.pk-deal-qty').value) || 0;
+        const pr = Number(row.querySelector('.pk-deal-price').value) || 0;
+        if (q > 1 && pr > 0 && perPiece > 0) lines.push(`${q} for ${pkMoney(pr)}: profit <b style="color:${pr >= perPiece * q ? 'inherit' : '#b3140a'}">${pkMoney(pr - perPiece * q)}</b>${pr < perPiece * q ? ' &mdash; below cost!' : ''}`);
+      });
+      sum.innerHTML = lines.length ? lines.join('<br/>') : 'Enter the pieces per packet and the packet cost to see the cost and profit per piece.';
+    };
+    // Switching packets on for a product that already exists: what was saved as its cost / price / barcode was the PACKET's.
+    const autofill = () => {
+      const bc = $q('#p-barcode'); const pb = $q('#p-pk-barcode');
+      if (pb && !pb.value.trim() && bc && bc.value.trim()) pb.value = bc.value.trim();
+      if (!own) {
+        const c = Number(costEl && costEl.value) || 0; const pr = priceEl ? Number(priceEl.value) || 0 : 0;
+        if (!$q('#p-pk-cost').value && c > 0) $q('#p-pk-cost').value = c;
+        if (!$q('#p-pk-price').value && pr > 0 && priceEl) { $q('#p-pk-price').value = pr; priceEl.value = ''; if (priceEl) priceEl.placeholder = 'price of ONE piece'; }
+      }
+    };
+    on.addEventListener('change', () => { if (on.checked) autofill(); refresh(); if (on.checked) $q('#p-pk-factor').focus(); });
+    $q('#p-barcode') && $q('#p-barcode').addEventListener('change', () => { const pb = $q('#p-pk-barcode'); if (on.checked && pb && !pb.value.trim()) pb.value = $q('#p-barcode').value.trim(); });
+    ['#p-pk-factor', '#p-pk-cost', '#p-pk-price'].forEach((q) => $q(q).addEventListener('input', refresh));
+    if (priceEl) priceEl.addEventListener('input', refresh);
+    modal.querySelector('#pk-deals').addEventListener('input', refresh);
+    modal.querySelector('#pk-deals').addEventListener('click', (e) => { if (e.target.closest('.pk-deal-del')) { e.target.closest('.pk-deal-row').remove(); refresh(); } });
+    $q('#pk-add-deal').addEventListener('click', () => {
+      if (modal.querySelectorAll('.pk-deal-row').length >= 3) { window.UI.toast.error('You can add up to 3 deals'); return; }
+      $q('#pk-deals').insertAdjacentHTML('beforeend', pkDealRowHtml(null));
+      modal.querySelector('#pk-deals .pk-deal-row:last-child .pk-deal-qty').focus();
+    });
+    refresh();
+
+    return {
+      isOn: () => on.checked,
+      factor: () => num('#p-pk-factor'),
+      /** { error, focus } or { units, costPrice } - `units` replaces only the PKT / DEAL units, other units are kept. */
+      collect() {
+        const keep = (product && product.units ? product.units : [])
+          .filter((u) => u.code !== PKT && u.code !== DEAL)
+          .map((u) => ({ _id: u._id, name: u.name, code: u.code, factor: u.factor, barcode: u.barcode || undefined, wholesalePrice: u.wholesalePrice, retailPrice: u.retailPrice, isWholesaleDefault: !!u.isWholesaleDefault, status: u.status }));
+        if (!on.checked) {
+          // unticked on an existing product: the old packet / deals stop being offered (kept as inactive so old sales still point at them)
+          const old = (product && product.units ? product.units : []).filter((u) => u.code === PKT || u.code === DEAL)
+            .map((u) => ({ _id: u._id, name: u.name, code: u.code, factor: u.factor, barcode: u.barcode || undefined, wholesalePrice: u.wholesalePrice, retailPrice: u.retailPrice, status: 'inactive' }));
+          return { units: keep.concat(old), touched: old.length > 0 };
+        }
+        const name = $q('#p-pk-name').value.trim();
+        const n = num('#p-pk-factor');
+        const packCost = num('#p-pk-cost');
+        if (!name) return { error: 'Enter the packet name (e.g. Packet)', focus: $q('#p-pk-name') };
+        if (!(n > 1) || !Number.isInteger(n)) return { error: 'Enter how many pieces are in one packet (a whole number, 2 or more)', focus: $q('#p-pk-factor') };
+        if (!(packCost > 0)) return { error: 'Enter the packet cost price - the cost of each piece is worked out from it', focus: $q('#p-pk-cost') };
+        const barcode = $q('#p-pk-barcode').value.trim();
+        const packPrice = num('#p-pk-price');
+        const units = [{
+          ...(own ? { _id: own._id } : {}), name, code: PKT, factor: n, barcode: barcode || undefined,
+          retailPrice: packPrice > 0 ? packPrice : undefined, status: 'active',
+        }];
+        const seen = new Set([name.toLowerCase()]);
+        const rows = Array.from(modal.querySelectorAll('.pk-deal-row'));
+        const oldDeals = pkDealsOf(product);
+        for (let i = 0; i < rows.length; i++) {
+          const q = Number(rows[i].querySelector('.pk-deal-qty').value) || 0;
+          const pr = Number(rows[i].querySelector('.pk-deal-price').value);
+          if (!q && !rows[i].querySelector('.pk-deal-price').value) continue;
+          if (!(q > 1) || !Number.isInteger(q) || !(pr >= 0) || !rows[i].querySelector('.pk-deal-price').value) return { error: 'Each deal needs a whole number of pieces (2 or more) and a price', focus: rows[i].querySelector('.pk-deal-qty') };
+          const dn = `${q} for ${Math.round(pr * 100) / 100}`;
+          if (seen.has(dn.toLowerCase())) return { error: `The deal "${dn}" is listed twice`, focus: rows[i].querySelector('.pk-deal-qty') };
+          seen.add(dn.toLowerCase());
+          const prev = oldDeals.find((d) => d.factor === q && d.name === dn);
+          units.push({ ...(prev ? { _id: prev._id } : {}), name: dn, code: DEAL, factor: q, retailPrice: pr, status: 'active' });
+        }
+        // deals removed from the form are switched off (not deleted)
+        oldDeals.filter((d) => !units.some((u) => u._id && String(u._id) === String(d._id)))
+          .forEach((d) => units.push({ _id: d._id, name: d.name, code: DEAL, factor: d.factor, retailPrice: d.retailPrice, status: 'inactive' }));
+        return { units: keep.concat(units), touched: true, costPrice: Math.round((packCost / n) * 10000) / 10000, factor: n };
+      },
+    };
+  }
+
+  function variantRowHtml(idx) {
+    return `
+      <div class="variant-row" data-idx="${idx}" style="border:1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-2)">
+        <div class="form-row">
+          <div class="field" style="margin-bottom: var(--space-2)">
+            <label>SKU</label>
+            <input class="input" name="v-sku-${idx}" required placeholder="TS-BLK-M" />
+          </div>
+          <div class="field" style="margin-bottom: var(--space-2)">
+            <label>Barcode <span class="text-muted">(optional)</span></label>
+            <div class="input-button-row">
+              <input class="input" name="v-barcode-${idx}" placeholder="Scan, type or Generate" />
+              ${scanButtonHtml(`v-barcode-scan-${idx}`)}
+              ${generateButtonHtml(`v-barcode-gen-${idx}`)}
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field" style="margin-bottom: var(--space-2)">
+            <label>Attributes</label>
+            <input class="input" name="v-attrs-${idx}" placeholder="Size: M, Color: Black" />
+          </div>
+          <div class="field" style="margin-bottom: var(--space-2)">
+            <label>Selling price (KES)</label>
+            <input class="input" name="v-price-${idx}" type="number" step="0.01" min="0" required />
+          </div>
+        </div>
+        ${window.AppShell.hasFeature('wholesalePricing') ? `
+        <div class="field" style="margin-bottom: var(--space-2)">
+          <label>Wholesale price (KES) <span class="text-muted">(optional - uses the product's wholesale price when empty)</span></label>
+          <input class="input" name="v-wprice-${idx}" type="number" step="0.01" min="0" style="max-width: 200px" />
+        </div>` : ''}
+        <button type="button" class="btn btn-ghost btn-sm" data-action="remove-variant-row">${window.Icons.get('trash')} Remove</button>
+      </div>
+    `;
+  }
+
+  function parseAttributes(text) {
+    if (!text) return {};
+    const attrs = {};
+    text.split(',').forEach((pair) => {
+      const [k, v] = pair.split(':').map((s) => s?.trim());
+      if (k && v) attrs[k] = v;
+    });
+    return attrs;
+  }
+
+  function canReceiveStock() {
+    try { return !!window.Permissions.can(window.AppShell.getUser(), 'inventory.receive'); } catch { return false; }
+  }
+
+  /** Small inline "copy" icon (used inside the Product name box). */
+  const COPY_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+
+  function openProductModal(product) {
+    getUsedBarcodes().catch(() => {}); // warm the barcode list before the first scan
+    const isEdit = !!product;
+    variantRowCount = 0;
+
+    const existingDiscount = isEdit ? Number(product.defaultDiscount) || 0 : 0;
+    // Wholesale businesses enter products wholesale-first (retail + unit conversion are optional extras).
+    const wf = !!(window.WholesaleProductForm && window.WholesaleProductForm.applies(isEdit ? product : null));
+    // Unit conversion (bag -> kg / 500g / 1/4 bag ...): shown on the normal product form (the wholesale form has its own pack fields).
+    const ukOn = !wf && !!(window.UnitKit && window.UnitKit.applies(isEdit ? product : null));
+
+    const bodyHtml = `
+      <form id="product-form">
+        <div class="field">
+          <label for="p-name">Product name</label>
+          <div style="position:relative">
+            <input class="input" id="p-name" name="name" required value="${isEdit ? window.UI.escapeHtml(product.name) : ''}" placeholder="Samsung 43&quot; Smart TV" style="padding-right:44px" />
+            <button type="button" id="p-name-copy-btn" title="Copy product name to SKU" aria-label="Copy product name to SKU"
+              style="position:absolute; right:6px; top:50%; transform:translateY(-50%); display:flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--color-text-muted, #6b7280); cursor:pointer">${COPY_ICON_SVG}</button>
+          </div>
+          <span class="field-hint">Tap the copy icon to put this name into the SKU box.</span>
+        </div>
+        ${wf ? '' : packetSectionHtml(isEdit ? product : null)}
+        <div class="form-row">
+          <div class="field">
+            <label for="p-sku">SKU</label>
+            <input class="input" id="p-sku" name="sku" required value="${isEdit ? window.UI.escapeHtml(product.sku) : ''}" placeholder="TV-SAM-43" />
+          </div>
+          <div class="field">
+            <label for="p-barcode">Barcode <span class="text-muted">(optional)</span></label>
+            <div class="input-button-row">
+              <input class="input" id="p-barcode" name="barcode" value="${isEdit ? window.UI.escapeHtml(product.barcode || '') : ''}" placeholder="Scan, type or Generate" />
+              ${scanButtonHtml('p-barcode-scan-btn')}
+              ${generateButtonHtml('p-barcode-gen-btn')}
+            </div>
+            <span class="field-hint">No barcode on the product? Leave empty or press Generate - the system creates a scannable one.</span>
+          </div>
+        </div>
+        ${!isEdit ? `
+        <div class="field bl-print-opt">
+          <label class="checkbox-row"><input type="checkbox" id="p-print-sticker" ${window.Storage.getPref('printStickerOnAdd', true) ? 'checked' : ''} /> <span class="text-sm">Print barcode sticker after saving</span></label>
+          <label class="text-sm">Stickers <input class="input" id="p-print-copies" type="number" min="1" max="500" value="1" /></label>
+        </div>` : ''}
+        <div class="form-row">
+          <div class="field">
+            <label for="p-category">Category</label>
+            <select class="select" id="p-category" name="categoryId">${categoryOptionsHtml(isEdit ? product.categoryId?._id : null)}</select>
+          </div>
+          <div class="field">
+            <label for="p-brand">Brand <span class="text-muted">(optional)</span></label>
+            <input class="input" id="p-brand" name="brand" value="${isEdit ? window.UI.escapeHtml(product.brand || '') : ''}" />
+          </div>
+        </div>
+
+        ${wf ? window.WholesaleProductForm.html(isEdit ? product : null) : `
+        ${!isEdit ? `
+        <div class="form-row">
+          <div class="field">
+            <label for="p-cost">Cost price (KES)</label>
+            <input class="input" id="p-cost" name="costPrice" type="number" step="0.01" min="0" value="0" />
+          </div>
+          <div class="field">
+            <label for="p-price">Selling price (KES)</label>
+            <input class="input" id="p-price" name="sellingPrice" type="number" step="0.01" min="0" required />
+          </div>
+        </div>
+        ` : `
+        <div class="form-row">
+          <div class="field">
+            <label for="p-cost">Cost price (KES)</label>
+            <input class="input" id="p-cost" name="costPrice" type="number" step="0.01" min="0" value="${product.costPrice}" />
+          </div>
+          <div class="field">
+            <label for="p-price">Selling price (KES)</label>
+            <input class="input" id="p-price" name="sellingPrice" type="number" step="0.01" min="0" value="${product.sellingPrice}" ${product.hasVariants ? 'disabled' : 'required'} />
+          </div>
+        </div>
+        ${product.hasVariants ? '<p class="text-xs text-muted" style="margin-top:-8px; margin-bottom: var(--space-4)">This product has variants - manage their prices individually from the Variants screen.</p>' : ''}
+        `}
+
+        <div class="field">
+          <label for="p-discount">Discount per unit (KES) <span class="text-muted">(optional)</span></label>
+          <input class="input" id="p-discount" name="defaultDiscount" type="number" step="0.01" min="0" inputmode="decimal" value="${existingDiscount > 0 ? existingDiscount : ''}" placeholder="0" style="max-width: 200px" />
+          <span class="field-hint">Applied automatically on the sales screen when this product is scanned or searched (multiplied by the quantity). Leave empty for no discount.</span>
+        </div>
+
+        ${wholesaleAllowed(isEdit ? product : null) ? wholesaleSectionHtml(isEdit ? product : null) : ''}
+        `}
+
+        <div class="form-row">
+          <div class="field">
+            <label for="p-taxrate">Tax rate (%)</label>
+            <input class="input" id="p-taxrate" name="taxRate" type="number" step="0.01" min="0" max="100" value="${isEdit ? product.taxRate : 0}" />
+          </div>
+          ${wf ? '' : `<div class="field">
+            <label for="p-unit">Unit</label>
+            <select class="select" id="p-unit" name="unit">
+              ${['piece', 'kg', 'g', 'litre', 'ml', 'metre', 'box', 'packet', 'service'].map((u) => `<option value="${u}" ${isEdit && product.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
+            </select>
+          </div>`}
+        </div>
+        ${wf ? '' : `<div class="field">
+          <label for="p-unitvalue">Size per item <span class="text-muted">(optional, in the unit above - e.g. 200 for a 200g pack)</span></label>
+          <input class="input" id="p-unitvalue" name="unitValue" type="number" min="0" step="any" inputmode="decimal" value="${isEdit && product.unitValue > 0 ? product.unitValue : ''}" placeholder="e.g. 200" style="max-width: 200px" />
+        </div>`}
+        ${ukOn ? window.UnitKit.sectionHtml(isEdit ? product : null) : ''}
+
+        <div class="field">
+          <label for="p-lowstock">Low stock threshold</label>
+          <input class="input" id="p-lowstock" name="lowStockThreshold" type="number" min="0" value="${isEdit ? product.lowStockThreshold : 5}" style="max-width: 140px" />
+        </div>
+
+        <div class="field">
+          <label>Tracking</label>
+          <div class="flex gap-4" style="flex-wrap: wrap">
+            <label class="checkbox-row"><input type="checkbox" name="trackInventory" ${!isEdit || product.trackInventory ? 'checked' : ''} /> <span class="text-sm">Track inventory</span></label>
+            ${trackingOption('trackSerialNumber', 'Serial numbers', 'serialNumberTracking', isEdit && product.trackSerialNumber)}
+            ${trackingOption('trackBatch', 'Batch tracking', 'batchTracking', isEdit && product.trackBatch)}
+            ${trackingOption('trackExpiry', 'Expiry dates', 'expiryTracking', isEdit && product.trackExpiry)}
+          </div>
+        </div>
+
+        ${!isEdit && canReceiveStock() ? `
+        <div class="field" id="p-stock-section" style="border:1px solid var(--color-border, #e5e7eb);border-radius:var(--radius-md, 10px);padding:var(--space-3, 12px)">
+          <label class="checkbox-row"><input type="checkbox" id="p-add-stock" /> <span class="text-sm"><strong>Add inventory now</strong> <span class="text-muted">(stock received)</span></span></label>
+          <div id="p-stock-fields" style="display:none;margin-top:var(--space-3, 12px)">
+            <div class="form-row">
+              <div class="field"><label for="p-stock-qty">Quantity received</label><input class="input" id="p-stock-qty" type="number" min="1" step="any" inputmode="decimal" />
+                <div id="p-stock-unit-wrap" style="display:none;margin-top:6px"><select class="select" id="p-stock-unit" aria-label="Received as"><option value="packets">Packets (scanned in)</option><option value="pieces">Single pieces</option></select><span class="field-hint" id="p-stock-conv"></span></div></div>
+              <div class="field"><label for="p-stock-batch">Batch number <span class="text-muted" id="p-stock-batch-opt">(optional)</span></label><input class="input" id="p-stock-batch" autocomplete="off" /></div>
+            </div>
+            <div class="field"><label for="p-stock-expiry">Expiry date <span class="text-muted" id="p-stock-exp-opt">(optional)</span></label><input class="input" id="p-stock-expiry" type="date" style="max-width:220px" /></div>
+            <span class="field-hint" id="p-stock-hint">Stock is added to the current branch when the product is saved.</span>
+          </div>
+        </div>` : ''}
+
+        <div class="field">
+          <label for="p-description">Description <span class="text-muted">(optional)</span></label>
+          <textarea class="textarea" id="p-description" name="description">${isEdit ? window.UI.escapeHtml(product.description || '') : ''}</textarea>
+        </div>
+
+        ${!isEdit && !wf ? `
+        <div class="field">
+          <label>Variants <span class="text-muted">(optional - leave empty for a simple product)</span></label>
+          <div id="variants-container"></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="add-variant-row-btn">${window.Icons.get('plus')} Add variant</button>
+        </div>
+        ` : ''}
+      </form>
+    `;
+
+    const modal = window.UI.openModal({
+      title: isEdit ? 'Edit product' : 'Add product',
+      bodyHtml,
+      maxWidth: wf ? '720px' : '640px',
+      footerHtml: `
+        <button class="btn btn-secondary" data-action="cancel">Cancel</button>
+        <button class="btn btn-primary" data-action="save" id="product-save-btn">${isEdit ? 'Save changes' : 'Add product'}</button>
+      `,
+    });
+
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
+
+    // Copy icon inside the Product name box: puts the name straight into the SKU box (and onto the clipboard too).
+    const nameCopyBtn = modal.querySelector('#p-name-copy-btn');
+    if (nameCopyBtn) {
+      nameCopyBtn.addEventListener('click', () => {
+        const nameInput = modal.querySelector('#p-name');
+        const skuInput = modal.querySelector('#p-sku');
+        const text = nameInput ? nameInput.value.trim() : '';
+        if (!text) { window.UI.toast.error('Type the product name first'); if (nameInput) nameInput.focus(); return; }
+        if (skuInput) {
+          skuInput.value = text;
+          skuInput.dispatchEvent(new Event('input', { bubbles: true }));
+          skuInput.focus();
+          skuInput.select();
+        }
+        try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {}); } catch { /* clipboard is optional */ }
+        window.UI.toast.success('Name copied to SKU');
+      });
+    }
+
+    // An expiry date is stored on a batch, so tracking expiry always means tracking batches too.
+    const expiryBox = modal.querySelector('input[name="trackExpiry"]');
+    const batchBox = modal.querySelector('input[name="trackBatch"]');
+    if (expiryBox && batchBox) {
+      const syncExpiryBatch = () => {
+        if (expiryBox.checked) { batchBox.checked = true; batchBox.disabled = true; batchBox.title = 'Required while expiry dates are tracked'; }
+        else { batchBox.disabled = false; batchBox.title = ''; }
+      };
+      expiryBox.addEventListener('change', syncExpiryBatch);
+      syncExpiryBatch();
+    }
+
+    // Optional "Add inventory now" section (new products only).
+    const stockToggle = modal.querySelector('#p-add-stock');
+    if (stockToggle) {
+      const stockFields = modal.querySelector('#p-stock-fields');
+      const stockExp = modal.querySelector('#p-stock-expiry');
+      const stockExpOpt = modal.querySelector('#p-stock-exp-opt');
+      const syncStock = () => {
+        const on = stockToggle.checked;
+        const hasVariants = modal.querySelectorAll('.variant-row').length > 0;
+        stockFields.style.display = on ? '' : 'none';
+        const expiryOn = !!(expiryBox && expiryBox.checked);
+        const tracked = !modal.querySelector('input[name="trackInventory"]') || modal.querySelector('input[name="trackInventory"]').checked;
+        stockExp.required = on && expiryOn;
+        stockExpOpt.textContent = expiryOn ? '(required)' : '(optional)';
+        modal.querySelector('#p-stock-hint').textContent = hasVariants
+          ? 'This product has variants - receive their stock from Inventory > Receive stock after saving.'
+          : (tracked ? 'Stock is added to the current branch when the product is saved.' : 'Turn on "Track inventory" below so this stock counts.');
+      };
+      stockToggle.addEventListener('change', () => { syncStock(); if (stockToggle.checked) modal.querySelector('#p-stock-qty').focus(); });
+      modal.querySelectorAll('input[name="trackExpiry"], input[name="trackBatch"], input[name="trackInventory"]').forEach((el) => el.addEventListener('change', syncStock));
+      modal.addEventListener('click', (e) => { if (e.target.closest('#add-variant-row-btn, .variant-row')) setTimeout(syncStock, 0); });
+      syncStock();
+    }
+
+    bindBarcodeScanButton(modal.querySelector('#p-barcode-scan-btn'), modal.querySelector('#p-barcode'));
+    bindGenerateButton(modal.querySelector('#p-barcode-gen-btn'), modal.querySelector('#p-barcode'));
+    bindBarcodeLiveCheck(modal.querySelector('#p-barcode'), modal, isEdit ? [product.barcode].concat((product.variants || []).map((v) => v.barcode)) : []);
+
+    const packetCtl = wf ? null : bindPacketSection(modal, isEdit ? product : null);
+    if (packetCtl && modal.querySelector('#p-stock-unit')) {
+      const convEl = modal.querySelector('#p-stock-conv');
+      const syncConv = () => {
+        const q = Number(modal.querySelector('#p-stock-qty').value) || 0; const n = packetCtl.factor();
+        convEl.textContent = packetCtl.isOn() && modal.querySelector('#p-stock-unit').value === 'packets' && q > 0 && n > 1 ? `${q} packet${q === 1 ? '' : 's'} = ${Math.round(q * n * 1000) / 1000} pieces added to stock` : '';
+      };
+      ['#p-stock-qty', '#p-stock-unit', '#p-pk-factor', '#p-pk-on'].forEach((q) => { const el = modal.querySelector(q); if (el) { el.addEventListener('input', syncConv); el.addEventListener('change', syncConv); } });
+      syncConv();
+    }
+
+    // Sizes editor: cost per base unit, price / profit of every size, stock in any size.
+    const unitKit = ukOn ? window.UnitKit.bind(modal, {
+      product: isEdit ? product : null,
+      baseUnit: () => (modal.querySelector('#p-unit') || {}).value || 'piece',
+      generateBarcode: async () => { const used = await getUsedBarcodes(); const code = window.BarcodeLabels.generateCode(used); used.add(code); return code; },
+    }) : null;
+
+    if (wf) window.WholesaleProductForm.bind(modal, { product: isEdit ? product : null });
+
+    // "Also sell wholesale": the wholesale fields appear only while this box is ticked.
+    const wsToggle = modal.querySelector('#p-wholesale-on');
+    if (wsToggle) {
+      const wsFields = modal.querySelector('#wholesale-fields');
+      const syncWholesale = () => {
+        const on = wsToggle.checked;
+        if (wsFields) wsFields.style.display = on ? '' : 'none';
+        ['#p-moq', '#p-wprice', '#p-wu-name', '#p-wu-factor'].forEach((q) => { const el = modal.querySelector(q); if (el) el.disabled = !on; });
+      };
+      wsToggle.addEventListener('change', () => {
+        syncWholesale();
+        if (wsToggle.checked) modal.querySelector('#p-moq').focus();
+      });
+      syncWholesale();
+    }
+
+    // The variants block does not exist in the wholesale-first form: a missing button must never abort the setup
+    // (it used to throw here, so the Save listener below was never attached and "Add product" did nothing).
+    const addVariantBtn = modal.querySelector('#add-variant-row-btn');
+    if (!isEdit && addVariantBtn) {
+      addVariantBtn.addEventListener('click', () => {
+        const container = modal.querySelector('#variants-container');
+        const idx = variantRowCount++;
+        container.insertAdjacentHTML('beforeend', variantRowHtml(idx));
+        const row = container.querySelector(`[data-idx="${idx}"]`);
+        row.querySelector('[data-action="remove-variant-row"]').addEventListener('click', (e) => {
+          e.target.closest('.variant-row').remove();
+        });
+        bindBarcodeScanButton(row.querySelector(`#v-barcode-scan-${idx}`), row.querySelector(`[name="v-barcode-${idx}"]`));
+        bindGenerateButton(row.querySelector(`#v-barcode-gen-${idx}`), row.querySelector(`[name="v-barcode-${idx}"]`));
+        bindBarcodeLiveCheck(row.querySelector(`[name="v-barcode-${idx}"]`), modal, []);
+      });
+    }
+
+    modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
+      const form = modal.querySelector('#product-form');
+      if (!form.reportValidity()) return;
+      if (await barcodeBlocked(modal)) return;
+
+      const raw = window.UI.serializeForm(form);
+
+      // Wholesale-first form: validate + build the pricing / unit fields (the backend re-checks all of it).
+      let wfRes = null;
+      if (wf) {
+        wfRes = window.WholesaleProductForm.collect(modal, { product: isEdit ? product : null });
+        if (wfRes.error) {
+          window.UI.toast.error(wfRes.error);
+          if (wfRes.focus) wfRes.focus.focus();
+          return;
+        }
+      }
+
+      // Discount sanity check (the backend enforces the same rule). Skipped for
+      // variant products, whose prices are per variant. serializeForm drops
+      // empty fields, so an empty box means "no discount".
+      const discountValue = Number(raw.defaultDiscount) || 0;
+      const hasVariantRows = !isEdit && modal.querySelectorAll('.variant-row').length > 0;
+      const priceValue = Number(raw.sellingPrice);
+      if (discountValue > 0 && !hasVariantRows && Number.isFinite(priceValue) && discountValue > priceValue) {
+        window.UI.toast.error('Discount per unit cannot be more than the selling price');
+        modal.querySelector('#p-discount').focus();
+        return;
+      }
+
+      // Wholesale (only when the section is shown). Mirrors the backend rules so the cashier gets a clear message.
+      const wholesaleOn = !!(wsToggle && wsToggle.checked);
+      const moqValue = Number(raw.moq) || 0;
+      const wholesalePriceValue = Number(raw.wholesalePrice) || 0;
+      if (wholesaleOn) {
+        const variantsHere = hasVariantRows || (isEdit && product.hasVariants);
+        if (!(moqValue > 0)) { window.UI.toast.error('Enter the minimum order quantity (MOQ) for wholesale'); modal.querySelector('#p-moq').focus(); return; }
+        if (!variantsHere) {
+          if (!(wholesalePriceValue > 0)) { window.UI.toast.error('Enter the wholesale price per unit'); modal.querySelector('#p-wprice').focus(); return; }
+          if (Number.isFinite(priceValue) && wholesalePriceValue >= priceValue) { window.UI.toast.error('Wholesale price must be lower than the selling price'); modal.querySelector('#p-wprice').focus(); return; }
+        }
+      }
+
+      // Packets: validate and work out the cost PER PIECE (packet cost / pieces per packet).
+      let pkRes = null;
+      if (packetCtl) {
+        pkRes = packetCtl.collect();
+        if (pkRes.error) { window.UI.toast.error(pkRes.error); if (pkRes.focus) pkRes.focus.focus(); return; }
+        if (pkRes.costPrice !== undefined) raw.costPrice = String(pkRes.costPrice);
+        if (pkRes.touched && !(Number(raw.sellingPrice) > 0) && packetCtl.isOn()) { window.UI.toast.error('Enter the selling price of ONE piece'); modal.querySelector('#p-price').focus(); return; }
+      }
+
+      // Sizes (unit conversion): validate, work out the cost per base unit, warn when a size sells below cost.
+      let ukRes = null;
+      if (unitKit) {
+        ukRes = unitKit.collect();
+        if (ukRes.error) { window.UI.toast.error(ukRes.error); if (ukRes.focus) ukRes.focus.focus(); return; }
+        if (ukRes.costPrice !== undefined) raw.costPrice = String(ukRes.costPrice);
+        if (unitKit.active() && ukRes.touched && !(await unitKit.confirmBelowCost())) return;
+      }
+
+      // Optional opening stock (simple products only; variants are received from the Inventory page).
+      let stockReq = null;
+      const stockOn = !!modal.querySelector('#p-add-stock')?.checked && modal.querySelectorAll('.variant-row').length === 0;
+      if (stockOn) {
+        const qty = Number(modal.querySelector('#p-stock-qty').value);
+        const batchNo = modal.querySelector('#p-stock-batch').value.trim();
+        const expiry = modal.querySelector('#p-stock-expiry').value;
+        if (!(qty > 0)) { window.UI.toast.error('Enter the quantity received'); modal.querySelector('#p-stock-qty').focus(); return; }
+        if (raw.trackExpiry && !expiry) { window.UI.toast.error('Enter the expiry date for this product'); modal.querySelector('#p-stock-expiry').focus(); return; }
+        if (raw.trackSerialNumber) { window.UI.toast.error('Serial-numbered products: receive stock from Inventory > Receive stock so each serial can be entered'); return; }
+        if (!raw.trackInventory) { window.UI.toast.error('Turn on "Track inventory" to add stock'); return; }
+        const branchId = window.AppShell.getActiveBranchId();
+        if (!branchId) { window.UI.toast.error('Select a branch first'); return; }
+        // Received as packets: stock is kept in pieces, so packets x pieces-per-packet
+        const asPackets = !!(packetCtl && packetCtl.isOn() && modal.querySelector('#p-stock-unit') && modal.querySelector('#p-stock-unit').value === 'packets');
+        // Received as a bag / 1/4 bag / any size: stock is kept in the base unit, so convert here (the product has no unit ids yet).
+        const ukBase = unitKit && unitKit.active() ? unitKit.stockBase(qty) : null;
+        const ukLabel = ukBase != null && ukBase !== qty ? unitKit.stockLabel() : '';
+        stockReq = { branchId, quantity: ukBase != null ? ukBase : (asPackets ? Math.round(qty * packetCtl.factor() * 1000) / 1000 : qty), batchNumber: batchNo || undefined, expiryDate: expiry || undefined, reason: ukLabel ? `Initial stock (${qty} ${ukLabel})` : (asPackets ? `Initial stock (${qty} packets)` : 'Initial stock') };
+      }
+
+      const payload = {
+        name: raw.name, sku: raw.sku, barcode: raw.barcode, categoryId: raw.categoryId || undefined,
+        brand: raw.brand, costPrice: raw.costPrice, sellingPrice: raw.sellingPrice,
+        // Always sent (0 when empty) so that clearing the box on an existing product removes the discount.
+        defaultDiscount: discountValue,
+        taxRate: raw.taxRate, unit: raw.unit, ...(wf ? {} : { unitValue: Number(raw.unitValue) || 0 }), lowStockThreshold: raw.lowStockThreshold,
+        description: raw.description,
+        trackInventory: !!raw.trackInventory, trackSerialNumber: !!raw.trackSerialNumber,
+        trackBatch: !!raw.trackBatch || !!raw.trackExpiry, trackExpiry: !!raw.trackExpiry,
+      };
+      if (wfRes) {
+        // Pricing, base unit and unit conversions come from the wholesale-first form; the discount box does not exist there.
+        delete payload.costPrice; delete payload.sellingPrice; delete payload.unit;
+        if (isEdit) delete payload.defaultDiscount;
+        Object.assign(payload, wfRes.payload);
+      }
+      if (wsToggle && wholesaleOn && !isEdit) {
+        const wuName = (raw.wuName || '').trim();
+        const wuFactor = Number(raw.wuFactor) || 0;
+        if (wuName || wuFactor) {
+          if (!wuName || !(wuFactor > 1)) { window.UI.toast.error('Enter the pack name and how many items it holds (more than 1)'); modal.querySelector('#p-wu-name').focus(); return; }
+          payload.units = [{ name: wuName, factor: wuFactor, isWholesaleDefault: true }];
+        }
+      }
+      if (ukRes && ukRes.touched) {
+        payload.units = (payload.units || []).concat(ukRes.units);
+        if (ukRes.costPrice !== undefined) payload.costPrice = raw.costPrice;
+      }
+      if (pkRes && pkRes.touched) {
+        // Packet + deal units (other units, e.g. a wholesale carton, are kept as they are). When the sizes editor
+        // changed the other units it already carries them, so only the packet / deal units are taken from here.
+        const pu = ukRes && ukRes.touched ? pkRes.units.filter((u) => u.code === PKT || u.code === DEAL) : pkRes.units;
+        payload.units = (payload.units || []).concat(pu);
+        payload.costPrice = raw.costPrice;
+      }
+      if (wsToggle) {
+        payload.wholesaleEnabled = wholesaleOn;
+        // When on: null clears an emptied price (e.g. variants carry their own). When off the saved values are left untouched.
+        if (wholesaleOn) { payload.moq = moqValue; payload.wholesalePrice = wholesalePriceValue > 0 ? wholesalePriceValue : null; }
+      }
+
+      if (!isEdit) {
+        const variantEls = modal.querySelectorAll('.variant-row');
+        if (variantEls.length) {
+          payload.variants = Array.from(variantEls).map((row) => {
+            const idx = row.dataset.idx;
+            return {
+              sku: row.querySelector(`[name="v-sku-${idx}"]`).value,
+              barcode: row.querySelector(`[name="v-barcode-${idx}"]`).value || undefined,
+              attributes: parseAttributes(row.querySelector(`[name="v-attrs-${idx}"]`).value),
+              sellingPrice: row.querySelector(`[name="v-price-${idx}"]`).value,
+              wholesalePrice: row.querySelector(`[name="v-wprice-${idx}"]`)?.value || undefined,
+              costPrice: raw.costPrice,
+            };
+          });
+          delete payload.sellingPrice; // variants carry their own prices when present
+        }
+      }
+
+      const btn = document.getElementById('product-save-btn');
+      window.UI.setButtonLoading(btn, true, 'Saving…');
+
+      try {
+        // New product with no barcode: the system creates one (also for variants without a barcode).
+        const generated = { main: false, variants: new Set() };
+        if (!isEdit) {
+          const used = await getUsedBarcodes();
+          (payload.variants || []).forEach((v) => { if (v.barcode) used.add(String(v.barcode).trim()); });
+          if (payload.barcode) used.add(String(payload.barcode).trim());
+          (payload.units || []).forEach((u) => { if (u.barcode) used.add(String(u.barcode).trim()); });
+          if (payload.variants) {
+            payload.variants.forEach((v, i) => { if (!v.barcode) { v.barcode = window.BarcodeLabels.generateCode(used); generated.variants.add(i); } });
+            if (!payload.barcode) delete payload.barcode;
+          } else if (!payload.barcode) {
+            payload.barcode = window.BarcodeLabels.generateCode(used);
+            generated.main = true;
+          }
+        }
+        if (isEdit) {
+          await window.Api.put(`/products/${product._id}`, payload);
+          window.UI.toast.success('Product updated');
+        } else {
+          const created = await createProductWithRetry(payload, generated);
+          window.UI.toast.success('Product added');
+          usedBarcodes = null; getUsedBarcodes(true).catch(() => {});
+          if (stockReq) {
+            if (created && created.queued) {
+              window.UI.toast.warning('Saved offline. Add its stock from Inventory > Receive stock once it has uploaded.');
+            } else {
+              try {
+                const pid = created?.data?.product?._id || created?.data?._id;
+                if (!pid) throw new Error('product id missing');
+                await window.Api.post('/inventory/receive', { ...stockReq, productId: pid, costPrice: (wfRes ? undefined : raw.costPrice) || undefined });
+                window.UI.toast.success('Stock received');
+              } catch (stockErr) {
+                window.UI.toast.warning(`Product saved, but the stock was not added (${stockErr.message}). Use Inventory > Receive stock.`);
+              }
+            }
+          }
+          const printBox = modal.querySelector('#p-print-sticker');
+          window.Storage.setPref('printStickerOnAdd', !!(printBox && printBox.checked));
+          if (printBox && printBox.checked) {
+            const copies = Math.min(500, Math.max(1, parseInt(modal.querySelector('#p-print-copies').value, 10) || 1));
+            const stickerItems = payload.variants
+              ? payload.variants.map((v) => {
+                  const attrs = Object.values(v.attributes || {}).join(' / ');
+                  return { name: attrs ? `${payload.name} (${attrs})` : payload.name, barcode: v.barcode, price: Number(v.sellingPrice) || 0, copies };
+                })
+              : [{ name: payload.name, barcode: payload.barcode, price: Number(wfRes ? wfRes.display.price : payload.sellingPrice) || 0, copies }];
+            window.UI.closeModal();
+            fetchAndRender();
+            window.BarcodeLabels.printItems(stickerItems);
+            return;
+          }
+        }
+        window.UI.closeModal();
+        fetchAndRender();
+      } catch (err) {
+        if (err.code === 'VALIDATION_ERROR' && err.errors?.length) {
+          window.UI.applyFormErrors(form, err.errors);
+          // Errors for fields without a form name (wholesale / retail / unit prices) have nowhere to render: say it.
+          const unmatched = err.errors.filter((e) => !form.querySelector(`[name="${e.field}"]`));
+          if (unmatched.length) window.UI.toast.error(unmatched.map((e) => e.message).slice(0, 2).join('. '));
+        } else {
+          window.UI.toast.error(err.message);
+        }
+      } finally {
+        window.UI.setButtonLoading(btn, false);
+      }
+    });
+  }
+
+  /** Create a product; if a generated barcode was taken meanwhile (another till), generate a new one and retry. */
+  async function createProductWithRetry(payload, generated) {
+    for (let attempt = 0; ; attempt++) {
+      try { return await window.Api.post('/products', payload); }
+      catch (err) {
+        const taken = /barcode/i.test(err.message || '') && /(exist|duplicate|already|taken|unique)/i.test(err.message || '');
+        const anyGenerated = generated && (generated.main || generated.variants.size);
+        if (!taken || attempt >= 2 || !anyGenerated) throw err;
+        const used = await getUsedBarcodes(true);
+        if (payload.variants) payload.variants.forEach((v, i) => { if (generated.variants.has(i)) v.barcode = window.BarcodeLabels.generateCode(used); });
+        else if (generated.main) payload.barcode = window.BarcodeLabels.generateCode(used);
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Variants modal (for an existing product)
+   * ------------------------------------------------------------------ */
+  function openVariantsModal(product) {
+    const modal = window.UI.openModal({
+      title: `Variants - ${product.name}`,
+      maxWidth: '600px',
+      bodyHtml: `<div id="variants-list"></div>`,
+      footerHtml: `<button class="btn btn-secondary" data-action="close">Close</button>`,
+    });
+    modal.querySelector('[data-action="close"]').addEventListener('click', () => { window.UI.closeModal(); fetchAndRender(); });
+
+    renderVariantsList(modal, product);
+  }
+
+  function renderVariantsList(modal, product) {
+    const listEl = modal.querySelector('#variants-list');
+    listEl.innerHTML = `
+      <div class="table-wrap" style="margin-bottom: var(--space-4)">
+        <table class="table">
+          <thead><tr><th>SKU</th><th>Attributes</th><th>Price</th>${wholesaleAllowed(product) ? '<th>Wholesale</th>' : ''}<th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${product.variants.map((v) => `
+              <tr data-id="${v._id}">
+                <td class="text-sm">${window.UI.escapeHtml(v.sku)}</td>
+                <td class="text-sm">${window.UI.escapeHtml(variantAttrsText(v))}</td>
+                <td>
+                  <input class="input" style="width:110px; height:34px" data-variant-price="${v._id}" type="number" step="0.01" min="0" value="${v.sellingPrice}" />
+                </td>
+                ${wholesaleAllowed(product) ? `<td>
+                  <input class="input" style="width:110px; height:34px" data-variant-wprice="${v._id}" type="number" step="0.01" min="0" value="${v.wholesalePrice || ''}" placeholder="${product.wholesalePrice || '-'}" title="Empty = use the product's wholesale price" />
+                </td>` : ''}
+                <td><span class="badge ${v.status === 'active' ? 'badge-success' : 'badge-neutral'}">${v.status}</span></td>
+                <td class="actions">
+                  <button class="btn btn-ghost btn-sm btn-icon" data-action="save-variant" title="Save price">${window.Icons.get('check')}</button>
+                  <button class="btn btn-ghost btn-sm btn-icon" data-action="archive-variant" title="Archive">${window.Icons.get('trash')}</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <form id="add-variant-form">
+        <div class="form-row">
+          <div class="field"><label>SKU</label><input class="input" name="sku" required /></div>
+          <div class="field"><label>Attributes</label><input class="input" name="attrsText" placeholder="Size: L, Color: Red" /></div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>Barcode <span class="text-muted">(optional)</span></label>
+            <div class="input-button-row">
+              <input class="input" name="barcode" placeholder="Scan, type or Generate" />
+              ${scanButtonHtml('add-variant-barcode-scan-btn')}
+              ${generateButtonHtml('add-variant-barcode-gen-btn')}
+            </div>
+          </div>
+          <div class="field"><label>Selling price (KES)</label><input class="input" name="sellingPrice" type="number" step="0.01" min="0" required /></div>
+        </div>
+        ${wholesaleAllowed(product) ? `<div class="field"><label>Wholesale price (KES) <span class="text-muted">(optional)</span></label><input class="input" name="wholesalePrice" type="number" step="0.01" min="0" style="max-width:200px" /></div>` : ''}
+        <button type="submit" class="btn btn-primary btn-sm">${window.Icons.get('plus')} Add variant</button>
+      </form>
+    `;
+
+    bindBarcodeScanButton(listEl.querySelector('#add-variant-barcode-scan-btn'), listEl.querySelector('#add-variant-form [name="barcode"]'));
+    bindGenerateButton(listEl.querySelector('#add-variant-barcode-gen-btn'), listEl.querySelector('#add-variant-form [name="barcode"]'));
+    bindBarcodeLiveCheck(listEl.querySelector('#add-variant-form [name="barcode"]'), listEl.querySelector('#add-variant-form'), []);
+
+    listEl.querySelectorAll('[data-action="save-variant"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.closest('tr').dataset.id;
+        const price = listEl.querySelector(`[data-variant-price="${id}"]`).value;
+        const wEl = listEl.querySelector(`[data-variant-wprice="${id}"]`);
+        const body = { sellingPrice: price };
+        if (wEl) body.wholesalePrice = wEl.value === '' ? null : wEl.value; // null clears it (falls back to the product's)
+        try {
+          await window.Api.put(`/products/${product._id}/variants/${id}`, body);
+          window.UI.toast.success('Variant updated');
+        } catch (err) {
+          window.UI.toast.error(err.message);
+        }
+      });
+    });
+
+    listEl.querySelectorAll('[data-action="archive-variant"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.closest('tr').dataset.id;
+        const ok = await window.UI.confirmDialog({ title: 'Archive variant?', confirmText: 'Archive', danger: true });
+        if (!ok) return;
+        try {
+          await window.Api.delete(`/products/${product._id}/variants/${id}`);
+          const { data } = await window.Api.get(`/products/${product._id}`);
+          renderVariantsList(modal, data.product);
+        } catch (err) {
+          window.UI.toast.error(err.message);
+        }
+      });
+    });
+
+    listEl.querySelector('#add-variant-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      if (await barcodeBlocked(form)) return;
+      const raw = window.UI.serializeForm(form);
+      try {
+        if (!raw.barcode) raw.barcode = window.BarcodeLabels.generateCode(await getUsedBarcodes()); // no barcode typed: create one
+        await window.Api.post(`/products/${product._id}/variants`, {
+          sku: raw.sku,
+          barcode: raw.barcode || undefined,
+          attributes: parseAttributes(raw.attrsText),
+          sellingPrice: raw.sellingPrice,
+          wholesalePrice: raw.wholesalePrice || undefined,
+        });
+        window.UI.toast.success('Variant added');
+        const { data } = await window.Api.get(`/products/${product._id}`);
+        renderVariantsList(modal, data.product);
+      } catch (err) {
+        if (err.code === 'VALIDATION_ERROR' && err.errors?.length) {
+          window.UI.applyFormErrors(form, err.errors);
+        } else {
+          window.UI.toast.error(err.message);
+        }
+      }
+    });
+  }
+
+  function variantAttrsText(variant) {
+    if (!variant.attributes) return '—';
+    const entries = Object.entries(variant.attributes);
+    return entries.length ? entries.map(([k, v]) => `${k}: ${v}`).join(', ') : '—';
+  }
+})();

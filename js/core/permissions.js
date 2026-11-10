@@ -514,7 +514,7 @@
       if (!window.Api || !window.Storage || !navigator.onLine) return false;
       if (!window.Storage.getAccessToken() || window.Storage.getOfflineSession?.()) return false;
       const last = Number(sessionStorage.getItem('pos.permsSyncedAt') || 0);
-      if (!force && Date.now() - last < 20000) return false;
+      if (!force && Date.now() - last < 8000) return false;
       sessionStorage.setItem('pos.permsSyncedAt', String(Date.now()));
       const { data } = await window.Api.get('/permissions/me', undefined, { fresh: true });
       const old = window.Storage.getUser();
@@ -527,7 +527,11 @@
       return true;
     } catch (e) { return false; }
   }
-  if (typeof window.addEventListener === 'function') window.addEventListener('load', () => setTimeout(() => sync(), 600));
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('load', () => setTimeout(() => sync(), 600));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); }); // owner changed something while the till was in the background
+    window.addEventListener('focus', () => sync());
+  }
 
   window.Permissions = { ROLES, can, applyPermissionGates, sync };
 })(window);

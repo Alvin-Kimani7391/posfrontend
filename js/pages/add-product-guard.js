@@ -102,63 +102,17 @@
   }
 
   /* ---------------- live duplicate-barcode alert (Quick add window) ---------------- */
+  // Uses the shared BarcodeGuard: the SERVER decides if a barcode exists (deleted products never count).
   function bindDupAlert(form, root) {
     const input = $('[name="barcode"]', form);
     if (!input || input._bcLive) return;
-    input._bcLive = true;
-    const field = input.closest('.field') || input.parentElement;
-    const msg = document.createElement('div');
-    msg.setAttribute('role', 'alert');
-    msg.style.cssText = 'display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:#fdecea;border:1px solid #d93025;color:#b3140a;font-weight:600;font-size:13px';
-    field.appendChild(msg);
-    let used = null;
-    const warm = () => { if (window.BarcodeLabels) window.BarcodeLabels.loadCatalog().then((c) => { used = c.used; }).catch(() => {}); };
-    warm();
-    let timer = null, seq = 0, lastToasted = '';
-    const setState = (dup, text) => {
-      input._bcDup = dup;
-      input.style.borderColor = dup ? '#d93025' : '';
-      input.style.boxShadow = dup ? '0 0 0 3px rgba(217,48,37,.25)' : '';
-      input.style.background = dup ? '#fff5f4' : '';
-      msg.style.display = dup ? '' : 'none';
-      msg.textContent = dup ? text : '';
-    };
-    const dupText = (name) => `⚠ BARCODE ALREADY EXISTS in the system${name ? ` — product: "${name}"` : ''}. Use a different barcode.`;
-    const alertDup = (code, name, final) => {
-      setState(true, dupText(name));
-      if (final && lastToasted !== code) { lastToasted = code; toast('error', `Barcode ${code} already exists${name ? ` (${name})` : ''}`); }
-      if (final) { try { input.focus(); input.select(); } catch { /* ignore */ } }
-    };
-    const server = async (code) => {
-      try {
-        const { data } = await window.Api.get(`/products/barcode/${encodeURIComponent(code)}`);
-        const p = data && (data.product || data);
-        if (p && (p._id || p.name)) return { name: p.name || '' };
-      } catch { /* not found */ }
-      return null;
-    };
-    const check = async (final) => {
-      const code = input.value.trim(); const my = ++seq;
-      if (!code) { setState(false); return; }
-      if (used && used.has(code)) {                      // INSTANT: in-memory list, no network
-        alertDup(code, '', final);
-        if (final) server(code).then((h) => { if (h && h.name && my === seq) msg.textContent = dupText(h.name); });
-        return;
-      }
-      if (!final) { setState(false); return; }
-      const hit = await server(code);                    // confirm with the server
-      if (my !== seq) return;
-      if (hit) { if (used) used.add(code); alertDup(code, hit.name, true); } else setState(false);
-    };
-    input._bcCheck = () => check(true);
-    input.addEventListener('input', () => { check(false); clearTimeout(timer); timer = setTimeout(() => check(true), 80); });
-    input.addEventListener('change', () => { clearTimeout(timer); check(true); });
-    input.addEventListener('blur', () => { clearTimeout(timer); check(true); });
+    if (!window.BarcodeGuard) return;
+    window.BarcodeGuard.bind(input, {});
     // a scanner ends with Enter: check first, never submit before the alert had a chance to show
     input.addEventListener('keydown', async (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault(); e.stopImmediatePropagation();
-      clearTimeout(timer); await check(true);
+      await input._bcCheck();
       if (!input._bcDup) { const next = $('[name="sellingPrice"]', form); if (next) next.focus(); }
     }, true);
     // the Add button re-checks before it is allowed to save
@@ -168,12 +122,11 @@
         if (saveBtn._pass) { saveBtn._pass = false; return; }
         if (!input.value.trim()) return;
         e.preventDefault(); e.stopImmediatePropagation();
-        clearTimeout(timer); await check(true);
+        await input._bcCheck();
         if (input._bcDup) { toast('error', 'This barcode already exists in the system - change it first'); input.focus(); return; }
         saveBtn._pass = true; saveBtn.click();
       }, true);
     }
-    if (input.value.trim()) check(true);
   }
 
   /* ---------------- wire one add-product window ---------------- */

@@ -1710,43 +1710,9 @@
 
   function bindBarcodeLiveCheck(input) {
     if (!input || input._bcLive) return;
-    input._bcLive = true;
-    warmBarcodeSet();
-    const field = input.closest('.field') || input.parentElement;
-    const msg = document.createElement('div');
-    msg.setAttribute('role', 'alert');
-    msg.style.cssText = 'display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:#fdecea;border:1px solid #d93025;color:#b3140a;font-weight:600;font-size:13px';
-    field.appendChild(msg);
-    let timer = null, seq = 0, lastToasted = '';
-    const setState = (dup, text) => {
-      input._bcDup = dup;
-      input.style.borderColor = dup ? '#d93025' : '';
-      input.style.boxShadow = dup ? '0 0 0 3px rgba(217,48,37,.25)' : '';
-      input.style.background = dup ? '#fff5f4' : '';
-      msg.style.display = dup ? '' : 'none';
-      msg.textContent = dup ? text : '';
-    };
-    const dupText = (name) => `⚠ BARCODE ALREADY EXISTS in the system${name ? ` — product: "${name}"` : ''}. Use a different barcode.`;
-    const alertDup = (code, name, final) => {
-      setState(true, dupText(name));
-      if (final && lastToasted !== code) { lastToasted = code; window.UI.toast.error(`Barcode ${code} already exists${name ? ` (${name})` : ''}`); }
-      if (final) { try { input.focus(); input.select(); } catch { /* ignore */ } }
-    };
-    const check = async (final) => {
-      const code = input.value.trim(); const my = ++seq;
-      if (!code) { setState(false); return; }
-      const hit = instantBarcodeHit(code);            // INSTANT: device copy, no network
-      if (hit) { alertDup(code, hit.name, final); return; }
-      if (!final) { setState(false); return; }
-      const sh = await serverBarcodeHit(code);         // confirm with the server
-      if (my !== seq) return;
-      if (sh) { if (bcUsed) bcUsed.add(code); alertDup(code, sh.name, true); } else setState(false);
-    };
-    input.addEventListener('input', () => { check(false); clearTimeout(timer); timer = setTimeout(() => check(true), 80); });
-    input.addEventListener('change', () => { clearTimeout(timer); check(true); });
-    input.addEventListener('blur', () => { clearTimeout(timer); check(true); });
-    input._bcCheck = () => check(true);
-    if (input.value.trim()) check(true);
+    // The server is the ONLY judge of "this barcode exists" (it ignores deleted products). The device copy / in-memory
+    // list are used only when there is no connection at all (offline).
+    window.BarcodeGuard.bind(input, { local: (code) => instantBarcodeHit(code) });
   }
 
   /** Tracking checkbox shown only when the business has that feature on (same rule as Products). */
@@ -1866,18 +1832,24 @@
       if (raw.categoryId) payload.categoryId = raw.categoryId;
       if ((payload.trackBatch || payload.trackExpiry) && qaQty <= 0 && (qaBatchNo || qaExpiry)) { window.UI.toast.error('Enter the opening stock quantity so the batch / expiry can be saved with it'); if (qaQtyEl) qaQtyEl.focus(); return; }
       if (payload.trackExpiry && qaQty > 0 && !qaExpiry) { window.UI.toast.error('Enter the expiry date for this stock'); modal.querySelector('#qa-expiry').focus(); return; }
+      let barcodeWasGenerated = false;
       if (!payload.barcode) {
-        try {
-          if (window.BarcodeLabels) {
-            const used = (await window.BarcodeLabels.loadCatalog()).used;
-            payload.barcode = window.BarcodeLabels.generateCode(used);
-          }
-        } catch { /* a barcode is optional */ }
+        try { payload.barcode = await window.BarcodeGuard.generate(); barcodeWasGenerated = true; } catch { /* a barcode is optional */ }
       }
       const btn = modal.querySelector('#qa-save');
       window.UI.setButtonLoading(btn, true, 'Saving…');
       try {
-        const res = await window.Api.post('/products', payload);
+        let res;
+        for (let attempt = 0; ; attempt++) {
+          try { res = await window.Api.post('/products', payload); break; }
+          catch (e) {
+            if (e && e.code === 'BARCODE_RETRY' && attempt < 2) continue;                                   // server just freed a deleted product's barcode
+            const taken = /barcode/i.test(e && e.message || '') && /(exist|already|taken|duplicate|unique)/i.test(e && e.message || '');
+            if (taken && barcodeWasGenerated && attempt < 3) { payload.barcode = await window.BarcodeGuard.generate(); continue; }   // someone used our generated code: make another
+            throw e;
+          }
+        }
+        if (barcodeWasGenerated && payload.barcode) window.BarcodeGuard.forget(payload.barcode);
         const product = (res.data && (res.data.product || res.data)) || null;
         const qty = Number(modal.querySelector('#qa-qty') ? modal.querySelector('#qa-qty').value : 0) || 0;
         if (product && product._id && qty > 0) {
@@ -1915,6 +1887,11 @@
   const retailUnitsOf = (product) => ((product && product.units) || []).filter((u) => u.status !== 'inactive' && Number(u.factor) > 0);
   const unitByIdOf = (product, id) => retailUnitsOf(product).find((u) => String(u._id) === String(id)) || null;
   const lineUnitOf = (item) => (item && !item.ws && item.unitId ? unitByIdOf(item.product, item.unitId) : null);
+  /** Measured products (kg, litre, metre...) can be sold in parts: 1.5 kg, 0.25 of a bag. Other products stay whole numbers. */
+  const MEASURED_UNITS = ['kg', 'kgs', 'kilogram', 'kilograms', 'g', 'gram', 'grams', 'litre', 'litres', 'liter', 'liters', 'l', 'ltr', 'ml', 'metre', 'metres', 'meter', 'meters', 'm', 'm2', 'm3', 'tonne', 'tonnes'];
+  const qty3 = (n) => Math.round(Number(n) * 1000) / 1000; // removes floating-point noise (2.1000000000000004 -> 2.1)
+  // Case-insensitive unit match; packet / deal lines stay whole numbers; wholesale lines always allow decimals.
+  const allowsFraction = (item) => !!(item && item.product && (item.ws || (!item.unitId && (MEASURED_UNITS.includes(String(item.product.unit || '').trim().toLowerCase()) || String(item.product.productType || '').toLowerCase() === 'weighted'))));
   const unitKeyOf = (product, variant, unitId) => (unitId ? `${variant ? variant._id : product._id}|u|${unitId}` : undefined);
   const baseKeyOf = (product, variant) => (variant ? variant._id : product._id);
   const baseUnitName = (product) => product.unit || 'piece';
@@ -2039,6 +2016,42 @@
     } catch { return true; } // never block a sale just because the hint could not be loaded
   }
 
+  /**
+   * STOCK GUARD at add-to-cart: tells the cashier at once when an item is out of stock or only N are left.
+   * Decimal-safe: a kg line is cut by the exact excess (2.5 asked, 1.2 in stock -> 1.2); whole-unit lines stay whole.
+   * Skipped offline, for untracked items, for variants, and when the business allows negative stock. The server still checks at Complete sale.
+   */
+  const lineFactorOf = (line) => { const u = lineUnitOf(line); return u ? Number(u.factor) || 1 : 1; };
+  async function checkCartStock(product, variant, key) {
+    try {
+      if (!product || variant || product.trackInventory === false || isOfflineNow()) return;
+      const { data } = await window.Api.get('/products/stock-levels', { ids: product._id, branchId: window.AppShell.getActiveBranchId() || undefined });
+      if (data.allowNegativeStock) return;
+      const st = data.stock && data.stock[product._id];
+      if (!st || !st.tracked) return;
+      const avail = Math.max(0, Number(st.quantity) || 0);
+      const lines = state.cart.filter((l) => !l.ws && !l.variant && String(l.product._id) === String(product._id));
+      const inCart = lines.reduce((t, l) => t + l.quantity * lineFactorOf(l), 0);
+      if (inCart <= avail + 1e-6) return;
+      let excess = inCart - avail;
+      const ordered = [...lines.filter((l) => keyOf(l) === key), ...lines.filter((l) => keyOf(l) !== key)];
+      for (const l of ordered) {
+        if (excess <= 1e-6) break;
+        const f = lineFactorOf(l);
+        const cut = allowsFraction(l)
+          ? Math.min(l.quantity, Math.ceil((excess / f) * 1000 - 1e-6) / 1000)
+          : Math.min(l.quantity, Math.ceil(excess / f - 1e-9));
+        l.quantity = qty3(l.quantity - cut); excess -= cut * f;
+        if (l.quantity <= 0) state.cart.splice(state.cart.indexOf(l), 1); else syncAutoDiscount(l);
+      }
+      renderCart();
+      window.UI.toast.error(avail <= 0
+        ? `${product.name} is OUT OF STOCK. It was not added to the cart.`
+        : `Only ${qty3(avail)} ${product.name} in stock. The quantity was set to ${qty3(avail)}.`);
+      setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) $('pos-search')?.focus(); }, 0);
+    } catch { /* never block selling because the stock check could not run */ }
+  }
+
   function addToCart(product, variant, qty, unitId) {
     if (drawerLocked()) { window.UI.toast.error('Close the cash drawer before starting the next sale'); return; }
     if (!state.cart.length) warmConnection(); // first item: the server connection is ready before the cashier reaches Complete
@@ -2047,7 +2060,7 @@
     const key = unitId ? unitKeyOf(product, variant, unitId) : (variant ? variant._id : product._id);
     const existing = state.cart.find((i) => keyOf(i) === key);
     if (existing) {
-      existing.quantity += add;
+      existing.quantity = qty3(existing.quantity + add);
       syncAutoDiscount(existing); // preset discount grows with the quantity; a manual discount is left alone
     } else {
       const item = { product, variant, quantity: add, discount: 0, autoDiscount: false, overridePriceEnabled: false, overridePrice: null, ...(unitId ? { unitId, key } : {}) };
@@ -2060,6 +2073,7 @@
     }
     state.lastAdded = key;
     renderCart(key); // scrolls the new / updated row into view
+    checkCartStock(product, variant, key); // out of stock? tell the cashier now
     // Batch / expiry tracked products: show which batch will be sold (earliest expiry first). Display only.
     if (window.BatchTill) window.BatchTill.ensure(state.cart).then(() => { if (state.view === 'new-sale') renderCart(); }).catch(() => {});
     // Pharmacy: learn whether this product is a medicine (class, recall status) and repaint the tags.
@@ -2092,7 +2106,7 @@
       subtotal += round2(unitPrice * item.quantity);
       itemDiscountTotal += item.discount || 0;
       tax += previewLine(unitPrice, item.quantity, item.discount, item.product.taxRate).tax;
-      itemCount += item.quantity;
+      itemCount = qty3(itemCount + item.quantity);
     });
     const total = Math.max(round2(subtotal - itemDiscountTotal - (state.cartDiscount || 0)), 0);
     return { subtotal: round2(subtotal), itemDiscountTotal: round2(itemDiscountTotal), tax: round2(tax), itemCount, total };
@@ -2171,7 +2185,7 @@
           <div class="pz-rgt">
             <div class="pz-c-qty pz-stepper">
               <button type="button" data-action="dec" data-idx="${i}" aria-label="Decrease quantity">−</button>
-              <input type="number" inputmode="${item.ws ? 'decimal' : 'numeric'}" min="0" step="${item.ws ? 'any' : '1'}" value="${item.quantity}" data-action="qty" data-idx="${i}" aria-label="Quantity" />
+              <input type="number" inputmode="${allowsFraction(item) ? 'decimal' : 'numeric'}" min="0" step="${allowsFraction(item) ? 'any' : '1'}" value="${item.quantity}" data-action="qty" data-idx="${i}" aria-label="Quantity" />
               <button type="button" data-action="inc" data-idx="${i}" aria-label="Increase quantity">+</button>
             </div>
             ${unitCell}
@@ -2202,12 +2216,13 @@
       if (!item) return;
       switch (b.dataset.action) {
         case 'inc':
-          item.quantity += 1;
+          item.quantity = qty3(item.quantity + 1);
+          if (!item.ws) checkCartStock(item.product, item.variant, keyOf(item));
           syncAutoDiscount(item);
           renderCart();
           break;
         case 'dec':
-          item.quantity -= 1;
+          item.quantity = qty3(item.quantity - 1);
           if (item.quantity <= 0) state.cart.splice(idx, 1);
           else syncAutoDiscount(item);
           renderCart();
@@ -2263,10 +2278,11 @@
       const inp = e.target.closest('input[data-action="qty"]');
       if (!inp) return;
       const idx = Number(inp.dataset.idx);
-      const n = state.cart[idx] && state.cart[idx].ws ? Math.round(Number(inp.value) * 1000) / 1000 : Math.floor(Number(inp.value));
+      const n = allowsFraction(state.cart[idx]) ? Math.round(Number(inp.value) * 1000) / 1000 : Math.floor(Number(inp.value));
       if (!Number.isFinite(n) || n <= 0) state.cart.splice(idx, 1);
       else if (state.cart[idx]) {
         state.cart[idx].quantity = n;
+        { const ln = state.cart[idx]; if (ln && !ln.ws) checkCartStock(ln.product, ln.variant, keyOf(ln)); }
         syncAutoDiscount(state.cart[idx]);
       }
       renderCart();
