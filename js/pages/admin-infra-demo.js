@@ -21,7 +21,7 @@
   function overview() {
     const a = state.active, b = a === 'green' ? 'blue' : 'green';
     return {
-      permissions: { canOperate: true },
+      permissions: { canOperate: true, canPromote: true },
       maintenance: state.maintenance,
       github: { pendingApprovalUrl: 'https://github.com/' },
       server: { cpuPct: clamp(18 + Math.random() * 20), memUsedMb: 1180, memTotalMb: 2048, diskUsedGb: 14.6, diskTotalGb: 40, uptimeSec: 86400 * 12 + 4000, load: [0.42, 0.38, 0.31], netInKbps: 220, netOutKbps: 540 },
@@ -41,16 +41,21 @@
       jobs: { lockedBy: 'sixstar-worker', running: 12, lastFailure: null },
     };
   }
+  const D = (o) => Object.assign({ by: 'zion', previous: 'blue', tests: '48 passed', health: 'ready in 6s', reason: '', env: 'production' }, o);
   const deployments = [
-    { release: '20261104-1410-a3f9c1e', sha: 'a3f9c1e', by: 'zion', previous: 'blue', status: 'success', ts: ago(190), tests: '48 passed', health: 'ready in 6s', reason: '' },
-    { release: '20261103-1630-9d21aa0', sha: '9d21aa0', by: 'zion', previous: 'green', status: 'failed_before_switch', ts: ago(1300), tests: '48 passed', health: 'not ready after 40s', reason: '/health/ready did not pass' },
-    { release: '20261102-0905-77be210', sha: '77be210', by: 'zion', previous: 'blue', status: 'success', ts: ago(3300), tests: '46 passed', health: 'ready in 5s', reason: '' },
-    { release: '20261031-1120-0c4e8b7', sha: '0c4e8b7', by: 'zion', previous: 'green', status: 'rolled_back_verified', ts: ago(6300), tests: '45 passed', health: 'failed after switch', reason: 'post-switch health failed' },
+    D({ release: '20261110-1602-e41b7d9', sha: 'e41b7d9', status: 'success', env: 'staging', ts: ago(4), previous: '-', promotable: true, outcome: 'success' }),
+    D({ release: '20261110-1511-5c0aa31', sha: '5c0aa31', status: 'staging_failed', env: 'staging', ts: ago(55), previous: '-', reason: 'staging did not become ready', outcome: 'failed' }),
+    D({ release: '20261104-1410-a3f9c1e', sha: 'a3f9c1e', status: 'success', ts: ago(190), outcome: 'success' }),
+    D({ release: '20261103-1630-9d21aa0', sha: '9d21aa0', status: 'failed_before_switch', previous: 'green', ts: ago(1300), health: 'not ready after 40s', reason: '/health/ready did not pass', outcome: 'failed' }),
+    D({ release: '20261102-0905-77be210', sha: '77be210', status: 'success', ts: ago(3300), outcome: 'success' }),
+    D({ release: '20261101-0800-aa11bb2', sha: 'aa11bb2', status: 'rollback_verified', previous: 'green', ts: ago(5000), reason: 'manual rollback', outcome: 'info' }),
+    D({ release: '20261031-1120-0c4e8b7', sha: '0c4e8b7', status: 'rolled_back_verified', previous: 'green', ts: ago(6300), health: 'failed after switch', reason: 'post-switch health failed', outcome: 'failed' }),
   ];
+
   function get(path, q) {
     q = q || {};
     if (path.endsWith('/overview')) return overview();
-    if (path.endsWith('/deployments')) return { items: deployments };
+    if (path.endsWith('/deployments')) return { items: deployments, promote: { available: true, reason: '' } };
     if (path.endsWith('/logs')) {
       const after = Number(q.after || 0);
       if (!after) return { lines: seed.filter((l) => !q.service || l.service === q.service) };
@@ -62,6 +67,7 @@
   }
   function post(path) {
     if (path.endsWith('/rollback')) state.active = state.active === 'green' ? 'blue' : 'green';
+    if (path.endsWith('/promote')) { deployments[0].promotable = false; deployments.unshift(D({ release: 'promoting', sha: 'e41b7d9', status: 'success', ts: new Date().toISOString(), outcome: 'success', previous: 'green' })); }
     if (path.endsWith('/maintenance')) state.maintenance = !state.maintenance;
     return { ok: true, message: 'Demo: action simulated, nothing real changed.' };
   }

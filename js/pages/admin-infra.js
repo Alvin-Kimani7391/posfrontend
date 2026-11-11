@@ -3,7 +3,8 @@
  *
  * Backend contract (all under /admin/infra, SUPER_ADMIN only; read endpoints = monitoring, POST = operator):
  *   GET  /overview     -> { permissions:{canOperate}, maintenance, github:{pendingApprovalUrl}, server, release:{active,standby}, services[], database, backup, jobs }
- *   GET  /deployments  -> { items:[{release,sha,by,previous,status,reason,ts,tests,health}] }
+ *   GET  /deployments  -> { items:[{release,sha,by,previous,status,reason,ts,tests,health,env,outcome,promotable}], promote:{available,reason} }
+ *   POST /promote      -> { release }   (staging server only; starts the production deploy of that tested release)
  *   GET  /logs?service&level&q&after -> { lines:[{id,ts,level,service,msg}] }
  *   POST /rollback | /restart {service} | /backup | /maintenance {enabled}
  * Preview with no backend: admin-infra.html?demo=1
@@ -20,12 +21,25 @@
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
   const tone = (p) => (p >= 90 ? 'bad' : p >= 75 ? 'warn' : '');
   const bar = (p) => `<div class="inf-bar"><i class="${tone(p)}" style="width:${Math.min(p, 100)}%"></i></div>`;
+  const toast = (m, t) => { try { (t === 'error' ? window.UI.toast.error : window.UI.toast.success)(m); } catch (e) { /* cosmetic */ } };
   const dot = (ok) => `<span class="inf-dot ${ok === true ? 'ok' : ok === false ? 'bad' : 'warn'}"></span>`;
   const STATUS = {
     success: ['badge-success', 'Live'], failed_before_switch: ['badge-danger', 'Failed - production untouched'],
-    rolled_back_verified: ['badge-warning', 'Rolled back (verified)'], ROLLBACK_FAILED_MANUAL_ACTION: ['badge-danger', 'ROLLBACK FAILED - act now'],
-    rollback_verified: ['badge-warning', 'Manual rollback (verified)'], ROLLBACK_UNVERIFIED: ['badge-danger', 'Rollback not verified'],
+    aborted_before_start: ['badge-danger', 'Failed - nothing changed'], staging_failed: ['badge-danger', 'Failed on staging'],
+    rolled_back_verified: ['badge-danger', 'Failed - rolled back automatically'], ROLLBACK_FAILED_MANUAL_ACTION: ['badge-danger', 'ROLLBACK FAILED - act now'],
+    WORKER_DOWN_MANUAL_ACTION: ['badge-danger', 'Worker down - act now'], ROLLBACK_UNVERIFIED: ['badge-danger', 'Rollback not verified'],
+    rollback_verified: ['badge-warning', 'Manual rollback (verified)'], candidate_verified_not_switched: ['badge-warning', 'Verified, not switched'],
   };
+  // green circle + tick = success, red circle + cross = failed, amber circle + ! = other (manual rollback ...)
+  const ICON = {
+    ok: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="currentColor"/><path d="M7 12.5l3.2 3.2L17 8.8" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    bad: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="currentColor"/><path d="M8 8l8 8M16 8l-8 8" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="currentColor"/><path d="M12 7v6.2M12 16.6v.4" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>',
+  };
+  const labelFor = (d, st) => (d.env === 'staging' && d.status === 'success' ? 'Passed on staging' : st[1]);
+  const outcome = (d) => d.outcome || (d.status === 'success' ? 'success' : /fail|abort|FAILED/i.test(d.status) ? 'failed' : 'info');
+  const statusIcon = (d) => { const o = outcome(d), k = o === 'success' ? 'ok' : o === 'failed' ? 'bad' : 'warn';
+    return `<span class="inf-ic ${k}" role="img" aria-label="${o === 'success' ? 'Succeeded' : o === 'failed' ? 'Failed' : 'Notice'}">${ICON[k]}</span>`; };
 
   document.addEventListener('DOMContentLoaded', () => {
     const el = window.AdminShell.mount({ title: 'Infrastructure' });
@@ -108,18 +122,27 @@
       const [{ data }, ov] = await Promise.all([api.get('/admin/infra/deployments'), S.ov ? null : api.get('/admin/infra/overview')]);
       if (ov) { S.ov = ov.data; topStrip(); }
       const pend = S.ov.github && S.ov.github.pendingApprovalUrl;
+      const pr = data.promote || {}, isStg = !!(window.APP_CONFIG && window.APP_CONFIG.IS_STAGING), canPromote = isStg && S.ov.permissions.canPromote;
+      const next = data.items.find((d) => d.promotable);
+      const promoCard = isStg ? `<div class="inf-card inf-promo" style="margin-bottom:var(--space-4)"><div><b>Push to production</b>
+          <div class="inf-sub">${next ? `Staging release <span class="inf-mono">${esc(next.release)}</span> (${esc(next.sha)}) passed on staging and is not live yet. Production receives this exact tested build.`
+            : pr.available === false && pr.reason ? esc(pr.reason) : 'Nothing waiting: the newest tested staging release is already live (or has not passed yet).'}</div></div>
+          ${next && canPromote ? `<button class="btn btn-primary btn-sm" data-promote="${esc(next.release)}">Push to production…</button>` : ''}</div>` : '';
       $('inf-body').innerHTML = `
-        ${pend ? `<div class="inf-card" style="margin-bottom:var(--space-4);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><b>Production approvals</b><div class="inf-sub">New releases wait for your explicit approval in GitHub before going live.</div></div><a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="${esc(pend)}">Review in GitHub</a></div>` : ''}
+        ${promoCard}
+        ${pend ? `<div class="inf-card" style="margin-bottom:var(--space-4);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><b>GitHub approvals</b><div class="inf-sub">Runs waiting for review are shown in GitHub.</div></div><a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="${esc(pend)}">Open GitHub</a></div>` : ''}
         <div class="inf-card"><h3>Deployment history</h3>
         ${data.items.length ? `<ul class="inf-tl">${data.items.map((d) => {
-          const st = STATUS[d.status] || ['badge-neutral', d.status];
-          const bad = /fail|FAILED/i.test(d.status);
-          return `<li><div class="rail">${dot(bad ? false : d.status === 'success' ? true : null)}</div>
-            <div><div class="ttl">${esc(d.release)} <span class="badge ${st[0]}">${esc(st[1])}</span></div>
-              <div class="meta"><span class="inf-mono">${esc(d.sha)}</span> · by ${esc(d.by)} · from ${esc(d.previous || '-')} · tests: ${esc(d.tests || '-')} · health: ${esc(d.health || '-')}</div>
-              ${d.reason ? `<div class="why">${esc(d.reason)}</div>` : ''}</div>
+          const st = STATUS[d.status] || [outcome(d) === 'failed' ? 'badge-danger' : 'badge-neutral', d.status];
+          const envName = d.env === 'staging' ? 'STAGING' : 'PRODUCTION';
+          return `<li><div class="rail">${statusIcon(d)}</div>
+            <div><div class="ttl">${esc(d.release)} <span class="inf-env ${d.env === 'staging' ? 'stg' : 'prd'}">${envName}</span> <span class="badge ${st[0]}">${esc(labelFor(d, st))}</span></div>
+              <div class="meta"><span class="inf-mono">${esc(d.sha)}</span> · by ${esc(d.by)}${d.env === 'staging' ? '' : ` · from ${esc(d.previous || '-')}`} · tests: ${esc(d.tests || '-')} · health: ${esc(d.health || '-')}</div>
+              ${d.reason ? `<div class="why">${esc(d.reason)}</div>` : ''}
+              ${d.promotable && canPromote ? `<div style="margin-top:8px"><button class="btn btn-primary btn-sm" data-promote="${esc(d.release)}">Push to production…</button></div>` : ''}</div>
             <div class="text-xs text-muted" title="${esc(window.UI.formatDateTime(d.ts))}">${ago(d.ts)}</div></li>`; }).join('')}</ul>`
         : window.UI.emptyStateHtml({ icon: 'alert', title: 'No deployments recorded yet' })}</div>`;
+      $('inf-body').onclick = (e) => { const b = e.target.closest('[data-promote]'); if (b) confirmPromote(b.dataset.promote); };
     } catch (e) { fail(e); }
   }
 
@@ -200,11 +223,26 @@
     $('inf-body').onclick = (e) => { const b = e.target.closest('[data-act]'); if (b) confirmAct(b.dataset.act, b.dataset.word); };
   }
 
+  function confirmPromote(release) {
+    const m = document.createElement('div'); m.className = 'inf-modal';
+    m.innerHTML = `<div><h3>Push to production</h3><div class="text-sm text-muted">Release <b>${esc(release)}</b> will be deployed to the live system with zero downtime (blue/green). If it fails its health checks it is rolled back automatically and all super admins are emailed. Type <b>PRODUCTION</b> to continue.</div><input class="input" id="cf-in" autocomplete="off" />
+      <div class="row"><button class="btn btn-secondary btn-sm" id="cf-no">Cancel</button><button class="btn btn-primary btn-sm" id="cf-yes" disabled>Push to production</button></div></div>`;
+    document.body.appendChild(m);
+    const inp = m.querySelector('#cf-in'), yes = m.querySelector('#cf-yes');
+    inp.focus(); inp.addEventListener('input', () => { yes.disabled = inp.value.trim() !== 'PRODUCTION'; });
+    m.querySelector('#cf-no').onclick = () => m.remove();
+    yes.onclick = async () => {
+      yes.disabled = true; m.remove();
+      try { const { data } = await api.post('/admin/infra/promote', { release }); toast(data.message || 'Started', 'success'); setTimeout(renderDeployments, 1500); }
+      catch (e) { toast(e.message || 'Could not start the production deploy', 'error'); }
+    };
+  }
+
   function confirmAct(act, word) {
     const body = act === 'restart' ? { service: $('rs-svc').value } : act === 'maintenance' ? { enabled: !S.ov.maintenance } : {};
     const run = async () => {
-      try { const { data } = await api.post('/admin/infra/' + act, body); window.UI.toast(data.message || 'Done', { type: 'success' }); await loadOverview(); }
-      catch (e) { window.UI.toast(e.message || 'Action failed', { type: 'error' }); }
+      try { const { data } = await api.post('/admin/infra/' + act, body); toast(data.message || 'Done', 'success'); await loadOverview(); }
+      catch (e) { toast(e.message || 'Action failed', 'error'); }
     };
     if (!word) return run();
     const m = document.createElement('div'); m.className = 'inf-modal';
