@@ -1816,6 +1816,9 @@
   const uwNum = (n) => (Math.round((Number(n) || 0) * 1000) / 1000).toLocaleString('en-KE', { maximumFractionDigits: 3 });
   const uwPlural = (u, n) => (['kg', 'g', 'ml'].includes(u) || n === 1 ? u : (u === 'box' ? 'boxes' : `${u}s`));
   const uwUnitName = (u) => (u === 'piece' ? 'piece' : (u || 'unit'));
+  const uwPackPlural = (p, n) => { const l = String(p || 'pack'); return n === 1 ? l : (/(x|s|ch|sh)$/i.test(l) ? `${l}es` : `${l}s`); };
+  const UW_FRACS = [['1/4', '\u00BC'], ['1/2', '\u00BD'], ['3/4', '\u00BE']];
+  const uwFracVal = (f) => { const [a, b] = String(f).split('/').map(Number); return a / b; };
 
   function uwInjectStyles() {
     if (document.getElementById('uw-styles')) return;
@@ -1846,12 +1849,14 @@
     document.head.appendChild(st);
   }
 
-  function pkDealRowHtml(d) {
+  function pkDealRowHtml(d, frac) {
+    const m = !frac && d && /^([1-3]\/[2-4]) /.exec(d.name || '');
+    const fr = frac || (m ? m[1] : '');
     const q = d && d.factor ? d.factor : '';
     const pr = d && d.retailPrice != null ? d.retailPrice : '';
     return `
-      <div class="pk-deal-row form-row uw-dealrow">
-        <div class="field" style="margin-bottom:0"><label>Units in this option</label><input class="input pk-deal-qty" type="number" min="0" step="any" inputmode="decimal" placeholder="3" value="${q}" /></div>
+      <div class="pk-deal-row form-row uw-dealrow" data-frac="${fr}">
+        <div class="field" style="margin-bottom:0"><label>Units in this option${fr ? ` <span class="text-muted">(${fr} pack)</span>` : ''}</label><input class="input pk-deal-qty" type="number" min="0" step="any" inputmode="decimal" placeholder="3" value="${q}" /></div>
         <div class="field" style="margin-bottom:0"><label>Price for them (KES)</label><input class="input pk-deal-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="5" value="${pr}" /></div>
         <button type="button" class="btn btn-ghost btn-sm pk-deal-del" aria-label="Remove option" title="Remove option">${window.Icons.get('trash')}</button>
       </div>`;
@@ -1880,9 +1885,11 @@
 
             <div class="uw-step" id="uw-s1">
               <div class="uw-q"><span>1</span>What is the bulk pack you buy?</div>
-              <div class="uw-help">Pick one or type your own name.</div>
-              <div class="uw-chips" id="uw-pack-chips">${UW_PACKS.map((n) => `<button type="button" class="uw-chip" data-uw-pack="${n}">${n}</button>`).join('')}</div>
-              <input class="input" id="p-pk-name" maxlength="30" placeholder="e.g. Carton" autocomplete="off" value="${pk ? esc(pk.name) : ''}" />
+              <div class="uw-help">Pick one, or choose Other and type the exact name you use.</div>
+              <div class="uw-chips" id="uw-pack-chips">${UW_PACKS.map((n) => `<button type="button" class="uw-chip" data-uw-pack="${n}">${n}</button>`).join('')}<button type="button" class="uw-chip" data-uw-pack="__other">Other\u2026</button></div>
+              <div id="uw-pack-other" style="${pk && !UW_PACKS.some((n) => n.toLowerCase() === String(pk.name).toLowerCase()) ? '' : 'display:none'}">
+                <input class="input" id="p-pk-name" maxlength="30" placeholder="Type your own pack name, e.g. Tray, Roll, Jerrycan" autocomplete="off" value="${pk ? esc(pk.name) : ''}" />
+              </div>
             </div>
 
             <div class="uw-step" id="uw-s2">
@@ -1924,8 +1931,9 @@
                 </div>
               </div>
               <div class="field" style="margin-bottom:var(--space-2)">
-                <label>Extra ways to sell <span class="text-muted">(optional, e.g. 3 pieces for KES 5, or half a pack)</span></label>
-                <div id="pk-deals">${deals.map(pkDealRowHtml).join('')}</div>
+                <label>Extra ways to sell <span class="text-muted">(optional: tap \u00BC, \u00BD or \u00BE of a pack, or add your own like 3 pieces for KES 5)</span></label>
+                <div id="pk-deals">${deals.map((d) => pkDealRowHtml(d)).join('')}</div>
+                <div class="uw-chips" id="uw-frac-chips"><span class="text-xs text-muted" style="align-self:center">Quick add:</span>${UW_FRACS.map(([f, sym]) => `<button type="button" class="uw-chip" data-uw-frac="${f}">${sym} pack</button>`).join('')}</div>
                 <button type="button" class="btn btn-secondary btn-sm" id="pk-add-deal">${window.Icons.get('plus')} Add an option</button>
               </div>
               <div id="pk-summary" class="uw-sum"></div>
@@ -1950,6 +1958,7 @@
     const num = (q) => Number($q(q).value) || 0;
     const unit = () => (unitEl && unitEl.value) || 'piece';
     const packName = () => nameEl.value.trim();
+    let otherMode = !!(own && !UW_PACKS.some((n) => n.toLowerCase() === own.name.toLowerCase()));
 
     bindBarcodeScanButton($q('#p-pk-scan-btn'), $q('#p-pk-barcode'));
     bindGenerateButton($q('#p-pk-gen-btn'), $q('#p-pk-barcode'));
@@ -1962,7 +1971,7 @@
       fields.style.display = isOn ? '' : 'none';
       // One cost (the pack cost) and one price (the unit price) are entered in the wizard: hide the plain boxes while it is on.
       if (costEl) { costEl.readOnly = isOn; const cf = costEl.closest('.field'); if (cf) cf.style.display = isOn ? 'none' : ''; }
-      if (priceEl && !priceEl.disabled) { priceEl.required = !isOn; const pf = priceEl.closest('.field'); if (pf) pf.style.display = isOn ? 'none' : ''; }
+      if (priceEl && !priceEl.disabled) { priceEl.required = !isOn; const pf = priceEl.closest('.field'); if (pf) pf.style.display = isOn ? 'none' : ''; const cpRow = priceEl.closest('.form-row'); if (cpRow && costEl && cpRow === costEl.closest('.form-row')) cpRow.style.display = isOn ? 'none' : ''; }
       const stockUnit = $q('#p-stock-unit-wrap'); if (stockUnit) stockUnit.style.display = isOn ? '' : 'none';
       const sum = $q('#pk-summary');
       if (!isOn) { if (sum) sum.innerHTML = ''; return; }
@@ -1978,7 +1987,17 @@
         const cur = !done && (k === 1 || (k === 2 && s1) || (k === 3 && s1) || (k === 4 && s1 && s3));
         d.classList.toggle('done', done); d.classList.toggle('cur', cur && !modal.querySelector('#uw-steps .uw-dot.cur'));
       });
-      modal.querySelectorAll('[data-uw-pack]').forEach((c) => c.classList.toggle('on', c.dataset.uwPack.toLowerCase() === pn.toLowerCase()));
+      const custom = otherMode || (!!pn && !UW_PACKS.some((x) => x.toLowerCase() === pn.toLowerCase()));
+      $q('#uw-pack-other').style.display = custom ? '' : 'none';
+      modal.querySelectorAll('[data-uw-pack]').forEach((c) => c.classList.toggle('on', c.dataset.uwPack === '__other' ? custom : (!custom && c.dataset.uwPack.toLowerCase() === pn.toLowerCase())));
+      const whole = UW_WHOLE_ONLY.includes(u);
+      modal.querySelectorAll('[data-uw-frac]').forEach((c) => {
+        const sym = (UW_FRACS.find((x) => x[0] === c.dataset.uwFrac) || [])[1]; const units = n * uwFracVal(c.dataset.uwFrac);
+        const ok = n > 1 && (!whole || Number.isInteger(units));
+        c.disabled = !ok; c.style.opacity = ok ? '' : '.45';
+        c.title = ok ? '' : `A ${pn || 'pack'} of ${uwNum(n)} ${uwPlural(un, n)} cannot be split this way`;
+        c.textContent = ok ? `${sym} ${pn || 'pack'} (${uwNum(units)} ${uwPlural(un, units)})` : `${sym} ${pn || 'pack'}`;
+      });
       modal.querySelectorAll('[data-uw-unit]').forEach((c) => c.classList.toggle('on', c.dataset.uwUnit === u));
       modal.querySelectorAll('[data-uw-n]').forEach((c) => c.classList.toggle('on', Number(c.dataset.uwN) === n));
       const pl = pn || 'pack';
@@ -1986,7 +2005,7 @@
       $q('#uw-unit-lbl').textContent = uwPlural(un, 2);
       $q('#uw-unit-price-lbl').textContent = un;
       const so = $q('#p-stock-unit');
-      if (so && so.options.length >= 2) { so.options[0].text = `${pn || 'Pack'}s (scanned in)`; so.options[1].text = `Single ${uwPlural(un, 2)}`; }
+      if (so && so.options.length >= 2) { so.options[0].text = `${uwPackPlural(pn || 'Pack', 2)}${n > 1 ? ` (1 ${pn || 'Pack'} = ${uwNum(n)} ${uwPlural(un, n)})` : ''}`; so.options[1].text = `Single ${uwPlural(un, 2)}`; }
 
       const packCost = num('#p-pk-cost');
       const perUnit = n > 0 ? packCost / n : 0;
@@ -2026,7 +2045,27 @@
     ['#p-pk-name', '#p-pk-factor', '#p-pk-cost', '#p-pk-price'].forEach((q) => $q(q).addEventListener('input', refresh));
     upEl.addEventListener('input', () => { syncPrice(); refresh(); });
     if (unitEl) unitEl.addEventListener('change', refresh);
-    $q('#uw-pack-chips').addEventListener('click', (e) => { const c = e.target.closest('[data-uw-pack]'); if (!c) return; nameEl.value = c.dataset.uwPack; refresh(); });
+    $q('#uw-pack-chips').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-uw-pack]'); if (!c) return;
+      if (c.dataset.uwPack === '__other') {
+        otherMode = true;
+        if (UW_PACKS.some((x) => x.toLowerCase() === packName().toLowerCase())) nameEl.value = '';
+        refresh(); nameEl.focus(); return;
+      }
+      otherMode = false; nameEl.value = c.dataset.uwPack; refresh();
+    });
+    $q('#uw-frac-chips').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-uw-frac]'); if (!c || c.disabled) return;
+      const fr = c.dataset.uwFrac; const n = num('#p-pk-factor');
+      const have = Array.from(modal.querySelectorAll('.pk-deal-row')).find((r) => r.dataset.frac === fr);
+      if (have) { have.querySelector('.pk-deal-price').focus(); return; }
+      if (modal.querySelectorAll('.pk-deal-row').length >= 6) { window.UI.toast.error('You can add up to 6 extra options'); return; }
+      const units = Math.round(n * uwFracVal(fr) * 1000) / 1000;
+      const suggest = num('#p-pk-price') > 0 ? num('#p-pk-price') * uwFracVal(fr) : (Number(upEl.value) || 0) * units;
+      $q('#pk-deals').insertAdjacentHTML('beforeend', pkDealRowHtml({ factor: units, retailPrice: suggest > 0 ? Math.round(suggest * 100) / 100 : '' }, fr));
+      refresh();
+      modal.querySelector('#pk-deals .pk-deal-row:last-child .pk-deal-price').focus();
+    });
     $q('#uw-unit-chips').addEventListener('click', (e) => {
       const c = e.target.closest('[data-uw-unit]'); if (!c) return;
       if (unitEl) { unitEl.value = c.dataset.uwUnit; unitEl.dispatchEvent(new Event('change', { bubbles: true })); }
@@ -2036,7 +2075,7 @@
     $q('#pk-deals').addEventListener('input', refresh);
     $q('#pk-deals').addEventListener('click', (e) => { if (e.target.closest('.pk-deal-del')) { e.target.closest('.pk-deal-row').remove(); refresh(); } });
     $q('#pk-add-deal').addEventListener('click', () => {
-      if (modal.querySelectorAll('.pk-deal-row').length >= 5) { window.UI.toast.error('You can add up to 5 extra options'); return; }
+      if (modal.querySelectorAll('.pk-deal-row').length >= 6) { window.UI.toast.error('You can add up to 6 extra options'); return; }
       $q('#pk-deals').insertAdjacentHTML('beforeend', pkDealRowHtml(null));
       modal.querySelector('#pk-deals .pk-deal-row:last-child .pk-deal-qty').focus();
     });
@@ -2046,6 +2085,8 @@
     return {
       isOn: () => on.checked,
       factor: () => num('#p-pk-factor'),
+      packName: () => packName(),
+      unitName: () => uwUnitName(unit()),
       /** { error, focus } or { units, touched, costPrice, factor } - `units` replaces only the PKT / DEAL units, other units are kept. */
       collect() {
         const asUnit = (u, status) => ({ _id: u._id, name: u.name, code: u.code, factor: u.factor, barcode: u.barcode || undefined, wholesalePrice: u.wholesalePrice, retailPrice: u.retailPrice, isWholesaleDefault: !!u.isWholesaleDefault, status: status || u.status });
@@ -2078,7 +2119,8 @@
           const q = Number(qEl.value) || 0; const pr = Number(pEl.value);
           if (!q && !pEl.value) continue; // empty row: ignore
           if (!(q > 0) || (whole && !Number.isInteger(q)) || !pEl.value || !(pr >= 0)) return { error: `Each extra option needs the number of ${uwPlural(uwUnitName(unit()), 2)} and a price`, focus: qEl };
-          const dn = `${uwNum(q)} for ${Math.round(pr * 100) / 100}`;
+          const fr = rows[i].dataset.frac; const isFrac = !!fr && Math.abs(q - n * uwFracVal(fr)) < 1e-6;
+          const dn = isFrac ? `${fr} ${name}` : `${uwNum(q)} for ${Math.round(pr * 100) / 100}`;
           if (seen.has(dn.toLowerCase())) return { error: `The option "${dn}" is listed twice`, focus: qEl };
           seen.add(dn.toLowerCase());
           const prev = oldDeals.find((d) => d.factor === q && d.name === dn);
@@ -2168,7 +2210,6 @@
           </div>
           <span class="field-hint">Tap the copy icon to put this name into the SKU box.</span>
         </div>
-        ${wf ? '' : packetSectionHtml(isEdit ? product : null)}
         <div class="form-row">
           <div class="field">
             <label for="p-sku">SKU</label>
@@ -2199,6 +2240,8 @@
             <input class="input" id="p-brand" name="brand" value="${isEdit ? window.UI.escapeHtml(product.brand || '') : ''}" />
           </div>
         </div>
+
+        ${wf ? '' : packetSectionHtml(isEdit ? product : null)}
 
         ${wf ? window.WholesaleProductForm.html(isEdit ? product : null) : `
         ${!isEdit ? `
@@ -2273,8 +2316,10 @@
           <label class="checkbox-row"><input type="checkbox" id="p-add-stock" /> <span class="text-sm"><strong>Add inventory now</strong> <span class="text-muted">(stock received)</span></span></label>
           <div id="p-stock-fields" style="display:none;margin-top:var(--space-3, 12px)">
             <div class="form-row">
-              <div class="field"><label for="p-stock-qty">Quantity received</label><input class="input" id="p-stock-qty" type="number" min="1" step="any" inputmode="decimal" />
-                <div id="p-stock-unit-wrap" style="display:none;margin-top:6px"><select class="select" id="p-stock-unit" aria-label="Received as"><option value="packets">Packets (scanned in)</option><option value="pieces">Single pieces</option></select><span class="field-hint" id="p-stock-conv"></span></div></div>
+              <div class="field"><label for="p-stock-qty" id="p-stock-qty-lbl">Quantity received</label>
+                <div id="p-stock-unit-wrap" style="display:none;margin-bottom:6px"><label for="p-stock-unit" class="text-xs text-muted">Received as</label><select class="select" id="p-stock-unit" aria-label="Received as"><option value="packets">Packs</option><option value="pieces">Single units</option></select></div>
+                <input class="input" id="p-stock-qty" type="number" min="0" step="any" inputmode="decimal" />
+                <span class="field-hint" id="p-stock-conv" style="display:block;font-weight:600"></span></div>
               <div class="field"><label for="p-stock-batch">Batch number <span class="text-muted" id="p-stock-batch-opt">(optional)</span></label><input class="input" id="p-stock-batch" autocomplete="off" /></div>
             </div>
             <div class="field"><label for="p-stock-expiry">Expiry date <span class="text-muted" id="p-stock-exp-opt">(optional)</span></label><input class="input" id="p-stock-expiry" type="date" style="max-width:220px" /></div>
@@ -2373,9 +2418,15 @@
       const convEl = modal.querySelector('#p-stock-conv');
       const syncConv = () => {
         const q = Number(modal.querySelector('#p-stock-qty').value) || 0; const n = packetCtl.factor();
-        convEl.textContent = packetCtl.isOn() && modal.querySelector('#p-stock-unit').value === 'packets' && q > 0 && n > 1 ? `${q} packet${q === 1 ? '' : 's'} = ${Math.round(q * n * 1000) / 1000} pieces added to stock` : '';
+        const isOn = packetCtl.isOn(); const packs = modal.querySelector('#p-stock-unit').value === 'packets';
+        const pn = packetCtl.packName() || 'Pack'; const un = packetCtl.unitName();
+        const lbl = modal.querySelector('#p-stock-qty-lbl');
+        if (lbl) lbl.textContent = !isOn ? 'Quantity received' : (packs ? `How many ${uwPackPlural(pn, 2)} received?` : `How many ${uwPlural(un, 2)} received?`);
+        convEl.textContent = !isOn || !(q > 0) ? '' : (packs
+          ? (n > 1 ? `${uwNum(q)} ${uwPackPlural(pn, q)} \u00D7 ${uwNum(n)} = ${uwNum(q * n)} ${uwPlural(un, q * n)} added to stock` : '')
+          : `${uwNum(q)} ${uwPlural(un, q)} added to stock${n > 1 ? ` (${uwNum(q / n)} ${uwPackPlural(pn, q / n)})` : ''}`);
       };
-      ['#p-stock-qty', '#p-stock-unit', '#p-pk-factor', '#p-pk-on'].forEach((q) => { const el = modal.querySelector(q); if (el) { el.addEventListener('input', syncConv); el.addEventListener('change', syncConv); } });
+      ['#p-stock-qty', '#p-stock-unit', '#p-pk-factor', '#p-pk-on', '#p-pk-name', '#p-unit'].forEach((q) => { const el = modal.querySelector(q); if (el) { el.addEventListener('input', syncConv); el.addEventListener('change', syncConv); } });
       syncConv();
     }
 
@@ -2515,7 +2566,7 @@
         // Received as a bag / 1/4 bag / any size: stock is kept in the base unit, so convert here (the product has no unit ids yet).
         const ukBase = unitKit && unitKit.active() ? unitKit.stockBase(qty) : null;
         const ukLabel = ukBase != null && ukBase !== qty ? unitKit.stockLabel() : '';
-        stockReq = { branchId, quantity: ukBase != null ? ukBase : (asPackets ? Math.round(qty * packetCtl.factor() * 1000) / 1000 : qty), batchNumber: batchNo || undefined, expiryDate: expiry || undefined, reason: ukLabel ? `Initial stock (${qty} ${ukLabel})` : (asPackets ? `Initial stock (${qty} packets)` : 'Initial stock') };
+        stockReq = { branchId, quantity: ukBase != null ? ukBase : (asPackets ? Math.round(qty * packetCtl.factor() * 1000) / 1000 : qty), batchNumber: batchNo || undefined, expiryDate: expiry || undefined, reason: ukLabel ? `Initial stock (${qty} ${ukLabel})` : (asPackets ? `Initial stock (${qty} ${uwPackPlural(packetCtl.packName() || 'pack', qty)})` : 'Initial stock') };
       }
 
       const payload = {
