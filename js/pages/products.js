@@ -233,7 +233,7 @@
   /** True (and focuses the offending box) when any barcode box in `scope` currently holds a duplicate. */
   async function barcodeBlocked(scope) {
     const inputs = Array.from(scope.querySelectorAll('input[name="barcode"], input[name^="v-barcode-"], #p-pk-barcode'));
-    for (const el of inputs) { if (el._bcCheck && el.value.trim()) await el._bcCheck(); }
+    await Promise.all(inputs.map((el) => (el._bcCheck && el.value.trim() && !el._bcDup ? Promise.race([el._bcCheck(), new Promise((r) => setTimeout(r, 1200))]).catch(() => {}) : null)));
     const bad = inputs.find((el) => el._bcDup);
     if (bad) { window.UI.toast.error('This barcode already exists in the system - change it first'); bad.focus(); return true; }
     return false;
@@ -1799,67 +1799,142 @@
   const pkDealsOf = (product) => pkUnits(product).filter((u) => u.code === DEAL);
   const pkMoney = (n) => `KES ${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
+  /* ------------------------------------------------------------------ *
+   * UNIT CONVERSION WIZARD (replaces the old "Sold in packets?" section)
+   * One guided flow for everything that is bought in bulk and sold in smaller units:
+   *   1. Bulk pack      - what is it called?  (Carton, Bag, Packet, Dozen ...)
+   *   2. Individual unit - what is ONE unit?  (piece, kg, litre ...)  -> also sets the product's base unit
+   *   3. Pack size      - how many units are inside one pack?
+   *   4. Prices         - pack cost, pack price, price of ONE unit, extra selling options (deals) + live profit
+   * Stock stays ONE pool in the base unit. The pack is saved as the PKT unit and the extra options as DEAL units,
+   * so the till, receiving, stickers and the backend keep working exactly as before.
+   * ------------------------------------------------------------------ */
+  const UW_PACKS = ['Packet', 'Carton', 'Bag', 'Box', 'Dozen', 'Bale', 'Crate', 'Sack'];
+  const UW_UNITS = [['piece', 'Piece'], ['kg', 'Kg'], ['g', 'Gram'], ['litre', 'Litre'], ['ml', 'ml'], ['metre', 'Metre'], ['box', 'Box'], ['packet', 'Packet']];
+  const UW_SIZES = [6, 10, 12, 20, 24, 50, 100];
+  const UW_WHOLE_ONLY = ['piece', 'box', 'packet'];            // units that cannot be split: pack sizes must be whole numbers
+  const uwNum = (n) => (Math.round((Number(n) || 0) * 1000) / 1000).toLocaleString('en-KE', { maximumFractionDigits: 3 });
+  const uwPlural = (u, n) => (['kg', 'g', 'ml'].includes(u) || n === 1 ? u : (u === 'box' ? 'boxes' : `${u}s`));
+  const uwUnitName = (u) => (u === 'piece' ? 'piece' : (u || 'unit'));
+
+  function uwInjectStyles() {
+    if (document.getElementById('uw-styles')) return;
+    const st = document.createElement('style'); st.id = 'uw-styles';
+    st.textContent = `
+      #packet-section.uw{border:1.5px solid var(--color-primary,#4f46e5);background:color-mix(in srgb,var(--color-primary,#4f46e5) 4%,transparent);border-radius:14px;padding:14px}
+      .uw-toggle{align-items:flex-start}
+      .uw-toggle small{display:block;font-weight:400;color:var(--color-text-muted,#6b7280);margin-top:2px}
+      .uw-steps{display:flex;gap:6px;margin:12px 0 10px}
+      .uw-dot{flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--color-text-muted,#6b7280)}
+      .uw-dot i{display:flex;width:24px;height:24px;margin:0 auto 3px;border-radius:50%;align-items:center;justify-content:center;font-style:normal;font-size:12px;background:var(--color-surface-2,#f1f2f6);border:1.5px solid var(--color-border,#e5e7eb)}
+      .uw-dot.cur i{border-color:var(--color-primary,#4f46e5);color:var(--color-primary,#4f46e5);background:var(--color-primary-50,#eef2ff)}
+      .uw-dot.done i{background:var(--color-primary,#4f46e5);border-color:var(--color-primary,#4f46e5);color:#fff}
+      .uw-dot.done{color:var(--color-text,#111827)}
+      .uw-step{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e7eb);border-radius:12px;padding:12px;margin-bottom:10px}
+      .uw-q{font-weight:700;font-size:14px;margin-bottom:2px}
+      .uw-q span{display:inline-flex;width:20px;height:20px;border-radius:50%;background:var(--color-primary,#4f46e5);color:#fff;font-size:11px;align-items:center;justify-content:center;margin-right:6px;vertical-align:1px}
+      .uw-help{font-size:12px;color:var(--color-text-muted,#6b7280);margin-bottom:8px}
+      .uw-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+      .uw-chip{min-height:34px;padding:0 13px;border:1px solid var(--color-border,#e5e7eb);border-radius:999px;background:var(--color-surface,#fff);font:inherit;font-size:13px;font-weight:600;cursor:pointer;color:inherit;-webkit-tap-highlight-color:transparent}
+      .uw-chip:hover{border-color:var(--color-primary,#4f46e5)}
+      .uw-chip.on{border-color:var(--color-primary,#4f46e5);color:var(--color-primary,#4f46e5);background:var(--color-primary-50,#eef2ff)}
+      .uw-sentence{margin-top:8px;padding:10px 12px;border-radius:10px;background:var(--color-primary-50,#eef2ff);font-size:14px;line-height:1.5}
+      .uw-sum{padding:10px 12px;border-radius:10px;background:var(--color-surface-2,rgba(127,127,127,.08));font-size:13px;line-height:1.7}
+      .uw-bad{color:#b3140a;font-weight:600}
+      .uw-dealrow{align-items:flex-end;margin-bottom:8px}
+    `;
+    document.head.appendChild(st);
+  }
+
   function pkDealRowHtml(d) {
     const q = d && d.factor ? d.factor : '';
     const pr = d && d.retailPrice != null ? d.retailPrice : '';
     return `
-      <div class="pk-deal-row form-row" style="align-items:flex-end;margin-bottom:var(--space-2)">
-        <div class="field" style="margin-bottom:0"><label>Pieces in the deal</label><input class="input pk-deal-qty" type="number" min="2" step="1" inputmode="numeric" placeholder="3" value="${q}" /></div>
-        <div class="field" style="margin-bottom:0"><label>Deal price (KES)</label><input class="input pk-deal-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="5" value="${pr}" /></div>
-        <button type="button" class="btn btn-ghost btn-sm pk-deal-del" aria-label="Remove deal" title="Remove deal">${window.Icons.get('trash')}</button>
+      <div class="pk-deal-row form-row uw-dealrow">
+        <div class="field" style="margin-bottom:0"><label>Units in this option</label><input class="input pk-deal-qty" type="number" min="0" step="any" inputmode="decimal" placeholder="3" value="${q}" /></div>
+        <div class="field" style="margin-bottom:0"><label>Price for them (KES)</label><input class="input pk-deal-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="5" value="${pr}" /></div>
+        <button type="button" class="btn btn-ghost btn-sm pk-deal-del" aria-label="Remove option" title="Remove option">${window.Icons.get('trash')}</button>
       </div>`;
   }
 
   function packetSectionHtml(product) {
+    uwInjectStyles();
     const pk = pkPacketOf(product);
     const on = !!pk;
+    const esc = window.UI.escapeHtml;
     const factor = pk ? pk.factor : '';
     const packCost = pk && product ? Math.round((Number(product.costPrice) || 0) * pk.factor * 100) / 100 : '';
     const deals = pkDealsOf(product);
+    const unitPrice = pk && product && Number(product.sellingPrice) > 0 ? product.sellingPrice : '';
     return `
-        <div class="field" id="packet-section" style="border:1.5px solid var(--color-primary, #2563eb); background:color-mix(in srgb, var(--color-primary, #2563eb) 5%, transparent); border-radius: var(--radius-md); padding: var(--space-3)">
-          <label class="checkbox-row" style="align-items:flex-start"><input type="checkbox" id="p-pk-on" ${on ? 'checked' : ''} style="margin-top:3px" /> <span class="text-sm font-semibold">Sold in packets? <span class="text-muted" style="font-weight:400">Tick if the supplier gives you packets (e.g. 50 sweets) that you can sell whole or break and sell single pieces. Packet cost and price are entered here; the cost price below is then worked out for you.</span></span></label>
+        <div class="field uw" id="packet-section">
+          <label class="checkbox-row uw-toggle"><input type="checkbox" id="p-pk-on" ${on ? 'checked' : ''} style="margin-top:3px" />
+            <span class="text-sm font-semibold">Unit conversion <small>Buy in bulk (carton, bag, packet...) and sell in smaller units (pieces, kg...). One stock, every size priced with its profit.</small></span></label>
           <div id="pk-fields" style="${on ? '' : 'display:none;'}">
-            <span class="field-hint">Receive and sell the whole packet by scanning its barcode, or break it and sell single pieces. Stock is counted in pieces, so nothing is ever double counted.</span>
-            <div class="form-row" style="margin-top: var(--space-2)">
-              <div class="field" style="margin-bottom: var(--space-2)">
-                <label for="p-pk-name">Packet name</label>
-                <input class="input" id="p-pk-name" maxlength="30" placeholder="Packet" value="${pk ? window.UI.escapeHtml(pk.name) : 'Packet'}" />
-              </div>
-              <div class="field" style="margin-bottom: var(--space-2)">
-                <label for="p-pk-factor">Pieces in one packet</label>
-                <input class="input" id="p-pk-factor" type="number" min="2" step="1" inputmode="numeric" placeholder="e.g. 50" value="${factor}" />
-              </div>
+            <div class="uw-steps" id="uw-steps">
+              <div class="uw-dot" data-d="1"><i>1</i>Bulk pack</div>
+              <div class="uw-dot" data-d="2"><i>2</i>Unit</div>
+              <div class="uw-dot" data-d="3"><i>3</i>Pack size</div>
+              <div class="uw-dot" data-d="4"><i>4</i>Prices</div>
             </div>
-            <div class="field" style="margin-bottom: var(--space-2)">
-              <label for="p-pk-barcode">Packet barcode <span class="text-muted">(the code printed on the supplier's packet)</span></label>
-              <div class="input-button-row">
-                <input class="input" id="p-pk-barcode" value="${pk ? window.UI.escapeHtml(pk.barcode || '') : ''}" placeholder="Scan, type or Generate" autocomplete="off" />
-                ${scanButtonHtml('p-pk-scan-btn')}
-                ${generateButtonHtml('p-pk-gen-btn')}
-              </div>
+
+            <div class="uw-step" id="uw-s1">
+              <div class="uw-q"><span>1</span>What is the bulk pack you buy?</div>
+              <div class="uw-help">Pick one or type your own name.</div>
+              <div class="uw-chips" id="uw-pack-chips">${UW_PACKS.map((n) => `<button type="button" class="uw-chip" data-uw-pack="${n}">${n}</button>`).join('')}</div>
+              <input class="input" id="p-pk-name" maxlength="30" placeholder="e.g. Carton" autocomplete="off" value="${pk ? esc(pk.name) : ''}" />
             </div>
-            <div class="form-row">
-              <div class="field" style="margin-bottom: var(--space-2)">
-                <label for="p-pk-cost">Packet cost price (KES) <span class="text-muted">(what the supplier charges)</span></label>
-                <input class="input" id="p-pk-cost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 200" value="${packCost}" />
-              </div>
-              <div class="field" style="margin-bottom: var(--space-2)">
-                <label for="p-pk-price">Packet selling price (KES)</label>
-                <input class="input" id="p-pk-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 300" value="${pk && pk.retailPrice != null ? pk.retailPrice : ''}" />
-              </div>
+
+            <div class="uw-step" id="uw-s2">
+              <div class="uw-q"><span>2</span>What is ONE individual unit inside it?</div>
+              <div class="uw-help">This is how you count stock and sell the smallest item.</div>
+              <div class="uw-chips" id="uw-unit-chips">${UW_UNITS.map(([v, l]) => `<button type="button" class="uw-chip" data-uw-unit="${v}">${l}</button>`).join('')}</div>
             </div>
-            <div class="field" style="margin-bottom: var(--space-2)">
-              <label>Piece deals <span class="text-muted">(optional, e.g. 3 pieces for KES 5)</span></label>
-              <div id="pk-deals">${deals.map(pkDealRowHtml).join('')}</div>
-              <button type="button" class="btn btn-secondary btn-sm" id="pk-add-deal">${window.Icons.get('plus')} Add a deal</button>
+
+            <div class="uw-step" id="uw-s3">
+              <div class="uw-q"><span>3</span>How many <b id="uw-unit-lbl">units</b> are in one <b id="uw-pack-lbl">pack</b>?</div>
+              <div class="uw-help">The size of the bulk pack in units.</div>
+              <input class="input" id="p-pk-factor" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 24" value="${factor}" style="max-width:200px" />
+              <div class="uw-chips" id="uw-size-chips">${UW_SIZES.map((n) => `<button type="button" class="uw-chip" data-uw-n="${n}">${n}</button>`).join('')}</div>
+              <div class="uw-sentence" id="uw-sentence" style="display:none"></div>
             </div>
-            <div id="pk-summary" class="text-sm" style="padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);background:var(--color-surface-2, rgba(127,127,127,.08))"></div>
+
+            <div class="uw-step" id="uw-s4">
+              <div class="uw-q"><span>4</span>Prices</div>
+              <div class="form-row" style="margin-top:8px">
+                <div class="field" style="margin-bottom:var(--space-2)">
+                  <label for="p-pk-cost"><span id="uw-cost-lbl">Pack</span> cost price (KES) <span class="text-muted">(what the supplier charges)</span></label>
+                  <input class="input" id="p-pk-cost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 200" value="${packCost}" />
+                </div>
+                <div class="field" style="margin-bottom:var(--space-2)">
+                  <label for="p-pk-price"><span id="uw-price-lbl">Pack</span> selling price (KES)</label>
+                  <input class="input" id="p-pk-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 300" value="${pk && pk.retailPrice != null ? pk.retailPrice : ''}" />
+                </div>
+              </div>
+              <div class="field" style="margin-bottom:var(--space-2)">
+                <label for="uw-unit-price">Selling price of ONE <span id="uw-unit-price-lbl">unit</span> (KES)</label>
+                <input class="input" id="uw-unit-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 20" value="${unitPrice}" style="max-width:200px" />
+              </div>
+              <div class="field" style="margin-bottom:var(--space-2)">
+                <label for="p-pk-barcode"><span id="uw-bc-lbl">Pack</span> barcode <span class="text-muted">(the code on the supplier's pack, optional)</span></label>
+                <div class="input-button-row">
+                  <input class="input" id="p-pk-barcode" value="${pk ? esc(pk.barcode || '') : ''}" placeholder="Scan, type or Generate" autocomplete="off" />
+                  ${scanButtonHtml('p-pk-scan-btn')}
+                  ${generateButtonHtml('p-pk-gen-btn')}
+                </div>
+              </div>
+              <div class="field" style="margin-bottom:var(--space-2)">
+                <label>Extra ways to sell <span class="text-muted">(optional, e.g. 3 pieces for KES 5, or half a pack)</span></label>
+                <div id="pk-deals">${deals.map(pkDealRowHtml).join('')}</div>
+                <button type="button" class="btn btn-secondary btn-sm" id="pk-add-deal">${window.Icons.get('plus')} Add an option</button>
+              </div>
+              <div id="pk-summary" class="uw-sum"></div>
+            </div>
           </div>
         </div>`;
   }
 
-  /** Wires the packet section: live cost-per-piece, profit lines, add/remove deals. Returns { collect(), isOn() }. */
+  /** Wires the wizard: progressive steps, live cost / profit / margin, deals. Returns { isOn(), factor(), collect() }. */
   function bindPacketSection(modal, product) {
     const on = modal.querySelector('#p-pk-on');
     if (!on) return null;
@@ -1867,81 +1942,128 @@
     const fields = $q('#pk-fields');
     const costEl = $q('#p-cost');
     const priceEl = $q('#p-price');
+    const unitEl = $q('#p-unit');
+    const nameEl = $q('#p-pk-name');
+    const facEl = $q('#p-pk-factor');
+    const upEl = $q('#uw-unit-price');
     const own = pkPacketOf(product);
+    const num = (q) => Number($q(q).value) || 0;
+    const unit = () => (unitEl && unitEl.value) || 'piece';
+    const packName = () => nameEl.value.trim();
 
     bindBarcodeScanButton($q('#p-pk-scan-btn'), $q('#p-pk-barcode'));
     bindGenerateButton($q('#p-pk-gen-btn'), $q('#p-pk-barcode'));
     bindBarcodeLiveCheck($q('#p-pk-barcode'), modal, () => [own && own.barcode, product && product.barcode, $q('#p-barcode') && $q('#p-barcode').value]);
 
-    const num = (q) => Number($q(q).value) || 0;
+    const syncPrice = () => { if (priceEl && !priceEl.disabled) { priceEl.value = upEl.value; priceEl.dispatchEvent(new Event('input', { bubbles: true })); } };
+
     const refresh = () => {
       const isOn = on.checked;
       fields.style.display = isOn ? '' : 'none';
-      if (costEl) { costEl.readOnly = isOn; const cf = costEl.closest('.field'); if (cf) cf.style.display = isOn ? 'none' : ''; } // one cost only: the packet cost
-      const pl = modal.querySelector('label[for="p-price"]'); if (pl) pl.textContent = isOn ? 'Selling price of ONE piece (KES)' : 'Selling price (KES)';
+      // One cost (the pack cost) and one price (the unit price) are entered in the wizard: hide the plain boxes while it is on.
+      if (costEl) { costEl.readOnly = isOn; const cf = costEl.closest('.field'); if (cf) cf.style.display = isOn ? 'none' : ''; }
+      if (priceEl && !priceEl.disabled) { priceEl.required = !isOn; const pf = priceEl.closest('.field'); if (pf) pf.style.display = isOn ? 'none' : ''; }
       const stockUnit = $q('#p-stock-unit-wrap'); if (stockUnit) stockUnit.style.display = isOn ? '' : 'none';
       const sum = $q('#pk-summary');
       if (!isOn) { if (sum) sum.innerHTML = ''; return; }
+
+      const u = unit(); const un = uwUnitName(u); const pn = packName();
       const n = num('#p-pk-factor');
-      const packCost = num('#p-pk-cost');
-      const perPiece = n > 0 ? packCost / n : 0;
-      if (costEl && n > 0) costEl.value = String(Math.round(perPiece * 10000) / 10000);
-      const piecePrice = priceEl ? Number(priceEl.value) || 0 : 0;
-      const packPrice = num('#p-pk-price');
-      const lines = [];
-      if (n > 1 && packCost > 0) lines.push(`Cost per piece: <b>${pkMoney(Math.round(perPiece * 100) / 100)}</b> (${pkMoney(packCost)} &divide; ${n})`);
-      if (n > 1 && packPrice > 0 && packCost > 0) lines.push(`Whole packet profit: <b style="color:${packPrice >= packCost ? 'inherit' : '#b3140a'}">${pkMoney(packPrice - packCost)}</b>${packPrice < packCost ? ' &mdash; selling below cost!' : ''}`);
-      if (n > 1 && piecePrice > 0 && packCost > 0) lines.push(`Profit per piece sold alone: <b style="color:${piecePrice >= perPiece ? 'inherit' : '#b3140a'}">${pkMoney(piecePrice - perPiece)}</b>${piecePrice < perPiece ? ' &mdash; selling below cost!' : ''}`);
-      modal.querySelectorAll('.pk-deal-row').forEach((row) => {
-        const q = Number(row.querySelector('.pk-deal-qty').value) || 0;
-        const pr = Number(row.querySelector('.pk-deal-price').value) || 0;
-        if (q > 1 && pr > 0 && perPiece > 0) lines.push(`${q} for ${pkMoney(pr)}: profit <b style="color:${pr >= perPiece * q ? 'inherit' : '#b3140a'}">${pkMoney(pr - perPiece * q)}</b>${pr < perPiece * q ? ' &mdash; below cost!' : ''}`);
+      const s1 = !!pn; const s3 = n > 1;
+      $q('#uw-s2').style.display = s1 ? '' : 'none';
+      $q('#uw-s3').style.display = s1 ? '' : 'none';
+      $q('#uw-s4').style.display = s1 && s3 ? '' : 'none';
+      modal.querySelectorAll('#uw-steps .uw-dot').forEach((d) => {
+        const k = Number(d.dataset.d); const done = k === 1 ? s1 : k === 2 ? s1 : k === 3 ? s3 : (s1 && s3 && num('#p-pk-cost') > 0 && Number(upEl.value) > 0);
+        const cur = !done && (k === 1 || (k === 2 && s1) || (k === 3 && s1) || (k === 4 && s1 && s3));
+        d.classList.toggle('done', done); d.classList.toggle('cur', cur && !modal.querySelector('#uw-steps .uw-dot.cur'));
       });
-      sum.innerHTML = lines.length ? lines.join('<br/>') : 'Enter the pieces per packet and the packet cost to see the cost and profit per piece.';
+      modal.querySelectorAll('[data-uw-pack]').forEach((c) => c.classList.toggle('on', c.dataset.uwPack.toLowerCase() === pn.toLowerCase()));
+      modal.querySelectorAll('[data-uw-unit]').forEach((c) => c.classList.toggle('on', c.dataset.uwUnit === u));
+      modal.querySelectorAll('[data-uw-n]').forEach((c) => c.classList.toggle('on', Number(c.dataset.uwN) === n));
+      const pl = pn || 'pack';
+      ['#uw-pack-lbl', '#uw-cost-lbl', '#uw-price-lbl', '#uw-bc-lbl'].forEach((q) => { const e = $q(q); if (e) e.textContent = q === '#uw-pack-lbl' ? pl.toLowerCase() : (pn || 'Pack'); });
+      $q('#uw-unit-lbl').textContent = uwPlural(un, 2);
+      $q('#uw-unit-price-lbl').textContent = un;
+      const so = $q('#p-stock-unit');
+      if (so && so.options.length >= 2) { so.options[0].text = `${pn || 'Pack'}s (scanned in)`; so.options[1].text = `Single ${uwPlural(un, 2)}`; }
+
+      const packCost = num('#p-pk-cost');
+      const perUnit = n > 0 ? packCost / n : 0;
+      if (costEl && n > 0) costEl.value = String(Math.round(perUnit * 10000) / 10000);
+      const sentence = $q('#uw-sentence');
+      if (s3) { sentence.style.display = ''; sentence.innerHTML = `1 <b>${window.UI.escapeHtml(pn)}</b> = <b>${uwNum(n)} ${uwPlural(un, n)}</b>${packCost > 0 ? ` &middot; each ${un} costs <b>${pkMoney(Math.round(perUnit * 100) / 100)}</b>` : ''}`; } else sentence.style.display = 'none';
+
+      const unitPrice = Number(upEl.value) || 0;
+      const packPrice = num('#p-pk-price');
+      const margin = (sell, cost) => (sell > 0 ? ` (${Math.round(((sell - cost) / sell) * 1000) / 10}% margin)` : '');
+      const line = (label, sell, cost) => `${label}: profit <b class="${sell >= cost ? '' : 'uw-bad'}">${pkMoney(Math.round((sell - cost) * 100) / 100)}</b>${margin(sell, cost)}${sell < cost ? ' <span class="uw-bad">&mdash; below cost!</span>' : ''}`;
+      const lines = [];
+      if (s3 && packCost > 0) {
+        if (packPrice > 0) lines.push(line(`Whole ${window.UI.escapeHtml(pn)} sold at ${pkMoney(packPrice)}`, packPrice, packCost));
+        if (unitPrice > 0) lines.push(line(`Each ${un} sold at ${pkMoney(unitPrice)}`, unitPrice, perUnit));
+        modal.querySelectorAll('.pk-deal-row').forEach((row) => {
+          const q = Number(row.querySelector('.pk-deal-qty').value) || 0;
+          const pr = Number(row.querySelector('.pk-deal-price').value) || 0;
+          if (q > 0 && pr > 0) lines.push(line(`${uwNum(q)} ${uwPlural(un, q)} for ${pkMoney(pr)}`, pr, perUnit * q));
+        });
+      }
+      sum.innerHTML = lines.length ? lines.join('<br/>') : 'Enter the pack cost and your prices to see the profit of every size.';
     };
-    // Switching packets on for a product that already exists: what was saved as its cost / price / barcode was the PACKET's.
+
+    // Switching it on for an existing product: what was saved as cost / price / barcode belonged to the whole pack.
     const autofill = () => {
       const bc = $q('#p-barcode'); const pb = $q('#p-pk-barcode');
       if (pb && !pb.value.trim() && bc && bc.value.trim()) pb.value = bc.value.trim();
       if (!own) {
         const c = Number(costEl && costEl.value) || 0; const pr = priceEl ? Number(priceEl.value) || 0 : 0;
         if (!$q('#p-pk-cost').value && c > 0) $q('#p-pk-cost').value = c;
-        if (!$q('#p-pk-price').value && pr > 0 && priceEl) { $q('#p-pk-price').value = pr; priceEl.value = ''; if (priceEl) priceEl.placeholder = 'price of ONE piece'; }
-      }
+        if (!$q('#p-pk-price').value && pr > 0 && priceEl) { $q('#p-pk-price').value = pr; priceEl.value = ''; }
+      } else if (!upEl.value && priceEl && Number(priceEl.value) > 0) upEl.value = priceEl.value;
     };
-    on.addEventListener('change', () => { if (on.checked) autofill(); refresh(); if (on.checked) $q('#p-pk-factor').focus(); });
+    on.addEventListener('change', () => { if (on.checked) autofill(); refresh(); syncPrice(); if (on.checked) { (packName() ? facEl : nameEl).focus(); } });
     $q('#p-barcode') && $q('#p-barcode').addEventListener('change', () => { const pb = $q('#p-pk-barcode'); if (on.checked && pb && !pb.value.trim()) pb.value = $q('#p-barcode').value.trim(); });
-    ['#p-pk-factor', '#p-pk-cost', '#p-pk-price'].forEach((q) => $q(q).addEventListener('input', refresh));
-    if (priceEl) priceEl.addEventListener('input', refresh);
-    modal.querySelector('#pk-deals').addEventListener('input', refresh);
-    modal.querySelector('#pk-deals').addEventListener('click', (e) => { if (e.target.closest('.pk-deal-del')) { e.target.closest('.pk-deal-row').remove(); refresh(); } });
+    ['#p-pk-name', '#p-pk-factor', '#p-pk-cost', '#p-pk-price'].forEach((q) => $q(q).addEventListener('input', refresh));
+    upEl.addEventListener('input', () => { syncPrice(); refresh(); });
+    if (unitEl) unitEl.addEventListener('change', refresh);
+    $q('#uw-pack-chips').addEventListener('click', (e) => { const c = e.target.closest('[data-uw-pack]'); if (!c) return; nameEl.value = c.dataset.uwPack; refresh(); });
+    $q('#uw-unit-chips').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-uw-unit]'); if (!c) return;
+      if (unitEl) { unitEl.value = c.dataset.uwUnit; unitEl.dispatchEvent(new Event('change', { bubbles: true })); }
+      refresh(); facEl.focus();
+    });
+    $q('#uw-size-chips').addEventListener('click', (e) => { const c = e.target.closest('[data-uw-n]'); if (!c) return; facEl.value = c.dataset.uwN; refresh(); $q('#p-pk-cost').focus(); });
+    $q('#pk-deals').addEventListener('input', refresh);
+    $q('#pk-deals').addEventListener('click', (e) => { if (e.target.closest('.pk-deal-del')) { e.target.closest('.pk-deal-row').remove(); refresh(); } });
     $q('#pk-add-deal').addEventListener('click', () => {
-      if (modal.querySelectorAll('.pk-deal-row').length >= 3) { window.UI.toast.error('You can add up to 3 deals'); return; }
+      if (modal.querySelectorAll('.pk-deal-row').length >= 5) { window.UI.toast.error('You can add up to 5 extra options'); return; }
       $q('#pk-deals').insertAdjacentHTML('beforeend', pkDealRowHtml(null));
       modal.querySelector('#pk-deals .pk-deal-row:last-child .pk-deal-qty').focus();
     });
     refresh();
+    if (on.checked) syncPrice();
 
     return {
       isOn: () => on.checked,
       factor: () => num('#p-pk-factor'),
-      /** { error, focus } or { units, costPrice } - `units` replaces only the PKT / DEAL units, other units are kept. */
+      /** { error, focus } or { units, touched, costPrice, factor } - `units` replaces only the PKT / DEAL units, other units are kept. */
       collect() {
-        const keep = (product && product.units ? product.units : [])
-          .filter((u) => u.code !== PKT && u.code !== DEAL)
-          .map((u) => ({ _id: u._id, name: u.name, code: u.code, factor: u.factor, barcode: u.barcode || undefined, wholesalePrice: u.wholesalePrice, retailPrice: u.retailPrice, isWholesaleDefault: !!u.isWholesaleDefault, status: u.status }));
+        const asUnit = (u, status) => ({ _id: u._id, name: u.name, code: u.code, factor: u.factor, barcode: u.barcode || undefined, wholesalePrice: u.wholesalePrice, retailPrice: u.retailPrice, isWholesaleDefault: !!u.isWholesaleDefault, status: status || u.status });
+        const keep = (product && product.units ? product.units : []).filter((u) => u.code !== PKT && u.code !== DEAL).map((u) => asUnit(u));
         if (!on.checked) {
-          // unticked on an existing product: the old packet / deals stop being offered (kept as inactive so old sales still point at them)
-          const old = (product && product.units ? product.units : []).filter((u) => u.code === PKT || u.code === DEAL)
-            .map((u) => ({ _id: u._id, name: u.name, code: u.code, factor: u.factor, barcode: u.barcode || undefined, wholesalePrice: u.wholesalePrice, retailPrice: u.retailPrice, status: 'inactive' }));
+          // unticked on an existing product: the old pack / options stop being offered (kept as inactive so old sales still point at them)
+          const old = (product && product.units ? product.units : []).filter((u) => u.code === PKT || u.code === DEAL).map((u) => asUnit(u, 'inactive'));
           return { units: keep.concat(old), touched: old.length > 0 };
         }
-        const name = $q('#p-pk-name').value.trim();
+        const name = packName();
         const n = num('#p-pk-factor');
         const packCost = num('#p-pk-cost');
-        if (!name) return { error: 'Enter the packet name (e.g. Packet)', focus: $q('#p-pk-name') };
-        if (!(n > 1) || !Number.isInteger(n)) return { error: 'Enter how many pieces are in one packet (a whole number, 2 or more)', focus: $q('#p-pk-factor') };
-        if (!(packCost > 0)) return { error: 'Enter the packet cost price - the cost of each piece is worked out from it', focus: $q('#p-pk-cost') };
+        const whole = UW_WHOLE_ONLY.includes(unit());
+        if (!name) return { error: 'Step 1: enter the name of the bulk pack (e.g. Carton)', focus: nameEl };
+        if (!(n > 1)) return { error: `Step 3: enter how many ${uwPlural(uwUnitName(unit()), 2)} are in one ${name.toLowerCase()} (more than 1)`, focus: facEl };
+        if (whole && !Number.isInteger(n)) return { error: `A ${name.toLowerCase()} must hold a whole number of ${uwPlural(uwUnitName(unit()), 2)}`, focus: facEl };
+        if (!(packCost > 0)) return { error: 'Enter the pack cost price - the cost of each unit is worked out from it', focus: $q('#p-pk-cost') };
+        if (!(Number(upEl.value) > 0)) return { error: `Enter the selling price of ONE ${uwUnitName(unit())}`, focus: upEl };
         const barcode = $q('#p-pk-barcode').value.trim();
         const packPrice = num('#p-pk-price');
         const units = [{
@@ -1952,18 +2074,18 @@
         const rows = Array.from(modal.querySelectorAll('.pk-deal-row'));
         const oldDeals = pkDealsOf(product);
         for (let i = 0; i < rows.length; i++) {
-          const q = Number(rows[i].querySelector('.pk-deal-qty').value) || 0;
-          const pr = Number(rows[i].querySelector('.pk-deal-price').value);
-          if (!q && !rows[i].querySelector('.pk-deal-price').value) continue;
-          if (!(q > 1) || !Number.isInteger(q) || !(pr >= 0) || !rows[i].querySelector('.pk-deal-price').value) return { error: 'Each deal needs a whole number of pieces (2 or more) and a price', focus: rows[i].querySelector('.pk-deal-qty') };
-          const dn = `${q} for ${Math.round(pr * 100) / 100}`;
-          if (seen.has(dn.toLowerCase())) return { error: `The deal "${dn}" is listed twice`, focus: rows[i].querySelector('.pk-deal-qty') };
+          const qEl = rows[i].querySelector('.pk-deal-qty'); const pEl = rows[i].querySelector('.pk-deal-price');
+          const q = Number(qEl.value) || 0; const pr = Number(pEl.value);
+          if (!q && !pEl.value) continue; // empty row: ignore
+          if (!(q > 0) || (whole && !Number.isInteger(q)) || !pEl.value || !(pr >= 0)) return { error: `Each extra option needs the number of ${uwPlural(uwUnitName(unit()), 2)} and a price`, focus: qEl };
+          const dn = `${uwNum(q)} for ${Math.round(pr * 100) / 100}`;
+          if (seen.has(dn.toLowerCase())) return { error: `The option "${dn}" is listed twice`, focus: qEl };
           seen.add(dn.toLowerCase());
           const prev = oldDeals.find((d) => d.factor === q && d.name === dn);
           units.push({ ...(prev ? { _id: prev._id } : {}), name: dn, code: DEAL, factor: q, retailPrice: pr, status: 'active' });
         }
-        // deals removed from the form are switched off (not deleted)
-        oldDeals.filter((d) => !units.some((u) => u._id && String(u._id) === String(d._id)))
+        // options removed from the form are switched off (not deleted)
+        oldDeals.filter((d) => !units.some((x) => x._id && String(x._id) === String(d._id)))
           .forEach((d) => units.push({ _id: d._id, name: d.name, code: DEAL, factor: d.factor, retailPrice: d.retailPrice, status: 'inactive' }));
         return { units: keep.concat(units), touched: true, costPrice: Math.round((packCost / n) * 10000) / 10000, factor: n };
       },
@@ -2033,7 +2155,7 @@
     // Wholesale businesses enter products wholesale-first (retail + unit conversion are optional extras).
     const wf = !!(window.WholesaleProductForm && window.WholesaleProductForm.applies(isEdit ? product : null));
     // Unit conversion (bag -> kg / 500g / 1/4 bag ...): shown on the normal product form (the wholesale form has its own pack fields).
-    const ukOn = !wf && !!(window.UnitKit && window.UnitKit.applies(isEdit ? product : null));
+    const ukOn = !wf && isEdit && hasSizes(product) && !!(window.UnitKit && window.UnitKit.applies(product));
 
     const bodyHtml = `
       <form id="product-form">
@@ -2300,7 +2422,21 @@
       });
     }
 
-    modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
+    const saveBtnEl = modal.querySelector('[data-action="save"]');
+    saveBtnEl.addEventListener('click', async () => {
+      if (saveBtnEl.dataset.busy) return; // ignore double clicks
+      saveBtnEl.dataset.busy = '1';
+      window.UI.setButtonLoading(saveBtnEl, true, 'Saving\u2026');
+      try {
+        await new Promise((r) => requestAnimationFrame(() => r())); // let the spinner paint before any work starts
+        await runSave();
+      } finally {
+        window.UI.setButtonLoading(saveBtnEl, false);
+        delete saveBtnEl.dataset.busy;
+      }
+    });
+
+    async function runSave() {
       const form = modal.querySelector('#product-form');
       if (!form.reportValidity()) return;
       if (await barcodeBlocked(modal)) return;
@@ -2441,14 +2577,13 @@
         }
       }
 
-      const btn = document.getElementById('product-save-btn');
-      window.UI.setButtonLoading(btn, true, 'Saving…');
+      const btn = document.getElementById('product-save-btn'); // already showing the loader (started on click)
 
       try {
         // New product with no barcode: the system creates one (also for variants without a barcode).
         const generated = { main: false, variants: new Set() };
         if (!isEdit) {
-          const used = new Set(await getUsedBarcodes()); // a COPY: codes made here must not leak into the shared list
+          const used = new Set((await Promise.race([getUsedBarcodes(), new Promise((r) => setTimeout(() => r(null), 1500))])) || []); // a COPY: codes made here must not leak into the shared list
           (payload.variants || []).forEach((v) => { if (v.barcode) used.add(String(v.barcode).trim()); });
           if (payload.barcode) used.add(String(payload.barcode).trim());
           (payload.units || []).forEach((u) => { if (u.barcode) used.add(String(u.barcode).trim()); });
@@ -2511,7 +2646,7 @@
       } finally {
         window.UI.setButtonLoading(btn, false);
       }
-    });
+    }
   }
 
   /** Create a product; if a generated barcode was taken meanwhile (another till), generate a new one and retry. */
