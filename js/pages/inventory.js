@@ -945,7 +945,15 @@
             <span class="field-hint" id="adj-current-hint">Select a product to see its current stock.</span>
           </div>
           <div class="field">
-            <label>What happened? (current condition)</label>
+            <label>How do you want to adjust?</label>
+            <div id="adj-mode" style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="btn btn-primary btn-sm" data-mode="delta">Add / remove units</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-mode="count">Enter counted stock</button>
+            </div>
+            <span class="field-hint" id="adj-mode-hint">Say how many to add or remove.</span>
+          </div>
+          <div class="field" id="adj-type-field">
+            <label id="adj-type-label">What happened? (current condition)</label>
             <select class="select" name="type" required>
               <option value="ADJUSTMENT_IN">Add stock (found / counted more / correction)</option>
               <option value="ADJUSTMENT_OUT">Remove stock (counted less / correction)</option>
@@ -956,7 +964,7 @@
           </div>
           <div class="form-row">
             <div class="field"><label id="adj-qty-label">Quantity to add</label><input class="input" name="quantity" type="number" min="1" step="1" inputmode="numeric" autocomplete="off" required /></div>
-            <div class="field"><label>New stock (calculated)</label><input class="input" id="adj-new" type="text" readonly tabindex="-1" placeholder="—" style="font-weight:700" /></div>
+            <div class="field"><label id="adj-new-label">New stock (calculated)</label><input class="input" id="adj-new" type="text" readonly tabindex="-1" placeholder="—" style="font-weight:700" /></div>
           </div>
           <div id="adj-msg" role="alert" style="display:none;margin:0 0 var(--space-3);padding:8px 10px;border-radius:6px;font-weight:600;font-size:13px"></div>
           <div class="field"><label>Reason</label><input class="input" name="reason" required placeholder="e.g. Physical count correction" /></div>
@@ -977,7 +985,9 @@
     const curEl = modal.querySelector('#adj-current');
     const curHint = modal.querySelector('#adj-current-hint');
     const saveBtn = modal.querySelector('#adjust-save-btn');
-    const isAdd = () => typeEl.value === 'ADJUSTMENT_IN';
+    let adjMode = 'delta'; // 'delta' = add / remove units,  'count' = type what is really on the shelf; the system works out the difference
+    const typeField = modal.querySelector('#adj-type-field');
+    const reasonEl = form.querySelector('[name="reason"]');
     const LABELS = { ADJUSTMENT_IN: 'Quantity to add', ADJUSTMENT_OUT: 'Quantity to remove', DAMAGE: 'Quantity damaged', EXPIRED: 'Quantity expired', LOST: 'Quantity lost / stolen' };
     const pool = () => (wh() && locEl ? locEl.value : 'RETAIL');
     // Adjust in any size / with decimals (12.5 kg, 1/4 bag): the picker converts to the base unit.
@@ -991,13 +1001,17 @@
       msgEl.textContent = text;
     };
 
-    /** Works out the new stock and checks the entered value. Returns { ok, qty, newStock, warn }. */
+    /** Works out the change and checks the entered value. Returns { ok, qty, newStock, type, warn, noChange }. qty is always the amount to add / remove. */
     function recalc() {
       qtyEl.style.borderColor = ''; qtyEl.style.boxShadow = ''; newEl.style.color = '';
-      const result = { ok: false, qty: NaN, newStock: NaN, warn: '' };
-      modal.querySelector('#adj-qty-label').textContent = LABELS[typeEl.value] || 'Quantity';
-      if (!selected) { newEl.value = ''; showMsg('', ''); return result; }
-      if (!current) { newEl.value = ''; showMsg('', ''); return result; }
+      const count = adjMode === 'count';
+      const result = { ok: false, qty: NaN, newStock: NaN, type: typeEl.value, warn: '' };
+      modal.querySelector('#adj-qty-label').textContent = count ? 'Counted stock (what is on the shelf now)' : (LABELS[typeEl.value] || 'Quantity');
+      modal.querySelector('#adj-new-label').textContent = count ? 'Difference (calculated)' : 'New stock (calculated)';
+      modal.querySelector('#adj-type-label').textContent = count ? 'Why is there less stock?' : 'What happened? (current condition)';
+      const addOpt = typeEl.querySelector('option[value="ADJUSTMENT_IN"]'); if (addOpt) addOpt.disabled = count;
+      typeField.style.display = count ? 'none' : ''; // in count mode it only appears when stock turns out to be LOWER
+      if (!selected || !current) { newEl.value = ''; showMsg('', ''); return result; }
       const raw = String(qtyEl.value).trim();
       if (raw === '') { newEl.value = ''; showMsg('', ''); return result; }
       const entered = Number(raw);
@@ -1007,10 +1021,28 @@
         newEl.value = ''; showMsg('error', text); return result;
       };
       if (!Number.isFinite(qty)) return bad('Enter a valid number.');
+      if (qty > 1000000) return bad('That quantity is too large. Check the number you typed.');
+
+      if (count) {
+        if (qty < 0) return bad('The counted stock cannot be below 0.');
+        if (qty !== 0 && (uk ? !uk.validBase(qty) : !Number.isInteger(qty))) return bad(fracOk() ? 'That makes a part of a single item. Enter a whole number of items.' : 'Enter a whole number (no decimals).');
+        const diff = Math.round((qty - current.quantity) * 1000) / 1000;
+        if (diff === 0) { newEl.value = '0  (no difference)'; showMsg('warn', `Your count matches the system (${current.quantity}). Nothing to adjust.`); return { ...result, newStock: qty, noChange: true }; }
+        const up = diff > 0; const amount = Math.abs(diff);
+        if (!up && !['ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRED', 'LOST'].includes(typeEl.value)) typeEl.value = 'ADJUSTMENT_OUT';
+        typeField.style.display = up ? 'none' : ''; // stock is lower: let them say why (counted less / damaged / expired / lost)
+        newEl.value = `${up ? '+' : '−'}${amount}  (${amount} ${up ? 'extra' : 'missing'})`;
+        let warn = '';
+        if (up && amount >= 1000 && amount > current.quantity * 10) warn = `Large increase: stock goes from ${current.quantity} to ${qty}. Make sure ${qty} is right.`;
+        else if (!up && qty < current.reserved) warn = `${current.reserved} unit(s) are reserved for orders - the counted stock ${qty} is below that.`;
+        else if (qty === 0) warn = 'This will leave the product out of stock.';
+        showMsg(warn ? 'warn' : '', warn);
+        return { ok: true, qty: amount, newStock: qty, type: up ? 'ADJUSTMENT_IN' : typeEl.value, warn, diff };
+      }
+
       if (qty <= 0) return bad('Quantity must be more than 0. Choose "Remove stock" to reduce stock.');
       if (uk ? !uk.validBase(qty) : !Number.isInteger(qty)) return bad(fracOk() ? 'That makes a part of a single item. Enter a whole number of items.' : 'Enter a whole number (no decimals).');
-      if (qty > 1000000) return bad('That quantity is too large. Check the number you typed.');
-      const add = isAdd();
+      const add = typeEl.value === 'ADJUSTMENT_IN';
       if (!add && qty > current.quantity) return bad(`You cannot remove ${qty}: only ${current.quantity} in stock. New stock cannot go below 0.`);
       const newStock = add ? current.quantity + qty : current.quantity - qty;
       newEl.value = `${Math.round(newStock * 1000) / 1000}  (${add ? '+' : '−'}${qty})`;
@@ -1019,8 +1051,21 @@
       else if (!add && newStock < current.reserved) warn = `${current.reserved} unit(s) are reserved for orders - new stock ${newStock} is below that.`;
       else if (!add && newStock === 0) warn = 'This will leave the product out of stock.';
       showMsg(warn ? 'warn' : '', warn);
-      return { ok: true, qty, newStock, warn };
+      return { ok: true, qty, newStock, type: typeEl.value, warn };
     }
+
+    function setMode(mode) {
+      adjMode = mode;
+      modal.querySelectorAll('#adj-mode [data-mode]').forEach((b) => { const on = b.dataset.mode === mode; b.classList.toggle('btn-primary', on); b.classList.toggle('btn-secondary', !on); });
+      modal.querySelector('#adj-mode-hint').textContent = mode === 'count'
+        ? 'Type the stock you actually counted. The system works out how many are extra or missing and corrects the stock.'
+        : 'Say how many to add or remove.';
+      if (mode === 'count' && !reasonEl.value.trim()) reasonEl.value = 'Physical stock count';
+      if (mode === 'delta' && reasonEl.value === 'Physical stock count') reasonEl.value = '';
+      qtyEl.value = ''; recalc();
+      setTimeout(() => qtyEl.focus(), 30);
+    }
+    modal.querySelector('#adj-mode').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b && b.dataset.mode !== adjMode) setMode(b.dataset.mode); });
 
     async function loadCurrent() {
       const my = ++loadSeq;
@@ -1057,6 +1102,7 @@
     });
     typeEl.addEventListener('change', recalc);
     qtyEl.addEventListener('input', recalc);
+    setMode('delta'); // paints labels and the active switch
     if (locEl) locEl.addEventListener('change', loadCurrent);
     // block characters that make no sense in a whole-number quantity (e, +, -, .)
     qtyEl.addEventListener('keydown', (e) => { if ((fracOk() ? ['e', 'E', '+', '-'] : ['e', 'E', '+', '-', '.', ',']).includes(e.key)) e.preventDefault(); });
@@ -1067,47 +1113,56 @@
       select({ product: preset.product, variant: preset.variant });
     }
 
+    let saving = false;
     saveBtn.addEventListener('click', async () => {
-      if (!selected) return window.UI.toast.error('Select a product first');
-      if (!current) return window.UI.toast.error('Current stock is not loaded yet - wait a moment or try again');
-      const r = recalc();
-      if (!String(qtyEl.value).trim()) { window.UI.toast.error('Enter the quantity'); qtyEl.focus(); return; }
-      if (!r.ok) { window.UI.toast.error(msgEl.textContent || 'Check the quantity'); qtyEl.focus(); return; }
-      if (!form.querySelector('[name="reason"]').value.trim()) { window.UI.toast.error('Enter the reason'); form.querySelector('[name="reason"]').focus(); return; }
-
-      const verb = isAdd() ? 'add' : 'remove';
-      const name = selected.variant ? `${selected.product.name} (${Object.values(selected.variant.attributes || {}).join(', ')})` : selected.product.name;
-      const ok = await window.UI.confirmDialog({
-        title: 'Confirm stock change',
-        message: `${name}: ${verb} ${r.qty}. Stock changes from ${current.quantity} to ${r.newStock}.${r.warn ? ` ${r.warn}` : ''}`,
-        confirmText: 'Yes, save', danger: !isAdd(),
-      });
-      if (!ok) return;
-
-      // the stock may have changed (a sale) while the window was open: re-read it and re-check before saving
+      if (saving) return; // a second tap while it is working does nothing
+      saving = true;
+      window.UI.setButtonLoading(saveBtn, true, 'Saving…'); // react the instant it is tapped; the checks below happen while it spins
       try {
-        const fresh = await fetchCurrentStock(selected.product, selected.variant, pool());
-        if (fresh.quantity !== current.quantity) {
-          current = fresh; curEl.textContent = String(fresh.quantity); recalc();
-          window.UI.toast.error(`Stock changed to ${fresh.quantity} while you were working. Check the new value and save again.`);
-          return;
-        }
-      } catch { /* the server still validates */ }
+        if (!selected) return window.UI.toast.error('Select a product first');
+        if (!current) return window.UI.toast.error('Current stock is not loaded yet - wait a moment or try again');
+        let r = recalc();
+        if (!String(qtyEl.value).trim()) { window.UI.toast.error(adjMode === 'count' ? 'Enter the counted stock' : 'Enter the quantity'); qtyEl.focus(); return; }
+        if (r.noChange) { window.UI.toast.error('Your count matches the stock already recorded - nothing to adjust'); return; }
+        if (!r.ok) { window.UI.toast.error(msgEl.textContent || 'Check the quantity'); qtyEl.focus(); return; }
+        if (adjMode === 'count' && !reasonEl.value.trim()) reasonEl.value = 'Physical stock count';
+        if (!reasonEl.value.trim()) { window.UI.toast.error('Enter the reason'); reasonEl.focus(); return; }
 
-      const values = window.UI.serializeForm(form);
-      window.UI.setButtonLoading(saveBtn, true, 'Saving…');
-      try {
+        // the stock may have changed (a sale) while the window was open: re-read it and re-check BEFORE asking to confirm
+        try {
+          const fresh = await fetchCurrentStock(selected.product, selected.variant, pool());
+          if (fresh.quantity !== current.quantity) {
+            current = fresh; curEl.textContent = String(fresh.quantity); recalc();
+            window.UI.toast.error(`Stock changed to ${fresh.quantity} while you were working. Check the new value and save again.`);
+            return;
+          }
+        } catch { /* the server still validates */ }
+
+        const up = r.type === 'ADJUSTMENT_IN';
+        const name = selected.variant ? `${selected.product.name} (${Object.values(selected.variant.attributes || {}).join(', ')})` : selected.product.name;
+        const message = adjMode === 'count'
+          ? `${name}: you counted ${r.newStock}, the system had ${current.quantity}. ${r.qty} ${up ? 'extra will be added' : 'missing will be removed'} so the stock becomes ${r.newStock}.${r.warn ? ` ${r.warn}` : ''}`
+          : `${name}: ${up ? 'add' : 'remove'} ${r.qty}. Stock changes from ${current.quantity} to ${r.newStock}.${r.warn ? ` ${r.warn}` : ''}`;
+        const ok = await window.UI.confirmDialog({ title: 'Confirm stock change', message, confirmText: 'Yes, save', danger: !up });
+        if (!ok) return;
+
+        const values = window.UI.serializeForm(form);
         await window.Api.post('/inventory/adjust', {
           branchId, productId: selected.product._id, variantId: selected.variant?._id,
-          type: values.type, quantity: uk ? uk.entered() : r.qty, unitId: uk ? uk.unitId() : undefined, reason: values.reason,
+          type: r.type,
+          // counted stock is sent as the exact difference in the base unit; add/remove keeps the unit the user chose
+          quantity: adjMode === 'count' ? r.qty : (uk ? uk.entered() : r.qty),
+          unitId: adjMode === 'count' ? undefined : (uk ? uk.unitId() : undefined),
+          reason: values.reason || reasonEl.value.trim(),
           location: wh() ? (values.location || 'RETAIL') : undefined,
         });
-        window.UI.toast.success(`Stock adjusted: ${current.quantity} → ${r.newStock}`);
+        window.UI.toast.success(adjMode === 'count' ? `Stock corrected: ${current.quantity} → ${r.newStock} (${up ? '+' : '−'}${r.qty})` : `Stock adjusted: ${current.quantity} → ${r.newStock}`);
         window.UI.closeModal();
         afterChange();
       } catch (err) {
         window.UI.toast.error(err.message);
       } finally {
+        saving = false;
         window.UI.setButtonLoading(saveBtn, false);
       }
     });

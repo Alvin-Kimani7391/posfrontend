@@ -1752,23 +1752,34 @@
    * are revealed only while the box is ticked (see the wsToggle handler in openProductModal).
    */
   function wholesaleSectionHtml(product) {
+    uwInjectStyles();
     const on = !!(product && product.wholesaleEnabled);
     const hasVariants = !!(product && product.hasVariants);
     return `
         <div class="field" id="wholesale-section" style="border:1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3)">
           <label class="checkbox-row"><input type="checkbox" name="wholesaleEnabled" id="p-wholesale-on" ${on ? 'checked' : ''} /> <span class="text-sm font-semibold">Also sell wholesale</span></label>
           <div id="wholesale-fields" style="${on ? '' : 'display:none;'}">
-          <span class="field-hint">Once a sale holds at least the minimum order quantity (MOQ) of this product, the till charges the wholesale price automatically. Below it, the normal selling price applies.</span>
-          <div class="form-row" style="margin-top: var(--space-2)">
+          <span class="field-hint">Enter either the price per unit, or the price of the minimum quantity (MOQ) and the price of ONE unit is worked out for you. Once a sale holds at least the MOQ, every unit is charged the wholesale price automatically; below it the normal selling price applies.</span>
+          <div class="uw-seg" id="ws-mode" role="group" aria-label="How do you price wholesale?">
+            <button type="button" data-wsmode="unit" class="on">I know the price per unit</button>
+            <button type="button" data-wsmode="total">I know the price for the MOQ</button>
+          </div>
+          <div class="form-row">
             <div class="field" style="margin-bottom: var(--space-2)">
-              <label for="p-moq">Minimum order quantity (MOQ)</label>
+              <label for="p-moq">Minimum order quantity (MOQ) <span class="text-muted" id="ws-moq-unit">(units)</span></label>
               <input class="input" id="p-moq" name="moq" type="number" step="any" min="0" inputmode="decimal" value="${product && product.moq ? product.moq : ''}" placeholder="e.g. 12" ${on ? '' : 'disabled'} />
             </div>
             <div class="field" style="margin-bottom: var(--space-2)">
-              <label for="p-wprice">Wholesale price per unit (KES)${hasVariants ? ' <span class="text-muted">(default for variants)</span>' : ''}</label>
-              <input class="input" id="p-wprice" name="wholesalePrice" type="number" step="0.01" min="0" inputmode="decimal" value="${product && product.wholesalePrice ? product.wholesalePrice : ''}" placeholder="Lower than the selling price" ${on ? '' : 'disabled'} />
+              <label for="p-wtotal" id="ws-total-lbl">Price for the whole MOQ (KES)</label>
+              <input class="input" id="p-wtotal" type="number" step="any" min="0" inputmode="decimal" value="${product && product.moq && product.wholesalePrice ? Math.round(product.moq * product.wholesalePrice * 100) / 100 : ''}" placeholder="e.g. 400" ${on ? '' : 'disabled'} />
             </div>
           </div>
+          <div class="uw-chips" id="ws-moq-chips" style="display:none"></div>
+          <div class="field" style="margin-bottom: var(--space-2)">
+            <label for="p-wprice" id="ws-unit-lbl">Wholesale price per unit (KES)${hasVariants ? ' <span class="text-muted">(default for variants)</span>' : ''}</label>
+            <input class="input" id="p-wprice" name="wholesalePrice" type="number" step="any" min="0" inputmode="decimal" value="${product && product.wholesalePrice ? product.wholesalePrice : ''}" placeholder="Lower than the selling price" style="max-width:220px" ${on ? '' : 'disabled'} />
+          </div>
+          <div id="ws-summary" class="uw-sum" style="display:none"></div>
           ${!product || !(product.units && product.units.length) ? `
           <div class="form-row" style="margin-top: var(--space-1)">
             <div class="field" style="margin-bottom: var(--space-2)">
@@ -1845,6 +1856,10 @@
       .uw-sum{padding:10px 12px;border-radius:10px;background:var(--color-surface-2,rgba(127,127,127,.08));font-size:13px;line-height:1.7}
       .uw-bad{color:#b3140a;font-weight:600}
       .uw-dealrow{align-items:flex-end;margin-bottom:8px}
+      .uw-seg{display:flex;gap:4px;padding:3px;border-radius:10px;background:var(--color-surface-2,rgba(127,127,127,.1));margin:10px 0 8px}
+      .uw-seg button{flex:1;min-height:36px;padding:4px 8px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:var(--color-text-muted,#6b7280);cursor:pointer}
+      .uw-seg button.on{background:var(--color-surface,#fff);color:var(--color-primary,#4f46e5);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+      .uw-auto{background:var(--color-surface-2,rgba(127,127,127,.08))!important;font-weight:700}
     `;
     document.head.appendChild(st);
   }
@@ -2443,11 +2458,58 @@
     const wsToggle = modal.querySelector('#p-wholesale-on');
     if (wsToggle) {
       const wsFields = modal.querySelector('#wholesale-fields');
+      const wq = (q) => modal.querySelector(q);
+      let wsMode = 'unit';
+      const moqEl = wq('#p-moq'); const totEl = wq('#p-wtotal'); const wpEl = wq('#p-wprice');
+      const r4 = (n) => Math.round(n * 10000) / 10000;
+      const wsCalc = () => {
+        const moq = Number(moqEl.value) || 0;
+        if (wsMode === 'total') { const t = Number(totEl.value) || 0; wpEl.value = moq > 0 && t > 0 ? String(r4(t / moq)) : ''; }
+        else { const p = Number(wpEl.value) || 0; totEl.value = moq > 0 && p > 0 ? String(Math.round(moq * p * 100) / 100) : ''; }
+      };
+      const wsRender = () => {
+        const pk = packetCtl && packetCtl.isOn();
+        const un = pk ? packetCtl.unitName() : 'unit'; const pn = pk ? (packetCtl.packName() || 'pack') : '';
+        const moq = Number(moqEl.value) || 0; const wp = Number(wpEl.value) || 0; const tot = Number(totEl.value) || 0;
+        const unitsLbl = pk ? uwPlural(un, moq) : (moq === 1 ? 'unit' : 'units');
+        wq('#ws-moq-unit').textContent = pk ? '(in ' + uwPlural(un, 2) + ')' : '(units)';
+        wq('#ws-total-lbl').firstChild.textContent = (moq > 0 ? 'Price for ' + uwNum(moq) + ' ' + unitsLbl : 'Price for the whole MOQ') + ' (KES)';
+        wq('#ws-unit-lbl').firstChild.textContent = (wsMode === 'total' ? 'Price per ' + (pk ? un : 'unit') + ' (calculated)' : 'Wholesale price per ' + (pk ? un : 'unit')) + ' (KES) ';
+        wpEl.readOnly = wsMode === 'total'; totEl.readOnly = wsMode !== 'total';
+        wpEl.classList.toggle('uw-auto', wsMode === 'total'); totEl.classList.toggle('uw-auto', wsMode !== 'total');
+        wq('#ws-mode').querySelectorAll('[data-wsmode]').forEach((b) => b.classList.toggle('on', b.dataset.wsmode === wsMode));
+        // quick MOQ chips from the bulk pack (1 carton, 2 cartons ...)
+        const chips = wq('#ws-moq-chips'); const n = pk ? packetCtl.factor() : 0;
+        if (pk && n > 1) {
+          chips.style.display = '';
+          chips.innerHTML = '<span class="text-xs text-muted" style="align-self:center">MOQ as:</span>' + [1, 2, 5, 10].map((k) => '<button type="button" class="uw-chip' + (moq === k * n ? ' on' : '') + '" data-ws-packs="' + k + '">' + k + ' ' + window.UI.escapeHtml(uwPackPlural(pn, k)) + ' (' + uwNum(k * n) + ')</button>').join('');
+        } else { chips.style.display = 'none'; chips.innerHTML = ''; }
+        // live summary with profit against the cost of one unit
+        const sum = wq('#ws-summary'); const sell = Number(wq('#p-price') && wq('#p-price').value) || 0; const cost = Number(wq('#p-cost') && wq('#p-cost').value) || 0;
+        if (moq > 0 && wp > 0) {
+          const lines = ['From <b>' + uwNum(moq) + ' ' + unitsLbl + '</b> every ' + (pk ? un : 'unit') + ' costs <b>' + pkMoney(r4(wp)) + '</b> (' + pkMoney(Math.round(moq * wp * 100) / 100) + ' for ' + uwNum(moq) + ')'];
+          if (cost > 0) lines.push('Profit per ' + (pk ? un : 'unit') + ': <b class="' + (wp >= cost ? '' : 'uw-bad') + '">' + pkMoney(Math.round((wp - cost) * 10000) / 10000) + '</b>' + (wp > 0 ? ' (' + Math.round(((wp - cost) / wp) * 1000) / 10 + '% margin)' : '') + (wp < cost ? ' <span class="uw-bad">&mdash; below cost!</span>' : ''));
+          if (sell > 0 && wp >= sell) lines.push('<span class="uw-bad">Wholesale price must be lower than the normal selling price (' + pkMoney(sell) + ')</span>');
+          else if (sell > 0) lines.push('Customer saves ' + pkMoney(r4(sell - wp)) + ' per ' + (pk ? un : 'unit') + ' (' + Math.round(((sell - wp) / sell) * 1000) / 10 + '% off)');
+          sum.style.display = ''; sum.innerHTML = lines.join('<br/>');
+        } else { sum.style.display = 'none'; sum.innerHTML = ''; }
+      };
+      const wsAll = () => { wsCalc(); wsRender(); };
+      wq('#ws-mode').addEventListener('click', (e) => { const b = e.target.closest('[data-wsmode]'); if (!b) return; wsMode = b.dataset.wsmode; wsAll(); (wsMode === 'total' ? totEl : wpEl).focus(); });
+      wq('#ws-moq-chips').addEventListener('click', (e) => { const b = e.target.closest('[data-ws-packs]'); if (!b) return; moqEl.value = String(Math.round(Number(b.dataset.wsPacks) * packetCtl.factor() * 1000) / 1000); wsAll(); (wsMode === 'total' ? totEl : wpEl).focus(); });
+      [moqEl, totEl, wpEl].forEach((el) => el.addEventListener('input', wsAll));
+      ['#p-price', '#p-cost', '#p-pk-factor', '#p-pk-name', '#p-pk-on', '#p-unit', '#uw-unit-price', '#p-pk-cost'].forEach((q) => { const el = wq(q); if (el) { el.addEventListener('input', wsRender); el.addEventListener('change', wsRender); } });
       const syncWholesale = () => {
         const on = wsToggle.checked;
         if (wsFields) wsFields.style.display = on ? '' : 'none';
-        ['#p-moq', '#p-wprice', '#p-wu-name', '#p-wu-factor'].forEach((q) => { const el = modal.querySelector(q); if (el) el.disabled = !on; });
+        // with Unit conversion ticked the bulk pack is already defined above, so the separate "wholesale pack" boxes are hidden
+        const packOn = !!(packetCtl && packetCtl.isOn());
+        ['#p-wu-name', '#p-wu-factor'].forEach((q) => { const el = modal.querySelector(q); const row = el && el.closest('.form-row'); if (row) row.style.display = packOn ? 'none' : ''; });
+        const wuHint = modal.querySelector('#p-wu-factor') && modal.querySelector('#p-wu-factor').closest('.form-row'); if (wuHint && wuHint.nextElementSibling && wuHint.nextElementSibling.classList.contains('field-hint')) wuHint.nextElementSibling.style.display = packOn ? 'none' : '';
+        wsAll();
+        ['#p-moq', '#p-wtotal', '#p-wprice', '#p-wu-name', '#p-wu-factor'].forEach((q) => { const el = modal.querySelector(q); if (el) el.disabled = !on; });
       };
+      const pkOnEl = modal.querySelector('#p-pk-on'); if (pkOnEl) pkOnEl.addEventListener('change', syncWholesale);
       wsToggle.addEventListener('change', () => {
         syncWholesale();
         if (wsToggle.checked) modal.querySelector('#p-moq').focus();
@@ -2525,7 +2587,7 @@
         const variantsHere = hasVariantRows || (isEdit && product.hasVariants);
         if (!(moqValue > 0)) { window.UI.toast.error('Enter the minimum order quantity (MOQ) for wholesale'); modal.querySelector('#p-moq').focus(); return; }
         if (!variantsHere) {
-          if (!(wholesalePriceValue > 0)) { window.UI.toast.error('Enter the wholesale price per unit'); modal.querySelector('#p-wprice').focus(); return; }
+          if (!(wholesalePriceValue > 0)) { window.UI.toast.error('Enter the wholesale price per unit, or the price for the minimum quantity'); modal.querySelector(modal.querySelector('#p-wprice').readOnly ? '#p-wtotal' : '#p-wprice').focus(); return; }
           if (Number.isFinite(priceValue) && wholesalePriceValue >= priceValue) { window.UI.toast.error('Wholesale price must be lower than the selling price'); modal.querySelector('#p-wprice').focus(); return; }
         }
       }
@@ -2585,7 +2647,7 @@
         if (isEdit) delete payload.defaultDiscount;
         Object.assign(payload, wfRes.payload);
       }
-      if (wsToggle && wholesaleOn && !isEdit) {
+      if (wsToggle && wholesaleOn && !isEdit && !(packetCtl && packetCtl.isOn())) {
         const wuName = (raw.wuName || '').trim();
         const wuFactor = Number(raw.wuFactor) || 0;
         if (wuName || wuFactor) {

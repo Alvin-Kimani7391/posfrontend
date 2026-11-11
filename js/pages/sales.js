@@ -1723,6 +1723,328 @@
     return `<label class="checkbox-row"><input type="checkbox" name="${name}" /> <span class="text-sm">${label}</span></label>`;
   }
 
+  /* QA-UNITCONV-BEGIN ------------------------------------------------------------------------------------------
+   * "Add product" window of the till: UNIT CONVERSION wizard + ALSO SELL WHOLESALE (same behaviour as Products).
+   *   Unit conversion: 1 bulk pack -> 2 individual unit -> 3 pack size -> 4 prices (+ extra ways to sell: 1/4, 1/2, 3/4, own deals)
+   *   Wholesale      : type the price per unit OR the price for the MOQ - the other one is worked out.
+   * Saved as: payload.unit (base unit), payload.units [PKT pack + DEAL options], costPrice per unit, wholesale fields.
+   * ------------------------------------------------------------------------------------------------------------ */
+  const QC_PACKS = ['Packet', 'Carton', 'Bag', 'Box', 'Dozen', 'Bale', 'Crate', 'Sack'];
+  const QC_UNITS = [['piece', 'Piece'], ['kg', 'Kg'], ['g', 'Gram'], ['litre', 'Litre'], ['ml', 'ml'], ['metre', 'Metre'], ['box', 'Box'], ['packet', 'Packet']];
+  const QC_SIZES = [6, 10, 12, 20, 24, 50, 100];
+  const QC_WHOLE = ['piece', 'box', 'packet'];
+  const QC_FRACS = [['1/4', '¼', 0.25], ['1/2', '½', 0.5], ['3/4', '¾', 0.75]];
+  const qcNum = (n) => (Math.round((Number(n) || 0) * 1000) / 1000).toLocaleString('en-KE', { maximumFractionDigits: 3 });
+  const qcR4 = (n) => Math.round(n * 10000) / 10000;
+  const qcR2 = (n) => Math.round(n * 100) / 100;
+  const qcUnitPl = (u, n) => (['kg', 'g', 'ml'].includes(u) || n === 1 ? u : (u === 'box' ? 'boxes' : `${u}s`));
+  const qcPackPl = (p, n) => { const l = String(p || 'pack'); return n === 1 ? l : (/(x|s|ch|sh)$/i.test(l) ? `${l}es` : `${l}s`); };
+
+  function qaInjectStyles() {
+    if (document.getElementById('qc-styles')) return;
+    const st = document.createElement('style'); st.id = 'qc-styles';
+    st.textContent = `
+      #qc-section{border:1.5px solid var(--color-primary,#4f46e5);background:color-mix(in srgb,var(--color-primary,#4f46e5) 4%,transparent);border-radius:14px;padding:14px}
+      #qw-section{border:1px solid var(--color-border,#e5e7eb);border-radius:12px;padding:12px}
+      .qc-tog small{display:block;font-weight:400;color:var(--color-text-muted,#6b7280);margin-top:2px}
+      .qc-steps{display:flex;gap:6px;margin:12px 0 10px}
+      .qc-dot{flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--color-text-muted,#6b7280)}
+      .qc-dot i{display:flex;width:24px;height:24px;margin:0 auto 3px;border-radius:50%;align-items:center;justify-content:center;font-style:normal;font-size:12px;background:var(--color-surface-2,#f1f2f6);border:1.5px solid var(--color-border,#e5e7eb)}
+      .qc-dot.cur i{border-color:var(--color-primary,#4f46e5);color:var(--color-primary,#4f46e5);background:var(--color-primary-50,#eef2ff)}
+      .qc-dot.done i{background:var(--color-primary,#4f46e5);border-color:var(--color-primary,#4f46e5);color:#fff}
+      .qc-step{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e7eb);border-radius:12px;padding:12px;margin-bottom:10px}
+      .qc-q{font-weight:700;font-size:14px;margin-bottom:2px}
+      .qc-q span{display:inline-flex;width:20px;height:20px;border-radius:50%;background:var(--color-primary,#4f46e5);color:#fff;font-size:11px;align-items:center;justify-content:center;margin-right:6px;vertical-align:1px}
+      .qc-help{font-size:12px;color:var(--color-text-muted,#6b7280);margin-bottom:8px}
+      .qc-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+      .qc-chip{min-height:34px;padding:0 13px;border:1px solid var(--color-border,#e5e7eb);border-radius:999px;background:var(--color-surface,#fff);font:inherit;font-size:13px;font-weight:600;cursor:pointer;color:inherit}
+      .qc-chip:hover{border-color:var(--color-primary,#4f46e5)}
+      .qc-chip.on{border-color:var(--color-primary,#4f46e5);color:var(--color-primary,#4f46e5);background:var(--color-primary-50,#eef2ff)}
+      .qc-chip:disabled{opacity:.45;cursor:not-allowed}
+      .qc-sentence{margin-top:8px;padding:10px 12px;border-radius:10px;background:var(--color-primary-50,#eef2ff);font-size:14px;line-height:1.5}
+      .qc-sum{padding:10px 12px;border-radius:10px;background:var(--color-surface-2,rgba(127,127,127,.08));font-size:13px;line-height:1.7;margin-top:8px}
+      .qc-bad{color:#b3140a;font-weight:600}
+      .qc-deal{align-items:flex-end;margin-bottom:8px}
+      .qc-seg{display:flex;gap:4px;padding:3px;border-radius:10px;background:var(--color-surface-2,rgba(127,127,127,.1));margin:10px 0 8px}
+      .qc-seg button{flex:1;min-height:36px;padding:4px 8px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:var(--color-text-muted,#6b7280);cursor:pointer}
+      .qc-seg button.on{background:var(--color-surface,#fff);color:var(--color-primary,#4f46e5);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+      .qc-auto{background:var(--color-surface-2,rgba(127,127,127,.08))!important;font-weight:700}
+    `;
+    document.head.appendChild(st);
+  }
+
+  function qaDealRowHtml(d, frac) {
+    const fr = frac || '';
+    return `<div class="qc-deal form-row" data-frac="${fr}">
+        <div class="field" style="margin-bottom:0"><label>Units in this option${fr ? ` <span class="text-muted">(${fr} pack)</span>` : ''}</label><input class="input qc-deal-qty" type="number" min="0" step="any" inputmode="decimal" placeholder="3" value="${d && d.factor ? d.factor : ''}" /></div>
+        <div class="field" style="margin-bottom:0"><label>Price for them (KES)</label><input class="input qc-deal-price" type="number" min="0" step="any" inputmode="decimal" placeholder="5" value="${d && d.retailPrice !== '' && d.retailPrice != null ? d.retailPrice : ''}" /></div>
+        <button type="button" class="btn btn-ghost btn-sm qc-deal-del" aria-label="Remove option" title="Remove option">&times;</button>
+      </div>`;
+  }
+
+  function qaConvHtml() {
+    qaInjectStyles();
+    return `
+        <div class="field" id="qc-section">
+          <label class="checkbox-row qc-tog"><input type="checkbox" id="qc-on" style="margin-top:3px" />
+            <span class="text-sm font-semibold">Unit conversion <small>Buy in bulk (carton, bag, packet...) and sell in smaller units (pieces, kg...). One stock, every size priced with its profit.</small></span></label>
+          <div id="qc-fields" style="display:none">
+            <div class="qc-steps" id="qc-steps">
+              <div class="qc-dot" data-d="1"><i>1</i>Bulk pack</div><div class="qc-dot" data-d="2"><i>2</i>Unit</div><div class="qc-dot" data-d="3"><i>3</i>Pack size</div><div class="qc-dot" data-d="4"><i>4</i>Prices</div>
+            </div>
+            <div class="qc-step" id="qc-s1">
+              <div class="qc-q"><span>1</span>What is the bulk pack you buy?</div>
+              <div class="qc-help">Pick one, or choose Other and type the exact name you use.</div>
+              <div class="qc-chips" id="qc-pack-chips">${QC_PACKS.map((n) => `<button type="button" class="qc-chip" data-qc-pack="${n}">${n}</button>`).join('')}<button type="button" class="qc-chip" data-qc-pack="__other">Other…</button></div>
+              <div id="qc-pack-other" style="display:none"><input class="input" id="qc-name" maxlength="30" placeholder="Type your own pack name, e.g. Tray, Roll, Jerrycan" autocomplete="off" /></div>
+            </div>
+            <div class="qc-step" id="qc-s2">
+              <div class="qc-q"><span>2</span>What is ONE individual unit inside it?</div>
+              <div class="qc-help">This is how you count stock and sell the smallest item.</div>
+              <div class="qc-chips" id="qc-unit-chips">${QC_UNITS.map(([v, l]) => `<button type="button" class="qc-chip" data-qc-unit="${v}">${l}</button>`).join('')}</div>
+            </div>
+            <div class="qc-step" id="qc-s3">
+              <div class="qc-q"><span>3</span>How many <b id="qc-unit-lbl">pieces</b> are in one <b id="qc-pack-lbl">pack</b>?</div>
+              <div class="qc-help">The size of the bulk pack in units.</div>
+              <input class="input" id="qc-factor" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 24" style="max-width:200px" />
+              <div class="qc-chips" id="qc-size-chips">${QC_SIZES.map((n) => `<button type="button" class="qc-chip" data-qc-n="${n}">${n}</button>`).join('')}</div>
+              <div class="qc-sentence" id="qc-sentence" style="display:none"></div>
+            </div>
+            <div class="qc-step" id="qc-s4" style="display:none">
+              <div class="qc-q"><span>4</span>Prices</div>
+              <div class="form-row" style="margin-top:8px">
+                <div class="field"><label for="qc-cost"><span class="qc-pn">Pack</span> cost price (KES) <span class="text-muted">(what the supplier charges)</span></label><input class="input" id="qc-cost" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 200" /></div>
+                <div class="field"><label for="qc-pprice"><span class="qc-pn">Pack</span> selling price (KES) <span class="text-muted">(optional)</span></label><input class="input" id="qc-pprice" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 300" /></div>
+              </div>
+              <div class="field"><label for="qc-uprice">Selling price of ONE <span id="qc-uprice-lbl">unit</span> (KES)</label><input class="input" id="qc-uprice" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 20" style="max-width:200px" /></div>
+              <div class="field"><label for="qc-pbc"><span class="qc-pn">Pack</span> barcode <span class="text-muted">(the code on the supplier's pack, optional)</span></label><input class="input" id="qc-pbc" autocomplete="off" placeholder="Scan or type" /></div>
+              <div class="field">
+                <label>Extra ways to sell <span class="text-muted">(optional: tap ¼, ½ or ¾ of a pack, or add your own like 3 pieces for KES 5)</span></label>
+                <div id="qc-deals"></div>
+                <div class="qc-chips" id="qc-frac-chips"><span class="text-xs text-muted" style="align-self:center">Quick add:</span>${QC_FRACS.map(([f, sym]) => `<button type="button" class="qc-chip" data-qc-frac="${f}">${sym} pack</button>`).join('')}</div>
+                <button type="button" class="btn btn-secondary btn-sm" id="qc-add-deal">+ Add an option</button>
+              </div>
+              <div id="qc-summary" class="qc-sum"></div>
+            </div>
+          </div>
+        </div>`;
+  }
+
+  function qaWholesaleHtml() {
+    qaInjectStyles();
+    return `
+        <div class="field" id="qw-section">
+          <label class="checkbox-row"><input type="checkbox" id="qw-on" /> <span class="text-sm font-semibold">Also sell wholesale</span></label>
+          <div id="qw-fields" style="display:none">
+            <span class="field-hint">Enter either the price per unit, or the price of the minimum quantity (MOQ) and the price of ONE unit is worked out for you. Once a sale holds at least the MOQ, every unit is charged the wholesale price automatically; below it the normal selling price applies.</span>
+            <div class="qc-seg" id="qw-mode" role="group" aria-label="How do you price wholesale?">
+              <button type="button" data-wsmode="unit" class="on">I know the price per unit</button>
+              <button type="button" data-wsmode="total">I know the price for the MOQ</button>
+            </div>
+            <div class="form-row">
+              <div class="field"><label for="qw-moq">Minimum order quantity (MOQ) <span class="text-muted" id="qw-moq-unit">(units)</span></label><input class="input" id="qw-moq" type="number" step="any" min="0" inputmode="decimal" placeholder="e.g. 12" /></div>
+              <div class="field"><label for="qw-total" id="qw-total-lbl">Price for the whole MOQ (KES)</label><input class="input" id="qw-total" type="number" step="any" min="0" inputmode="decimal" placeholder="e.g. 400" /></div>
+            </div>
+            <div class="qc-chips" id="qw-chips" style="display:none"></div>
+            <div class="field"><label for="qw-price" id="qw-price-lbl">Wholesale price per unit (KES)</label><input class="input" id="qw-price" type="number" step="any" min="0" inputmode="decimal" placeholder="Lower than the selling price" style="max-width:220px" /></div>
+            <div id="qw-summary" class="qc-sum" style="display:none"></div>
+          </div>
+        </div>`;
+  }
+
+  /** Wires the unit conversion wizard. Returns { isOn, factor, packName, unit, unitName, stockAsPacks, onChange(fn), collect() }. */
+  function qaBindConv(modal) {
+    const $q = (q) => modal.querySelector(q);
+    const on = $q('#qc-on'); if (!on) return null;
+    const nameEl = $q('#qc-name'); const facEl = $q('#qc-factor'); const upEl = $q('#qc-uprice');
+    const priceEl = $q('#qa-price'); const costEl = $q('#qa-cost'); const rowEl = $q('#qa-pricerow');
+    let unit = 'piece'; let packChoice = ''; let otherMode = false; const listeners = [];
+    const num = (q) => Number($q(q).value) || 0;
+    const packName = () => (otherMode ? nameEl.value.trim() : packChoice);
+    const frac = (f) => (QC_FRACS.find((x) => x[0] === f) || [])[2];
+
+    const refresh = () => {
+      const isOn = on.checked;
+      $q('#qc-fields').style.display = isOn ? '' : 'none';
+      if (rowEl) rowEl.style.display = isOn ? 'none' : '';
+      if (priceEl) priceEl.required = !isOn;
+      const sw = $q('#qa-stock-unit-wrap'); if (sw) sw.style.display = isOn ? '' : 'none';
+      if (isOn) { // the normal price boxes carry the per-unit values the rest of the form (and the server) uses
+        if (priceEl) priceEl.value = upEl.value;
+        const n0 = num('#qc-factor'); if (costEl && n0 > 0) costEl.value = String(qcR4(num('#qc-cost') / n0));
+      }
+      const pn = packName(); const n = num('#qc-factor'); const un = unit; const whole = QC_WHOLE.includes(un);
+      const s1 = !!pn; const s3 = n > 1;
+      if (isOn) {
+        $q('#qc-s2').style.display = s1 ? '' : 'none'; $q('#qc-s3').style.display = s1 ? '' : 'none'; $q('#qc-s4').style.display = s1 && s3 ? '' : 'none';
+        $q('#qc-pack-other').style.display = otherMode ? '' : 'none';
+        modal.querySelectorAll('#qc-steps .qc-dot').forEach((d) => {
+          const k = Number(d.dataset.d); const done = k <= 2 ? s1 : k === 3 ? s3 : (s1 && s3 && num('#qc-cost') > 0 && num('#qc-uprice') > 0);
+          d.classList.toggle('done', done); d.classList.remove('cur');
+        });
+        const firstOpen = Array.from(modal.querySelectorAll('#qc-steps .qc-dot')).find((d) => !d.classList.contains('done')); if (firstOpen) firstOpen.classList.add('cur');
+        modal.querySelectorAll('[data-qc-pack]').forEach((c) => c.classList.toggle('on', c.dataset.qcPack === '__other' ? otherMode : (!otherMode && c.dataset.qcPack === packChoice)));
+        modal.querySelectorAll('[data-qc-unit]').forEach((c) => c.classList.toggle('on', c.dataset.qcUnit === unit));
+        modal.querySelectorAll('[data-qc-n]').forEach((c) => c.classList.toggle('on', Number(c.dataset.qcN) === n));
+        $q('#qc-pack-lbl').textContent = (pn || 'pack').toLowerCase();
+        $q('#qc-unit-lbl').textContent = qcUnitPl(un, 2);
+        modal.querySelectorAll('.qc-pn').forEach((e) => { e.textContent = pn || 'Pack'; });
+        $q('#qc-uprice-lbl').textContent = un;
+        modal.querySelectorAll('[data-qc-frac]').forEach((c) => {
+          const units = n * frac(c.dataset.qcFrac); const ok = n > 1 && (!whole || Number.isInteger(units)); const sym = QC_FRACS.find((x) => x[0] === c.dataset.qcFrac)[1];
+          c.disabled = !ok; c.title = ok ? '' : `A ${pn || 'pack'} of ${qcNum(n)} ${qcUnitPl(un, n)} cannot be split this way`;
+          c.textContent = ok ? `${sym} ${pn || 'pack'} (${qcNum(units)} ${qcUnitPl(un, units)})` : `${sym} ${pn || 'pack'}`;
+        });
+        const packCost = num('#qc-cost'); const perUnit = n > 0 ? packCost / n : 0;
+        const sent = $q('#qc-sentence');
+        if (s3) { sent.style.display = ''; sent.innerHTML = `1 <b>${esc(pn)}</b> = <b>${qcNum(n)} ${qcUnitPl(un, n)}</b>${packCost > 0 ? ` &middot; each ${esc(un)} costs <b>${fm(qcR2(perUnit))}</b>` : ''}`; } else sent.style.display = 'none';
+        const up = num('#qc-uprice'); const pp = num('#qc-pprice');
+        const line = (label, sell, cost) => `${label}: profit <b class="${sell >= cost ? '' : 'qc-bad'}">${fm(qcR2(sell - cost))}</b>${sell > 0 ? ` (${Math.round(((sell - cost) / sell) * 1000) / 10}% margin)` : ''}${sell < cost ? ' <span class="qc-bad">&mdash; below cost!</span>' : ''}`;
+        const lines = [];
+        if (s3 && packCost > 0) {
+          if (pp > 0) lines.push(line(`Whole ${esc(pn)} sold at ${fm(pp)}`, pp, packCost));
+          if (up > 0) lines.push(line(`Each ${esc(un)} sold at ${fm(up)}`, up, perUnit));
+          modal.querySelectorAll('.qc-deal').forEach((row) => {
+            const q = Number(row.querySelector('.qc-deal-qty').value) || 0; const pr = Number(row.querySelector('.qc-deal-price').value) || 0;
+            if (q > 0 && pr > 0) lines.push(line(`${qcNum(q)} ${qcUnitPl(un, q)} for ${fm(pr)}`, pr, perUnit * q));
+          });
+        }
+        $q('#qc-summary').innerHTML = lines.length ? lines.join('<br/>') : 'Enter the pack cost and your prices to see the profit of every size.';
+      }
+      // stock received (works with or without conversion)
+      const lbl = $q('#qa-qty-lbl'); const hint = $q('#qa-conv-hint'); const so = $q('#qa-stock-unit'); const q = Number($q('#qa-qty') && $q('#qa-qty').value) || 0;
+      if (lbl && hint && so) {
+        if (!isOn) { lbl.innerHTML = 'Opening stock <span class="text-muted">(optional)</span>'; hint.textContent = ''; }
+        else {
+          const packs = so.value === 'packs';
+          so.options[0].text = `${qcPackPl(pn || 'Pack', 2)}${n > 1 ? ` (1 ${pn || 'Pack'} = ${qcNum(n)} ${qcUnitPl(un, n)})` : ''}`; so.options[1].text = `Single ${qcUnitPl(un, 2)}`;
+          lbl.innerHTML = `${packs ? `How many ${esc(qcPackPl(pn || 'pack', 2))} received?` : `How many ${esc(qcUnitPl(un, 2))} received?`} <span class="text-muted">(optional)</span>`;
+          hint.textContent = !(q > 0) ? '' : (packs ? (n > 1 ? `${qcNum(q)} ${qcPackPl(pn, q)} × ${qcNum(n)} = ${qcNum(q * n)} ${qcUnitPl(un, q * n)} added to stock` : '') : `${qcNum(q)} ${qcUnitPl(un, q)} added to stock${n > 1 ? ` (${qcNum(q / n)} ${qcPackPl(pn, q / n)})` : ''}`);
+        }
+      }
+      listeners.forEach((fn) => fn());
+    };
+
+    on.addEventListener('change', () => { if (on.checked) { const pb = $q('#qa-barcode'); if (pb && pb.value.trim() && !$q('#qc-pbc').value.trim()) $q('#qc-pbc').value = pb.value.trim(); } refresh(); if (on.checked) (packName() ? facEl : $q('[data-qc-pack]')).focus(); });
+    ['#qc-name', '#qc-factor', '#qc-cost', '#qc-pprice', '#qc-uprice', '#qa-qty'].forEach((q) => { const el = $q(q); if (el) el.addEventListener('input', refresh); });
+    const so = $q('#qa-stock-unit'); if (so) so.addEventListener('change', refresh);
+    $q('#qc-pack-chips').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-qc-pack]'); if (!c) return;
+      if (c.dataset.qcPack === '__other') { otherMode = true; refresh(); nameEl.focus(); return; }
+      otherMode = false; packChoice = c.dataset.qcPack; refresh();
+    });
+    $q('#qc-unit-chips').addEventListener('click', (e) => { const c = e.target.closest('[data-qc-unit]'); if (!c) return; unit = c.dataset.qcUnit; refresh(); facEl.focus(); });
+    $q('#qc-size-chips').addEventListener('click', (e) => { const c = e.target.closest('[data-qc-n]'); if (!c) return; facEl.value = c.dataset.qcN; refresh(); $q('#qc-cost').focus(); });
+    $q('#qc-frac-chips').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-qc-frac]'); if (!c || c.disabled) return;
+      const fr = c.dataset.qcFrac; const n = num('#qc-factor');
+      const have = Array.from(modal.querySelectorAll('.qc-deal')).find((r) => r.dataset.frac === fr);
+      if (have) { have.querySelector('.qc-deal-price').focus(); return; }
+      if (modal.querySelectorAll('.qc-deal').length >= 6) { window.UI.toast.error('You can add up to 6 extra options'); return; }
+      const units = qcR4(n * frac(fr)); const sg = num('#qc-pprice') > 0 ? num('#qc-pprice') * frac(fr) : num('#qc-uprice') * units;
+      $q('#qc-deals').insertAdjacentHTML('beforeend', qaDealRowHtml({ factor: units, retailPrice: sg > 0 ? qcR2(sg) : '' }, fr));
+      refresh(); modal.querySelector('#qc-deals .qc-deal:last-child .qc-deal-price').focus();
+    });
+    $q('#qc-add-deal').addEventListener('click', () => {
+      if (modal.querySelectorAll('.qc-deal').length >= 6) { window.UI.toast.error('You can add up to 6 extra options'); return; }
+      $q('#qc-deals').insertAdjacentHTML('beforeend', qaDealRowHtml(null, '')); modal.querySelector('#qc-deals .qc-deal:last-child .qc-deal-qty').focus();
+    });
+    $q('#qc-deals').addEventListener('input', refresh);
+    $q('#qc-deals').addEventListener('click', (e) => { if (e.target.closest('.qc-deal-del')) { e.target.closest('.qc-deal').remove(); refresh(); } });
+    refresh();
+
+    return {
+      isOn: () => on.checked, factor: () => num('#qc-factor'), packName, unit: () => unit, unitName: () => unit,
+      stockAsPacks: () => on.checked && !!so && so.value === 'packs',
+      onChange: (fn) => { listeners.push(fn); },
+      /** { error, focus } or { unit, units, costPrice, factor } */
+      collect() {
+        if (!on.checked) return { off: true };
+        const name = packName(); const n = num('#qc-factor'); const packCost = num('#qc-cost'); const whole = QC_WHOLE.includes(unit);
+        if (!name) return { error: 'Step 1: enter the name of the bulk pack (e.g. Carton)', focus: otherMode ? nameEl : $q('[data-qc-pack]') };
+        if (!(n > 1)) return { error: `Step 3: enter how many ${qcUnitPl(unit, 2)} are in one ${name.toLowerCase()} (more than 1)`, focus: facEl };
+        if (whole && !Number.isInteger(n)) return { error: `A ${name.toLowerCase()} must hold a whole number of ${qcUnitPl(unit, 2)}`, focus: facEl };
+        if (!(packCost > 0)) return { error: 'Enter the pack cost price - the cost of each unit is worked out from it', focus: $q('#qc-cost') };
+        if (!(num('#qc-uprice') > 0)) return { error: `Enter the selling price of ONE ${unit}`, focus: upEl };
+        const pp = num('#qc-pprice'); const bc = $q('#qc-pbc').value.trim();
+        const units = [{ name, code: 'PKT', factor: n, barcode: bc || undefined, retailPrice: pp > 0 ? pp : undefined, status: 'active' }];
+        const seen = new Set([name.toLowerCase()]);
+        const rows = Array.from(modal.querySelectorAll('.qc-deal'));
+        for (let i = 0; i < rows.length; i++) {
+          const qEl = rows[i].querySelector('.qc-deal-qty'); const pEl = rows[i].querySelector('.qc-deal-price');
+          const q = Number(qEl.value) || 0; const pr = Number(pEl.value);
+          if (!q && !pEl.value) continue;
+          if (!(q > 0) || (whole && !Number.isInteger(q)) || !pEl.value || !(pr >= 0)) return { error: `Each extra option needs the number of ${qcUnitPl(unit, 2)} and a price`, focus: qEl };
+          const fr = rows[i].dataset.frac; const isFrac = !!fr && Math.abs(q - n * frac(fr)) < 1e-6;
+          const dn = isFrac ? `${fr} ${name}` : `${qcNum(q)} for ${qcR2(pr)}`;
+          if (seen.has(dn.toLowerCase())) return { error: `The option "${dn}" is listed twice`, focus: qEl };
+          seen.add(dn.toLowerCase());
+          units.push({ name: dn, code: 'DEAL', factor: q, retailPrice: pr, status: 'active' });
+        }
+        return { unit, units, costPrice: qcR4(packCost / n), factor: n, sellingPrice: num('#qc-uprice') };
+      },
+    };
+  }
+
+  /** Wires "Also sell wholesale": price per unit OR price for the MOQ. Returns { isOn, collect() }. */
+  function qaBindWholesale(modal, conv) {
+    const $q = (q) => modal.querySelector(q);
+    const on = $q('#qw-on'); if (!on) return null;
+    const moqEl = $q('#qw-moq'); const totEl = $q('#qw-total'); const wpEl = $q('#qw-price');
+    let mode = 'unit';
+    const calc = () => {
+      const moq = Number(moqEl.value) || 0;
+      if (mode === 'total') { const t = Number(totEl.value) || 0; wpEl.value = moq > 0 && t > 0 ? String(qcR4(t / moq)) : ''; }
+      else { const p = Number(wpEl.value) || 0; totEl.value = moq > 0 && p > 0 ? String(qcR2(moq * p)) : ''; }
+    };
+    const render = () => {
+      $q('#qw-fields').style.display = on.checked ? '' : 'none';
+      if (!on.checked) return;
+      const pk = !!(conv && conv.isOn()); const un = pk ? conv.unitName() : 'unit'; const pn = pk ? (conv.packName() || 'pack') : '';
+      const moq = Number(moqEl.value) || 0; const wp = Number(wpEl.value) || 0;
+      const unitsLbl = pk ? qcUnitPl(un, moq) : (moq === 1 ? 'unit' : 'units');
+      $q('#qw-moq-unit').textContent = pk ? `(in ${qcUnitPl(un, 2)})` : '(units)';
+      $q('#qw-total-lbl').textContent = `${moq > 0 ? `Price for ${qcNum(moq)} ${unitsLbl}` : 'Price for the whole MOQ'} (KES)`;
+      $q('#qw-price-lbl').textContent = `${mode === 'total' ? `Price per ${un} (calculated)` : `Wholesale price per ${un}`} (KES)`;
+      wpEl.readOnly = mode === 'total'; totEl.readOnly = mode !== 'total';
+      wpEl.classList.toggle('qc-auto', mode === 'total'); totEl.classList.toggle('qc-auto', mode !== 'total');
+      modal.querySelectorAll('#qw-mode [data-wsmode]').forEach((b) => b.classList.toggle('on', b.dataset.wsmode === mode));
+      const chips = $q('#qw-chips'); const n = pk ? conv.factor() : 0;
+      if (pk && n > 1) {
+        chips.style.display = '';
+        chips.innerHTML = '<span class="text-xs text-muted" style="align-self:center">MOQ as:</span>' + [1, 2, 5, 10].map((k) => `<button type="button" class="qc-chip${moq === k * n ? ' on' : ''}" data-qw-packs="${k}">${k} ${esc(qcPackPl(pn, k))} (${qcNum(k * n)})</button>`).join('');
+      } else { chips.style.display = 'none'; chips.innerHTML = ''; }
+      const sum = $q('#qw-summary'); const sell = Number($q('#qa-price') && $q('#qa-price').value) || 0; const cost = Number($q('#qa-cost') && $q('#qa-cost').value) || 0;
+      if (moq > 0 && wp > 0) {
+        const lines = [`From <b>${qcNum(moq)} ${unitsLbl}</b> every ${esc(un)} costs <b>${fm(qcR4(wp))}</b> (${fm(qcR2(moq * wp))} for ${qcNum(moq)})`];
+        if (cost > 0) lines.push(`Profit per ${esc(un)}: <b class="${wp >= cost ? '' : 'qc-bad'}">${fm(qcR4(wp - cost))}</b> (${Math.round(((wp - cost) / wp) * 1000) / 10}% margin)${wp < cost ? ' <span class="qc-bad">&mdash; below cost!</span>' : ''}`);
+        if (sell > 0 && wp >= sell) lines.push(`<span class="qc-bad">Wholesale price must be lower than the normal selling price (${fm(sell)})</span>`);
+        else if (sell > 0) lines.push(`Customer saves ${fm(qcR4(sell - wp))} per ${esc(un)} (${Math.round(((sell - wp) / sell) * 1000) / 10}% off)`);
+        sum.style.display = ''; sum.innerHTML = lines.join('<br/>');
+      } else { sum.style.display = 'none'; sum.innerHTML = ''; }
+    };
+    const all = () => { calc(); render(); };
+    on.addEventListener('change', () => { all(); if (on.checked) moqEl.focus(); });
+    $q('#qw-mode').addEventListener('click', (e) => { const b = e.target.closest('[data-wsmode]'); if (!b) return; mode = b.dataset.wsmode; all(); (mode === 'total' ? totEl : wpEl).focus(); });
+    $q('#qw-chips').addEventListener('click', (e) => { const b = e.target.closest('[data-qw-packs]'); if (!b) return; moqEl.value = String(Math.round(Number(b.dataset.qwPacks) * conv.factor() * 1000) / 1000); all(); (mode === 'total' ? totEl : wpEl).focus(); });
+    [moqEl, totEl, wpEl].forEach((el) => el.addEventListener('input', all));
+    ['#qa-price', '#qa-cost'].forEach((q) => { const el = $q(q); if (el) { el.addEventListener('input', render); el.addEventListener('change', render); } });
+    if (conv) conv.onChange(() => { if (on.checked) render(); });
+    render();
+    return {
+      isOn: () => on.checked,
+      collect(sellingPrice) {
+        if (!on.checked) return { off: true };
+        const moq = Number(moqEl.value) || 0; const wp = Number(wpEl.value) || 0;
+        if (!(moq > 0)) return { error: 'Enter the minimum order quantity (MOQ) for wholesale', focus: moqEl };
+        if (!(wp > 0)) return { error: 'Enter the wholesale price per unit, or the price for the minimum quantity', focus: mode === 'total' ? totEl : wpEl };
+        if (Number.isFinite(sellingPrice) && wp >= sellingPrice) return { error: 'Wholesale price must be lower than the selling price', focus: mode === 'total' ? totEl : wpEl };
+        return { moq, wholesalePrice: qcR4(wp) };
+      },
+    };
+  }
+  /* QA-UNITCONV-END */
+
   function openBuiltinAddProduct(opts) {
     const user = window.AppShell.getUser();
     if (!window.Permissions.can(user, 'products.create')) {
@@ -1732,9 +2054,11 @@
     if (isOfflineNow()) { window.UI.toast.error('Adding a product needs an internet connection.'); return; }
     const wsOn = isWs();
     const canStock = !wsOn && window.Permissions.can(user, 'inventory.receive');
+    const qaProfile = (window.AppShell.getBusinessProfile && window.AppShell.getBusinessProfile()) || {};
+    const qaWsAllowed = wsOn || !!(window.AppShell.hasFeature && window.AppShell.hasFeature('wholesalePricing')) || ['supermarket', 'general_shop'].includes(qaProfile.businessType);
     const modal = window.UI.openModal({
       title: 'Add product',
-      maxWidth: '520px',
+      maxWidth: '600px',
       bodyHtml: `
         <form id="qa-form">
           <div class="field"><label for="qa-name">Product name</label><input class="input" id="qa-name" name="name" required value="${esc(opts.name || '')}" /></div>
@@ -1745,14 +2069,19 @@
           </div>
           <div class="field"><label for="qa-category">Category <span class="text-muted">(optional)</span></label>
             <select class="select" id="qa-category" name="categoryId"><option value="">No category</option></select></div>
-          <div class="form-row">
-            <div class="field"><label for="qa-price">Selling price (KES)</label><input class="input" id="qa-price" name="sellingPrice" type="number" step="0.01" min="0" inputmode="decimal" required /></div>
-            <div class="field"><label for="qa-cost">Cost price (KES)</label><input class="input" id="qa-cost" name="costPrice" type="number" step="0.01" min="0" inputmode="decimal" value="0" /></div>
+          ${qaConvHtml()}
+          <div class="form-row" id="qa-pricerow">
+            <div class="field"><label for="qa-price">Selling price (KES)</label><input class="input" id="qa-price" name="sellingPrice" type="number" step="any" min="0" inputmode="decimal" required /></div>
+            <div class="field"><label for="qa-cost">Cost price (KES)</label><input class="input" id="qa-cost" name="costPrice" type="number" step="any" min="0" inputmode="decimal" value="0" /></div>
           </div>
           <div class="form-row">
             <div class="field"><label for="qa-tax">Tax rate (%)</label><input class="input" id="qa-tax" name="taxRate" type="number" step="0.01" min="0" max="100" value="0" /></div>
-            ${canStock ? `<div class="field"><label for="qa-qty">Opening stock <span class="text-muted">(optional)</span></label><input class="input" id="qa-qty" type="number" step="any" min="0" inputmode="decimal" placeholder="0" /></div>` : '<div></div>'}
+            ${canStock ? `<div class="field"><label for="qa-qty" id="qa-qty-lbl">Opening stock <span class="text-muted">(optional)</span></label>
+              <div id="qa-stock-unit-wrap" style="display:none;margin-bottom:6px"><select class="select" id="qa-stock-unit" aria-label="Received as"><option value="packs">Packs</option><option value="units">Single units</option></select></div>
+              <input class="input" id="qa-qty" type="number" step="any" min="0" inputmode="decimal" placeholder="0" />
+              <span class="field-hint" id="qa-conv-hint" style="display:block;font-weight:600"></span></div>` : '<div></div>'}
           </div>
+          ${qaWsAllowed ? qaWholesaleHtml() : ''}
           ${(() => {
             const bt = qaTrackingOption('trackBatch', 'Batch tracking', 'batchTracking');
             const et = qaTrackingOption('trackExpiry', 'Expiry dates', 'expiryTracking');
@@ -1776,6 +2105,8 @@
     skuEl.addEventListener('input', () => { skuTouched = true; });
     nameEl.addEventListener('input', () => { if (!skuTouched) skuEl.value = skuFromName(nameEl.value); });
     bindBarcodeLiveCheck(modal.querySelector('#qa-barcode'));
+    const qaConv = qaBindConv(modal);
+    const qaWs = qaBindWholesale(modal, qaConv);
 
     // Expiry is stored on a batch, so tracking expiry always means tracking batches too (same as Products).
     const qaExpiryBox = modal.querySelector('input[name="trackExpiry"]');
@@ -1809,24 +2140,50 @@
       } catch { /* categories are optional */ }
     })();
 
-    modal.querySelector('#qa-save').addEventListener('click', async () => {
+    // A barcode is made ahead of time (while the cashier types) so saving never waits for it.
+    const qaWait = (p, ms, fallback) => Promise.race([p, new Promise((r) => setTimeout(() => r(fallback), ms))]);
+    const qaPreBarcode = opts.barcode ? null : window.BarcodeGuard.generate().catch(() => null);
+    const qaSaveBtn = modal.querySelector('#qa-save');
+    // The loader starts the instant the button is clicked (before any check or network call) and is always reset.
+    qaSaveBtn.addEventListener('click', async () => {
+      if (qaSaveBtn.dataset.busy) return; // ignore double clicks
+      qaSaveBtn.dataset.busy = '1';
+      window.UI.setButtonLoading(qaSaveBtn, true, 'Saving\u2026');
+      try {
+        await new Promise((r) => requestAnimationFrame(() => r())); // let the spinner paint before any work starts
+        await qaRunSave();
+      } finally {
+        if (document.body.contains(qaSaveBtn)) window.UI.setButtonLoading(qaSaveBtn, false);
+        delete qaSaveBtn.dataset.busy;
+      }
+    });
+
+    async function qaRunSave() {
       const form = modal.querySelector('#qa-form');
       if (!form.reportValidity()) return;
       const bcEl = modal.querySelector('#qa-barcode');
-      if (bcEl && bcEl.value.trim()) {
-        await bcEl._bcCheck();
+      if (bcEl && bcEl.value.trim() && bcEl._bcCheck) {
+        await qaWait(Promise.resolve(bcEl._bcCheck()).catch(() => {}), 1200); // never wait long: the server still rejects a real duplicate
         if (bcEl._bcDup) { window.UI.toast.error('This barcode already exists in the system - change it first'); bcEl.focus(); return; }
       }
       const raw = window.UI.serializeForm(form);
-      const price = Number(raw.sellingPrice);
+      const convRes = qaConv ? qaConv.collect() : { off: true };
+      if (convRes.error) { window.UI.toast.error(convRes.error); if (convRes.focus) convRes.focus.focus(); return; }
+      const price = convRes.off ? Number(raw.sellingPrice) : convRes.sellingPrice;
       if (!(price >= 0)) return window.UI.toast.error('Enter the selling price');
+      const wsRes = qaWs ? qaWs.collect(price) : { off: true };
+      if (wsRes.error) { window.UI.toast.error(wsRes.error); if (wsRes.focus) wsRes.focus.focus(); return; }
       const payload = {
         name: raw.name.trim(), sku: raw.sku.trim(), barcode: (raw.barcode || '').trim() || undefined,
-        costPrice: Number(raw.costPrice) || 0, sellingPrice: price, taxRate: Number(raw.taxRate) || 0,
-        unit: 'piece', lowStockThreshold: 5, defaultDiscount: 0, trackInventory: true,
+        costPrice: convRes.off ? (Number(raw.costPrice) || 0) : convRes.costPrice, sellingPrice: price, taxRate: Number(raw.taxRate) || 0,
+        unit: convRes.off ? 'piece' : convRes.unit, lowStockThreshold: 5, defaultDiscount: 0, trackInventory: true,
         trackBatch: !!(raw.trackBatch || raw.trackExpiry), trackExpiry: !!raw.trackExpiry,
       };
+      if (!convRes.off) payload.units = convRes.units;
+      if (!wsRes.off) { payload.wholesaleEnabled = true; payload.moq = wsRes.moq; payload.wholesalePrice = wsRes.wholesalePrice; }
       const qaQty = Number(qaQtyEl ? qaQtyEl.value : 0) || 0;
+      const asPacks = !!(qaConv && qaConv.stockAsPacks());
+      const stockQty = asPacks ? Math.round(qaQty * qaConv.factor() * 1000) / 1000 : qaQty; // stock is always kept in the base unit
       const qaBatchNo = modal.querySelector('#qa-batch') ? modal.querySelector('#qa-batch').value.trim() : '';
       const qaExpiry = modal.querySelector('#qa-expiry') ? modal.querySelector('#qa-expiry').value : '';
       if (raw.categoryId) payload.categoryId = raw.categoryId;
@@ -1834,10 +2191,9 @@
       if (payload.trackExpiry && qaQty > 0 && !qaExpiry) { window.UI.toast.error('Enter the expiry date for this stock'); modal.querySelector('#qa-expiry').focus(); return; }
       let barcodeWasGenerated = false;
       if (!payload.barcode) {
-        try { payload.barcode = await window.BarcodeGuard.generate(); barcodeWasGenerated = true; } catch { /* a barcode is optional */ }
+        const g = await qaWait(qaPreBarcode || window.BarcodeGuard.generate().catch(() => null), 1500, null); // a barcode is optional: never block on it
+        if (g) { payload.barcode = g; barcodeWasGenerated = true; }
       }
-      const btn = modal.querySelector('#qa-save');
-      window.UI.setButtonLoading(btn, true, 'Saving…');
       try {
         let res;
         for (let attempt = 0; ; attempt++) {
@@ -1851,15 +2207,16 @@
         }
         if (barcodeWasGenerated && payload.barcode) window.BarcodeGuard.forget(payload.barcode);
         const product = (res.data && (res.data.product || res.data)) || null;
-        const qty = Number(modal.querySelector('#qa-qty') ? modal.querySelector('#qa-qty').value : 0) || 0;
-        if (product && product._id && qty > 0) {
-          try {
-            await window.Api.post('/inventory/receive', { branchId: window.AppShell.getActiveBranchId(), productId: product._id, quantity: qty, costPrice: payload.costPrice || undefined, batchNumber: qaBatchNo || undefined, expiryDate: qaExpiry || undefined, reason: 'Initial stock' });
-          } catch (e) { window.UI.toast.error(`Product added, but the stock was not received (${e.message}). Use Inventory > Receive stock.`); }
-        }
+        // The product exists: close the window now; stock and the cart line follow right behind.
         window.UI.closeModal();
         retailIndex.invalidate(); retailIndex.load();
         window.UI.toast.success('Product added');
+        if (product && product._id && stockQty > 0) {
+          const packNote = asPacks ? ` (${qaQty} ${qcPackPl(qaConv.packName() || 'pack', qaQty)})` : '';
+          try {
+            await window.Api.post('/inventory/receive', { branchId: window.AppShell.getActiveBranchId(), productId: product._id, quantity: stockQty, costPrice: payload.costPrice || undefined, batchNumber: qaBatchNo || undefined, expiryDate: qaExpiry || undefined, reason: 'Initial stock' + packNote });
+          } catch (e) { window.UI.toast.error(`Product added, but the stock was not received (${e.message}). Use Inventory > Receive stock.`); }
+        }
         if (product && product._id && !wsOn) {
           let full = product;
           try { const { data } = await window.Api.get(`/products/${product._id}`, { branchId: window.AppShell.getActiveBranchId() || undefined }); full = data.product || product; } catch { /* use what we have */ }
@@ -1869,10 +2226,8 @@
       } catch (err) {
         if (err.code === 'VALIDATION_ERROR' && err.errors && err.errors.length) window.UI.applyFormErrors(modal.querySelector('#qa-form'), err.errors);
         else window.UI.toast.error(err.message);
-      } finally {
-        if (document.body.contains(btn)) window.UI.setButtonLoading(btn, false);
       }
-    });
+    }
   }
 
   /* ---- Cart operations ---- */
