@@ -1,74 +1,102 @@
 /**
- * connectivity.js
- * "Is the SERVER reachable?" - not just navigator.onLine (which is true on Wi-Fi with no internet).
+ * connectivity.js  (v2 - fixes the false "You are offline" while the internet is fine)
+ * "Is the SERVER reachable?" - not just navigator.onLine (which is true on Wi-Fi with no internet, and sometimes FALSE with working internet).
  *
- *  - Probes <api origin>/health with a 4 s timeout.
- *  - Goes OFFLINE only after 2 failed probes in a row (or the browser's own 'offline' event), so one
- *    slow request on weak Wi-Fi never flips a till into offline mode in the middle of a sale.
+ *  - Probes <api origin>/health with a 10 s timeout (the old 4 s was too short for a busy server / weak mobile data).
+ *  - Goes OFFLINE only after 3 failed probes in a row. A failed sale/report request, a page change that cancels a
+ *    request, or the browser's own 'offline' event NEVER flips the till offline by themselves - they only trigger a fresh probe.
+ *  - If the normal probe is blocked by CORS but the server still answers (no-cors probe), the till stays ONLINE.
  *  - Goes ONLINE on the first successful probe or any successful API response.
  *  - Probes every 60 s while online and every 8 s while offline.
  *
  *   Connectivity.isOnline()  Connectivity.check()  Connectivity.onChange(fn) -> unsubscribe
  *   Connectivity.reportSuccess() / reportFailure()   (called by api.js)
+ *   Connectivity.info()   -> { online, failures, lastError, lastProbeAt }   (type it in the browser console when diagnosing)
  */
 (function (window) {
   'use strict';
+  const PROBE_TIMEOUT_MS = 10000;
+  const FAILS_TO_GO_OFFLINE = 3;
   const subs = new Set();
-  let online = window.navigator.onLine !== false;
+  let online = true; // start optimistic: the first probe (or the first API call) corrects it
   let failures = 0;
   let timer = null;
   let probing = null;
+  let lastError = '';
+  let lastProbeAt = 0;
 
   function healthUrl() {
     try { return `${new URL(window.APP_CONFIG.API_BASE_URL).origin}/health`; } catch { return null; }
   }
 
-  function set(v) {
+  function set(v, why) {
     if (v === online) return;
     online = v;
+    try { console.info('[Connectivity] ' + (v ? 'ONLINE' : 'OFFLINE') + (why ? ' - ' + why : '')); } catch (e) { /* ignore */ }
     subs.forEach((fn) => { try { fn(online); } catch (e) { console.error(e); } });
     window.dispatchEvent(new CustomEvent('connectivitychange', { detail: { online } }));
   }
 
-  function schedule() {
+  function schedule(ms) {
     clearTimeout(timer);
-    timer = setTimeout(probe, online ? 60000 : 8000);
+    timer = setTimeout(probe, ms || (online ? 60000 : 8000));
+  }
+
+  /** One attempt: true = the server answered (any HTTP status), false = could not reach it. */
+  async function tryOnce(url) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
+    try {
+      await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store', signal: ctrl.signal });
+      return true;
+    } catch (e) {
+      lastError = (e && (e.name + ': ' + e.message)) || 'fetch failed';
+    } finally { clearTimeout(t); }
+    // Second chance: a "no-cors" request succeeds whenever the server is reachable, even if the server's CORS list is wrong.
+    const ctrl2 = new AbortController();
+    const t2 = setTimeout(() => ctrl2.abort(), PROBE_TIMEOUT_MS);
+    try {
+      await fetch(`${url}?t=${Date.now()}`, { mode: 'no-cors', cache: 'no-store', signal: ctrl2.signal });
+      lastError += ' (server reachable, CORS/CORP blocked - fix FRONTEND_URL on the backend)';
+      return true;
+    } catch (e) { return false; } finally { clearTimeout(t2); }
   }
 
   function probe() {
     if (probing) return probing;
     probing = (async () => {
       const url = healthUrl();
-      if (!url) return online;
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 4000);
-      try {
-        await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store', signal: ctrl.signal });
+      if (!url) { schedule(); return online; }
+      lastProbeAt = Date.now();
+      if (await tryOnce(url)) {
         failures = 0;
-        set(true);
-      } catch {
-        failures += 1;
-        if (failures >= 2 || window.navigator.onLine === false) set(false);
-        else setTimeout(probe, 1500); // confirm quickly before declaring offline
-      } finally {
-        clearTimeout(t);
+        set(true, 'server answered');
+        schedule();
+        return online;
       }
+      failures += 1;
+      if (failures >= FAILS_TO_GO_OFFLINE) { set(false, 'server not reachable (' + failures + ' probes failed: ' + lastError + ')'); schedule(); return online; }
+      // not sure yet: confirm again shortly instead of waiting a full minute
+      schedule(failures === 1 ? 1500 : 3000);
       return online;
-    })().finally(() => { probing = null; schedule(); });
+    })().finally(() => { probing = null; });
     return probing;
   }
 
+  // The browser's 'offline' event is only a HINT (it is often wrong on Android, VPNs and shared Wi-Fi): verify with the server.
   window.addEventListener('online', () => { failures = 0; probe(); });
-  window.addEventListener('offline', () => { failures = 2; set(false); schedule(); });
+  window.addEventListener('offline', () => { failures = Math.max(failures, 1); probe(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) probe(); });
 
   window.Connectivity = {
     isOnline: () => online,
     check: probe,
     onChange(fn) { subs.add(fn); return () => subs.delete(fn); },
-    reportSuccess() { failures = 0; set(true); },
-    reportFailure() { failures += 1; if (online) probe(); },
+    reportSuccess() { failures = 0; set(true, 'API call succeeded'); },
+    // A single failed request proves nothing (timeout, cancelled by page change, one bad packet): just re-check the server.
+    reportFailure() { if (online) probe(); },
+    info: () => ({ online, failures, lastError, lastProbeAt: lastProbeAt ? new Date(lastProbeAt).toISOString() : null }),
   };
 
-  schedule();
+  schedule(2000); // first check shortly after the page opens
 })(window);

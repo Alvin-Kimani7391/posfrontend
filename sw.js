@@ -4,10 +4,11 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.8.6-fast-till';
+const VERSION = 'v5.8.7-online-fix';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
+  'Fixed: the app no longer wrongly says you are offline when your internet is working',
   'Much faster till: products appear the instant you search or scan, and completing a sale is quicker',
   'New Access control page: choose what each employee can do, set groups, and change a whole role at once',
   'Much faster: pages open instantly and stop re-downloading files on every tap',

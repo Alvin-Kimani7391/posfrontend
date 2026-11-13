@@ -50,7 +50,8 @@
   }
 
   function networkError() {
-    const deviceOffline = typeof window.navigator !== 'undefined' && window.navigator.onLine === false;
+    // Only say "You're offline" when the browser AND the server check agree (the browser alone is often wrong).
+    const deviceOffline = typeof window.navigator !== 'undefined' && window.navigator.onLine === false && !(window.Connectivity && window.Connectivity.isOnline && window.Connectivity.isOnline());
     return new ApiError(
       deviceOffline ? "You're offline. Reconnect to the internet and try again." : 'Could not reach the server. Check your connection.',
       { code: 'NETWORK_ERROR' }
@@ -248,7 +249,7 @@
   /** The backend sleeps when idle (hosting free tier), which makes the first screens slow. Wake it as soon as any page opens and keep it awake while the app is in use. */
   function wakeBackend() {
     try {
-      const ping = () => { if (!document.hidden && navigator.onLine !== false) fetch(`${window.APP_CONFIG.API_BASE_URL}/health`, { mode: 'no-cors', cache: 'no-store', keepalive: true }).catch(() => {}); };
+      const ping = () => { if (!document.hidden && navigator.onLine !== false) fetch(`${new URL(window.APP_CONFIG.API_BASE_URL).origin}/health`, { mode: 'no-cors', cache: 'no-store', keepalive: true }).catch(() => {}); };
       ping();
       setInterval(ping, 4 * 60 * 1000);
       document.addEventListener('visibilitychange', () => { if (!document.hidden) ping(); });
