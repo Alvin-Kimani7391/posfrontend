@@ -50,7 +50,7 @@
       ${DEMO ? '<div class="inf-demo"><b>Demo mode</b> - sample data only. Nothing here touches your servers.</div>' : ''}
       <div class="inf-top" id="inf-top"></div>
       <div class="tabs" id="inf-tabs">
-        ${[['overview', 'Overview'], ['deployments', 'Deployments'], ['logs', 'Logs'], ['backups', 'Database & backups'], ['controls', 'Controls']]
+        ${[['overview', 'Overview'], ['deployments', 'Deployments'], ['logs', 'Logs'], ['backups', 'Database & backups'], ['database', 'MongoDB health'], ['controls', 'Controls']]
           .map(([k, l]) => `<button class="tab-btn ${k === 'overview' ? 'active' : ''}" data-tab="${k}">${l}</button>`).join('')}
       </div>
       <div id="inf-body" style="margin-top:var(--space-4)"></div>`;
@@ -69,6 +69,7 @@
     $('inf-body').innerHTML = '<div class="inf-card"><div class="skeleton" style="height:14px;width:40%"></div><div class="skeleton" style="height:90px;margin-top:14px"></div></div>';
     if (S.tab === 'deployments') return renderDeployments();
     if (S.tab === 'logs') return renderLogs();
+    if (S.tab === 'database') return renderDatabase();
     return loadOverview();
   }
   function fail(err) {
@@ -76,6 +77,13 @@
     $('inf-body').innerHTML = `<div class="card">${window.UI.emptyStateHtml({ icon: 'alert',
       title: notWired ? 'Infrastructure API not connected yet' : 'Could not load', message: notWired ? 'The /admin/infra endpoints are not on the backend yet. Preview the design with ?demo=1.' : err.message,
       actionHtml: `<a class="btn btn-secondary" href="admin-infra.html?demo=1">Open demo</a>` })}</div>`;
+  }
+
+  function renderDatabase() {
+    if (!window.InfraDB) return fail(new Error('Database module (admin-infra-db.js) is not loaded'));
+    const go = () => window.InfraDB.mount({ api, esc, toast, ago, dur, dot, bar, pct, $, S });
+    if (S.ov) return go();
+    api.get('/admin/infra/overview').then((r) => { S.ov = r.data; topStrip(); go(); }).catch(() => go());
   }
 
   async function loadOverview(silent) {
@@ -199,7 +207,7 @@
         <div class="inf-card"><h3>Database</h3>
           <div class="inf-big">${dot(d.status === 'connected')} ${esc(d.engine)}</div>
           <dl class="inf-kv"><dt>Status</dt><dd>${esc(d.status)}</dd><dt>Size</dt><dd>${d.sizeGb} GB</dd>
-          <dt>Connections</dt><dd>${d.connections} / ${d.maxConnections}</dd><dt>PostgreSQL</dt><dd>${d.pgReady ? 'Ready' : 'Migration not started'}</dd></dl>${bar(cp)}</div>
+          <dt>Connections</dt><dd>${d.connections} / ${d.maxConnections}</dd><dt>Hosting</dt><dd>${esc(d.hosting || '-')}</dd><dt>Replica set</dt><dd>${esc(d.replicaSet || 'n/a')}</dd><dt>Community DB</dt><dd>${d.communityReady ? 'Ready' : 'Not running'}</dd></dl>${bar(cp)}</div>
         <div class="inf-card"><h3>Backups (Cloudflare R2)</h3>
           <div class="inf-big">${dot(bOk)} ${nc ? 'Not set up yet' : bOk ? 'Healthy' : 'Failing'}</div>
           <dl class="inf-kv"><dt>Last success</dt><dd>${ago(b.lastSuccess)}</dd><dt>Encrypted</dt><dd>${b.encrypted ? 'Yes' : 'NO'}</dd>

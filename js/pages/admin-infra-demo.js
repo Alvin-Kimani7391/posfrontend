@@ -52,9 +52,22 @@
     D({ release: '20261031-1120-0c4e8b7', sha: '0c4e8b7', status: 'rolled_back_verified', previous: 'green', ts: ago(6300), health: 'failed after switch', reason: 'post-switch health failed', outcome: 'failed' }),
   ];
 
+  function dbDemo() {
+    const t = (m) => ago(m);
+    return { installed: true, usingCommunity: false, hosting: 'atlas', events: [{ ts: t(30), severity: 'info', message: 'Full backup 20261113T233000Z completed: 84.2 MB encrypted.' }],
+      resourceLog: [{ ts: t(5000), kind: 'initial', detected: { ramMb: 1900, cpus: 1 }, calculated: { mongoCacheMb: 512 }, result: 'applied' }],
+      migration: { steps: { audit: { status: 'ok', ts: t(900), detail: 'Atlas 7.0, 31 collections' }, backup: { status: 'ok', ts: t(880), detail: 'Encrypted copy in R2' } } },
+      guardian: { health: 'ok', generatedAt: t(0), stale: false, ageSec: 20, alerts: [{ id: 'x', severity: 'warning', message: 'Disk is 71% full (70% threshold).', since: t(120), action: 'Plan cleanup or an upgrade.' }],
+        server: { ramMb: 1900, ramAvailMb: 640, cpus: 1, load: [0.3, 0.2, 0.2] }, storage: { disks: { 'Database disk': { totalGb: 40, usedGb: 28.4, usedPct: 71 } } },
+        mongo: { installed: true, running: true, version: '8.0.4', uptimeSec: 400000, latencyMs: 2, connections: { current: 14, available: 800 }, cache: { usedMb: 310, maxMb: 512, dirtyMb: 4 }, replSet: { name: 'rs0', state: 'PRIMARY' }, oplog: { windowHours: 96, maxMb: 1024 }, auth: { enforced: true }, publicExposure: false, dbs: [{ name: 'sixstar', sizeMb: 820, indexMb: 140, collections: 31 }] },
+        resources: { mode: 'normal', modeReasons: [], profile: { profile: 'small', mongoCacheMb: 512, osReserveMb: 450, appReserveMb: 700, workerConcurrency: 1, backup: { zstdLevel: 3, uploadConcurrency: 1 } } },
+        backup: { configured: true, lastFull: { id: '20261113T233000Z', ts: t(30), sizeMb: 84.2, docs: 182000, verifiedAt: t(25) }, fulls: [{ id: '20261113T233000Z', ts: t(30), sizeMb: 84.2, docs: 182000, verifiedAt: t(25) }],
+          chain: { ok: true, segments: 96 }, recovery: { fullOnly: t(30), chainOk: true, pitrFrom: t(30), pitrUntil: t(5) }, restoreTest: { status: 'passed', ts: t(2000) }, r2: { objects: 61, sizeGb: 4.1 }, retention: { daily: 30, weekly: 8, monthly: 12 } } } };
+  }
   function get(path, q) {
     q = q || {};
     if (path.endsWith('/overview')) return overview();
+    if (path.endsWith('/database')) return dbDemo();
     if (path.endsWith('/deployments')) return { items: deployments, promote: { available: true, reason: '' } };
     if (path.endsWith('/logs')) {
       const after = Number(q.after || 0);
