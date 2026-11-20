@@ -123,10 +123,10 @@
   const toProduct = (p) => ({
     _id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, categoryId: p.categoryId,
     sellingPrice: p.sellingPriceCents / 100, wholesaleEnabled: !!p.wholesaleEnabled, moq: p.moq || null, wholesalePrice: p.wholesalePriceCents ? p.wholesalePriceCents / 100 : null, defaultDiscount: (p.defaultDiscountCents || 0) / 100, taxRate: p.taxRate || 0, taxCategory: p.taxCategory,
-    unit: p.unit, productType: p.productType, trackInventory: !!p.trackInventory, trackSerialNumber: !!p.trackSerialNumber, trackBatch: !!p.trackBatch,
+    unit: p.unit, productType: p.productType, trackInventory: !!p.trackInventory, trackSerialNumber: !!p.trackSerialNumber, trackBatch: !!p.trackBatch, trackExpiry: !!p.trackExpiry,
     hasVariants: !!p.hasVariants, status: 'active', variants: [], _offline: true,
   });
-  const FEEDS = ['categories', 'products', 'variants'];
+  const FEEDS = ['categories', 'products', 'variants', 'stock'];
   const DROP_WHEN_INACTIVE = new Set(['products', 'variants', 'registers']);
 
   const Cat = (Offline.catalog = {
@@ -148,6 +148,7 @@
         if (v.barcode) mem.barcodes.set(String(v.barcode), { p, v });
       });
       mem.ready = true;
+      await Offline.stock.loadServer();
     },
     count: () => mem.products.length,
     isReady: () => mem.ready && mem.products.length > 0,
@@ -198,6 +199,7 @@
         await DB.kvSet('catalogSyncedAt', new Date().toISOString());
         await DB.kvSet('catalogVersion', new Date().toISOString());
         if (changed || !mem.ready) await Cat.load();
+        else await Offline.stock.loadServer();
         await Cat.pruneIfDue();
         Cat.progress = null;
         Offline.emit('catalog', null);
@@ -224,6 +226,60 @@
     },
     version: async () => (await DB.kvGet('catalogVersion')) || 'none',
     registers: async () => ((C.get() || {}).registers || []).map((r) => ({ _id: r.id, name: r.name, code: r.code })),
+  });
+
+  /* ------------------------------ stock (offline receive / adjust + what is in stock) ------------------------------
+   * available(productId) = branch stock the server last told us + what still waits in the outbox
+   * (offline sales take stock away; offline receives / adjustments add or remove). null = unknown (never block a sale on it).
+   * receive() / adjust() write STOCK_RECEIVE / STOCK_ADJUST into the SAME ordered outbox as sales, so the server applies
+   * the stock first and the sale that needed it afterwards. */
+  const stockMem = new Map(); let pendingDelta = new Map(); const deltaCache = new Map();
+  const skey = (p, v) => `${p}|${v || ''}`;
+  const STOCK_TYPES = new Set(['STOCK_RECEIVE', 'STOCK_ADJUST']);
+  const OUT_ADJ = new Set(['ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRED', 'LOST']);
+  const deltasOf = (type, b) => {
+    if (type === 'SALE') return (b.items || []).map((i) => ({ k: skey(i.productId, i.variantId), d: -(Number(i.quantity) || 0) * (Number(i.unitFactor) || 1) }));
+    if (type === 'STOCK_RECEIVE') return [{ k: skey(b.productId, b.variantId), d: Math.abs(Number(b.quantity) || 0) }];
+    if (type === 'STOCK_ADJUST') return [{ k: skey(b.productId, b.variantId), d: (OUT_ADJ.has(b.adjustType) ? -1 : 1) * Math.abs(Number(b.quantity) || 0) }];
+    return [];
+  };
+  const St = (Offline.stock = {
+    async loadServer() { stockMem.clear(); (await DB.getAll('stock')).forEach((r) => stockMem.set(skey(r.productId, r.variantId), r)); try { await St.rebuildPending(); } catch { /* outbox not ready yet */ } },
+    async rebuildPending() {
+      const rows = await Out.list(); const live = new Set(); const m = new Map();
+      for (const r of rows) {
+        if (r.type !== 'SALE' && !STOCK_TYPES.has(r.type)) continue;
+        live.add(r.outboxSeq);
+        if (!deltaCache.has(r.outboxSeq)) deltaCache.set(r.outboxSeq, deltasOf(r.type, await DB.vault.decrypt(r.blob)));
+        deltaCache.get(r.outboxSeq).forEach((x) => m.set(x.k, (m.get(x.k) || 0) + x.d));
+      }
+      [...deltaCache.keys()].forEach((k) => { if (!live.has(k)) deltaCache.delete(k); });
+      pendingDelta = m;
+    },
+    allowNegative: () => !!(C.get() && C.get().business && C.get().business.allowNegativeStock),
+    known: (productId, variantId) => stockMem.has(skey(productId, variantId)),
+    /** Quantity on hand for this till right now (base units), or null when this till has no stock figure for the product. */
+    available(productId, variantId) {
+      const row = stockMem.get(skey(productId, variantId));
+      if (!row && !stockMem.size) return null; // the stock feed has not downloaded yet: unknown
+      // no stock row after the feed has downloaded = nothing was ever received = 0 on hand
+      return Math.round((((row && Number(row.quantity)) || 0) + (pendingDelta.get(skey(productId, variantId)) || 0)) * 1000) / 1000;
+    },
+    async _queue(type, fields) {
+      const chk = Offline.sales.check();
+      if (!chk.ok) throw new Error(chk.reason);
+      const g = chk.grant; const cid = uid(); const at = new Date(T.now()).toISOString();
+      const body = { type, clientEventId: cid, occurredAt: at, grant: g.grant, ...fields };
+      Object.keys(body).forEach((k) => body[k] === undefined && delete body[k]);
+      await Out.enqueue(type, body, { ref: cid, soldAt: at, totalCents: 0 });
+      Offline.sync.kick();
+      return { clientEventId: cid, available: St.available(fields.productId, fields.variantId) };
+    },
+    /** { productId, variantId?, quantity (base units), costPriceCents?, batchNumber?, manufacturingDate?, expiryDate?, reason? } */
+    receive: (o) => St._queue('STOCK_RECEIVE', o),
+    /** { productId, variantId?, quantity (> 0), adjustType, reason } */
+    adjust: (o) => St._queue('STOCK_ADJUST', o),
+    caps: () => { const a = Offline.auth && Offline.auth.activeGrant && Offline.auth.activeGrant(); return (a && a.caps) || {}; },
   });
 
   /* ------------------------------ outbox ------------------------------ */
@@ -263,6 +319,7 @@
       const p = await Out.pending();
       pendingCache.count = p.count; pendingCache.sales = p.sales; pendingCache.valueCents = p.valueCents;
       pendingCache.issues = await DB.count('issues');
+      try { await Offline.stock.rebuildPending(); } catch (e) { console.warn('[offline] stock overlay', e.message); }
       Offline.emit('pending', pendingCache);
       return p;
     },
@@ -345,6 +402,7 @@
     S.state = 'syncing'; S.error = null; Offline.emit('sync', S);
     try {
       await pushAll();
+      Cat.sync().catch(() => {}); // server applied our sales / stock events: take its fresh stock figures
       S._fails = 0; S.lastSyncAt = Date.now(); S.state = 'idle'; S.error = null;
       await DB.kvSet('lastSyncAt', S.lastSyncAt);
     } catch (err) {

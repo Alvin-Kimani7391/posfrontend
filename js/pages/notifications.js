@@ -217,12 +217,12 @@
     'openingCash', 'expectedCash', 'actualCash', 'cashDifference', 'denominationTotal',
     'amount', 'total', 'subtotal', 'newBalance', 'creditLimit', 'availableCredit', 'outstandingBalance',
     'shortageAmount', 'paymentAmount', 'totalPaid', 'balance',
-    'changeDue', 'changeGiven', 'amountTendered', 'cashReceived',
+    'changeDue', 'changeGiven', 'amountTendered', 'cashReceived', 'difference',
   ]);
 
   const LABELS = {
     openingCash: 'Opening float', expectedCash: 'Expected cash', actualCash: 'Counted cash',
-    cashDifference: 'Difference', denominationTotal: 'Total counted', cashSaleCount: 'Cash sales',
+    cashDifference: 'Difference', difference: 'Difference (vs list price)', denominationTotal: 'Total counted', cashSaleCount: 'Cash sales',
     shortageAmount: 'Shortage', paymentAmount: 'Payment', totalPaid: 'Repaid so far', balance: 'Still owing',
     newBalance: 'New balance', creditLimit: 'Credit limit', availableCredit: 'Available credit',
     outstandingBalance: 'Outstanding balance', receiptNumber: 'Receipt', customerName: 'Customer',
@@ -332,6 +332,7 @@
   }
 
   function formatValue(key, v) {
+    if (key === 'difference' && typeof v === 'number') return `${v > 0 ? '+' : v < 0 ? '-' : ''}${moneyC(Math.abs(v))}`; // cents, signed
     if (MONEY_KEYS.has(key) && typeof v === 'number') return moneyC(v);
     if (/At$/.test(key) && v) return window.UI.formatDateTime(v);
     if (/Seconds$/.test(key) && Number.isFinite(Number(v))) return esc(window.UI.formatDuration(Number(v)));

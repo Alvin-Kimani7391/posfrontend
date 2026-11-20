@@ -153,7 +153,7 @@
     lastAdded: null, // key of the last product added
     currentShift: null,
     flags: { ...DEFAULT_FLAGS },
-    history: { page: 1, limit: 10, search: '', from: '', to: '', channel: '' },
+    history: { page: 1, limit: 10, search: '', from: '', to: '', channel: '', offline: '' },
     mode: 'RETAIL', // 'RETAIL' | 'WHOLESALE' (wholesale only exists for businesses with warehouses)
     dueDate: '', // wholesale: when the credit part of an invoice is due (YYYY-MM-DD)
     pharmacy: {}, // pharmacy: { sig, rx, countersign, poisonsBook } collected before payment (see js/core/pharmacy-till.js)
@@ -2371,37 +2371,68 @@
     } catch { return true; } // never block a sale just because the hint could not be loaded
   }
 
+  const stockFixBusy = new Set();
+  /** How much of this product is on hand: server figure online, the till's own figure (+ queued sales / receives) offline. null = unknown. */
+  async function availableStock(product) {
+    if (isOfflineNow()) {
+      const S = window.Offline && window.Offline.stock;
+      if (!S || S.allowNegative()) return null;
+      return S.available(product._id, null);
+    }
+    const { data } = await window.Api.get('/products/stock-levels', { ids: product._id, branchId: window.AppShell.getActiveBranchId() || undefined });
+    if (data.allowNegativeStock) return null;
+    const st = data.stock && data.stock[product._id];
+    if (!st || !st.tracked) return null;
+    return Math.max(0, Number(st.quantity) || 0);
+  }
+  /** Trims the cart lines of this product so they fit `avail` (a kg line is cut by the exact excess). */
+  function trimCartToStock(product, key, avail) {
+    const lines = state.cart.filter((l) => !l.ws && !l.variant && String(l.product._id) === String(product._id));
+    const inCart = lines.reduce((t, l) => t + l.quantity * lineFactorOf(l), 0);
+    if (inCart <= avail + 1e-6) return false;
+    let excess = inCart - avail;
+    const ordered = [...lines.filter((l) => keyOf(l) === key), ...lines.filter((l) => keyOf(l) !== key)];
+    for (const l of ordered) {
+      if (excess <= 1e-6) break;
+      const f = lineFactorOf(l);
+      const cut = allowsFraction(l)
+        ? Math.min(l.quantity, Math.ceil((excess / f) * 1000 - 1e-6) / 1000)
+        : Math.min(l.quantity, Math.ceil(excess / f - 1e-9));
+      l.quantity = qty3(l.quantity - cut); excess -= cut * f;
+      if (l.quantity <= 0) state.cart.splice(state.cart.indexOf(l), 1); else syncAutoDiscount(l);
+    }
+    renderCart();
+    return true;
+  }
   /**
-   * STOCK GUARD at add-to-cart: tells the cashier at once when an item is out of stock or only N are left.
-   * Decimal-safe: a kg line is cut by the exact excess (2.5 asked, 1.2 in stock -> 1.2); whole-unit lines stay whole.
-   * Skipped offline, for untracked items, for variants, and when the business allows negative stock. The server still checks at Complete sale.
+   * STOCK GUARD at add-to-cart (online AND offline). Out of stock / short: instead of silently dropping the item, the
+   * "Fix stock" window (sales-stockfix.js) lets the cashier receive stock, adjust stock, or cancel (item leaves the cart).
+   * Skipped for untracked items, for variants, and when the business allows negative stock. The server still checks at Complete sale.
    */
   const lineFactorOf = (line) => { const u = lineUnitOf(line); return u ? Number(u.factor) || 1 : 1; };
   async function checkCartStock(product, variant, key) {
     try {
-      if (!product || variant || product.trackInventory === false || isOfflineNow()) return;
-      const { data } = await window.Api.get('/products/stock-levels', { ids: product._id, branchId: window.AppShell.getActiveBranchId() || undefined });
-      if (data.allowNegativeStock) return;
-      const st = data.stock && data.stock[product._id];
-      if (!st || !st.tracked) return;
-      const avail = Math.max(0, Number(st.quantity) || 0);
-      const lines = state.cart.filter((l) => !l.ws && !l.variant && String(l.product._id) === String(product._id));
-      const inCart = lines.reduce((t, l) => t + l.quantity * lineFactorOf(l), 0);
-      if (inCart <= avail + 1e-6) return;
-      let excess = inCart - avail;
-      const ordered = [...lines.filter((l) => keyOf(l) === key), ...lines.filter((l) => keyOf(l) !== key)];
-      for (const l of ordered) {
-        if (excess <= 1e-6) break;
-        const f = lineFactorOf(l);
-        const cut = allowsFraction(l)
-          ? Math.min(l.quantity, Math.ceil((excess / f) * 1000 - 1e-6) / 1000)
-          : Math.min(l.quantity, Math.ceil(excess / f - 1e-9));
-        l.quantity = qty3(l.quantity - cut); excess -= cut * f;
-        if (l.quantity <= 0) state.cart.splice(state.cart.indexOf(l), 1); else syncAutoDiscount(l);
+      if (!product || variant || product.trackInventory === false) return;
+      const sid = String(product._id);
+      if (stockFixBusy.has(sid)) return; // the window for this product is already open
+      let avail = await availableStock(product);
+      if (avail == null) return;
+      const need = () => state.cart.filter((l) => !l.ws && !l.variant && String(l.product._id) === sid).reduce((t, l) => t + l.quantity * lineFactorOf(l), 0);
+      if (need() <= avail + 1e-6) return;
+      let fixed = false;
+      if (window.StockFix) {
+        stockFixBusy.add(sid);
+        try {
+          const res = await window.StockFix.open({ product, needed: need(), available: avail, offline: isOfflineNow() });
+          if (res && res.action !== 'cancel') {
+            fixed = true;
+            try { const again = await availableStock(product); avail = again == null ? avail + (res.quantity || 0) : again; } catch { avail += res.quantity || 0; }
+          }
+        } finally { stockFixBusy.delete(sid); }
       }
-      renderCart();
+      if (!trimCartToStock(product, key, avail)) { if (fixed) window.UI.toast.success('Stock updated. Product kept in the cart.'); return; }
       window.UI.toast.error(avail <= 0
-        ? `${product.name} is OUT OF STOCK. It was not added to the cart.`
+        ? `${product.name} is OUT OF STOCK. It was removed from the cart.`
         : `Only ${qty3(avail)} ${product.name} in stock. The quantity was set to ${qty3(avail)}.`);
       setTimeout(() => { if (!document.activeElement || document.activeElement === document.body) $('pos-search')?.focus(); }, 0);
     } catch { /* never block selling because the stock check could not run */ }
@@ -4569,6 +4600,8 @@
           </div>
           ${isWsBiz() ? `<select class="select" id="history-channel" style="max-width:170px" aria-label="Sale type">
             <option value="">All sales</option><option value="RETAIL">Retail only</option><option value="WHOLESALE">Wholesale only</option></select>` : ''}
+          <select class="select" id="history-offline" style="max-width:190px" aria-label="Online or offline sales">
+            <option value="">All sales</option><option value="yes">Offline sales only</option><option value="no">Online sales only</option></select>
           <div class="flex gap-2">
             <input class="input" id="history-from" type="date" style="max-width:160px" />
             <input class="input" id="history-to" type="date" style="max-width:160px" />
@@ -4591,6 +4624,8 @@
       $('history-channel').value = state.history.channel || '';
       $('history-channel').addEventListener('change', (e) => { state.history.channel = e.target.value; state.history.page = 1; fetchHistory(); });
     }
+    $('history-offline').value = state.history.offline || '';
+    $('history-offline').addEventListener('change', (e) => { state.history.offline = e.target.value; state.history.page = 1; fetchHistory(); });
     $('history-from').addEventListener('change', (e) => { state.history.from = e.target.value; state.history.page = 1; fetchHistory(); });
     $('history-to').addEventListener('change', (e) => { state.history.to = e.target.value; state.history.page = 1; fetchHistory(); });
 
@@ -4605,6 +4640,7 @@
     branchId: window.AppShell.getActiveBranchId(), page: state.history.page, limit: state.history.limit, search: state.history.search,
     from: state.history.from || undefined, to: state.history.to || undefined,
     channel: isWsBiz() && state.history.channel ? state.history.channel : undefined,
+    offline: state.history.offline || undefined,
   });
   const histKey = () => `h|${JSON.stringify(histParams())}`;
 
@@ -4616,7 +4652,7 @@
     } else {
       tbody.innerHTML = items.map((s) => `
         <tr data-id="${s._id}">
-          <td class="cell-primary">${s.receiptNumber}${s.channel === 'WHOLESALE' ? ' <span class="badge badge-info">Wholesale</span>' : ''}</td>
+          <td class="cell-primary">${s.receiptNumber}${s.channel === 'WHOLESALE' ? ' <span class="badge badge-info">Wholesale</span>' : ''}${s.isOffline ? ' <span class="badge badge-warning" title="Made while the till was offline">Offline</span>' : ''}</td>
           <td class="text-sm">${window.UI.formatDateTime(s.createdAt)}</td>
           <td class="text-sm">${esc(s.cashierId?.name || '')}</td>
           <td class="text-sm">${s.customerId ? esc(s.customerId.name) : '<span class="text-muted">Walk-in</span>'}</td>

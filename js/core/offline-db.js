@@ -25,7 +25,7 @@
   Offline.emit = (evt, detail) => { (listeners[evt] || []).forEach((fn) => { try { fn(detail); } catch (e) { console.error('[offline] listener failed', e); } }); };
 
   const DB_NAME = 'pos-offline';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2; // v2: `stock` store (branch stock levels, so a till knows what is out of stock offline)
   const SCHEMA = {
     kv: { keyPath: 'k' },
     products: { keyPath: 'id', indexes: { barcode: 'barcode', sku: 'sku' } },
@@ -35,6 +35,7 @@
     outbox: { keyPath: 'outboxSeq' },
     issues: { keyPath: 'ref' },
     receipts: { keyPath: 'receiptNumber', indexes: { soldAt: 'soldAt' } },
+    stock: { keyPath: 'id' },
   };
 
   let dbPromise = null;

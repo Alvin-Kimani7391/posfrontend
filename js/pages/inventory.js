@@ -106,6 +106,7 @@
           ${window.UnitKit ? `<button class="btn btn-secondary" id="break-stock-btn" data-requires-permission="inventory.adjust" title="Break a bag into sellable sizes">${window.Icons.get('inventory')} Break down</button>` : ''}
           <button class="btn btn-secondary" id="return-purchase-btn" data-requires-permission="purchases.return">${window.Icons.get('bag')} Return purchase</button>
           ${wh() ? `<button class="btn btn-secondary" id="move-stock-btn" data-requires-permission="inventory.transfer">${window.Icons.get('truck')} Move stock</button>` : ''}
+          <button class="btn btn-secondary" id="stock-report-btn" title="Print or download the low stock / out of stock list">${window.Icons.get('printer')} Print / Download</button>
           <button class="btn btn-secondary" id="low-sms-btn" data-requires-permission="settings.update">${window.Icons.get('bell')} Low stock SMS</button>
           <button class="btn btn-primary" id="new-transfer-btn" data-requires-permission="inventory.transfer">${window.Icons.get('branches')} New transfer</button>
         </div>
@@ -140,6 +141,7 @@
     document.getElementById('return-purchase-btn')?.addEventListener('click', openReturnPurchase);
     document.getElementById('move-stock-btn')?.addEventListener('click', openMoveModal);
     document.getElementById('low-sms-btn')?.addEventListener('click', openLowStockSmsModal);
+    document.getElementById('stock-report-btn')?.addEventListener('click', () => openStockReportModal());
   }
 
   function bindTabs() {
@@ -462,12 +464,96 @@
         return;
       }
       body.innerHTML = `
+        <div style="padding: var(--space-4) var(--space-6) 0;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <button class="btn btn-secondary btn-sm" data-sr="out">Print / download out of stock</button>
+          <button class="btn btn-secondary btn-sm" data-sr="low">Low stock</button>
+          <button class="btn btn-primary btn-sm" data-sr="both">Both</button>
+        </div>
         ${sectionTable('Out of stock', data.outOfStock, 'badge-danger')}
         ${sectionTable('Low stock', data.lowStock, 'badge-warning')}
       `;
+      body.querySelectorAll('[data-sr]').forEach((b) => b.addEventListener('click', () => openStockReportModal(b.dataset.sr)));
     } catch (err) {
       body.innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load low stock alerts', message: err.message });
     }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Print / download the low stock + out of stock list (works for either one, or both)
+   * ------------------------------------------------------------------ */
+  function openStockReportModal(initial) {
+    const branchId = window.AppShell.getActiveBranchId();
+    if (!branchId) return window.UI.toast.error('Select a branch first');
+    const modal = window.UI.openModal({
+      title: 'Print or download stock list',
+      bodyHtml: `
+        <div class="field"><label>What do you want in the list?</label>
+          <div style="display:grid;gap:8px">
+            ${[['both', 'Out of stock and low stock', 'Everything that needs restocking'], ['out', 'Out of stock only', 'Items with zero stock'], ['low', 'Low stock only', 'Items at or below their minimum level']].map(([v, t, d]) => `
+              <label style="display:flex;gap:10px;align-items:flex-start;border:1.5px solid var(--color-border,#d1d5db);border-radius:10px;padding:10px 12px;cursor:pointer">
+                <input type="radio" name="sr-what" value="${v}" ${v === (initial || 'both') ? 'checked' : ''} style="margin-top:3px"><span><strong>${t}</strong><br><span class="text-sm text-muted">${d}</span></span></label>`).join('')}
+          </div></div>
+        <p class="text-sm text-muted" id="sr-hint">The list is for the branch you are working in.</p>`,
+      footerHtml: `
+        <button class="btn btn-secondary" data-action="cancel">Cancel</button>
+        <button class="btn btn-secondary" data-action="csv">Download (Excel)</button>
+        <button class="btn btn-primary" data-action="print">${window.Icons.get('printer')} Print / Save PDF</button>`,
+    });
+    modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
+    const load = async (btn, fn) => {
+      const what = modal.querySelector('[name="sr-what"]:checked').value;
+      window.UI.setButtonLoading(btn, true, 'Preparing…');
+      try {
+        const { data } = await window.Api.get('/inventory/low-stock', { branchId });
+        const mk = (r, status) => ({
+          name: r.productId?.name || 'Unknown product', sku: r.productId?.sku || '', branch: r.branchId?.name || '',
+          qty: Number(r.quantity) || 0, reserved: Number(r.reservedQuantity) || 0, min: r.lowStockThreshold ?? 5, status,
+        });
+        const out = (data.outOfStock || []).map((r) => mk(r, 'Out of stock'));
+        const low = (data.lowStock || []).map((r) => mk(r, 'Low stock'));
+        const rows = what === 'out' ? out : what === 'low' ? low : [...out, ...low];
+        if (!rows.length) { window.UI.toast.success(what === 'out' ? 'Nothing is out of stock right now.' : what === 'low' ? 'Nothing is low on stock right now.' : 'Nothing is low or out of stock right now.'); return; }
+        rows.sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name) : a.status === 'Out of stock' ? -1 : 1));
+        fn(rows, what);
+      } catch (err) { window.UI.toast.error(err.message); } finally { window.UI.setButtonLoading(btn, false); }
+    };
+    const titleOf = (what) => (what === 'out' ? 'Out of stock list' : what === 'low' ? 'Low stock list' : 'Low stock and out of stock list');
+    const meta = () => {
+      const prof = (window.AppShell.getBusinessProfile && window.AppShell.getBusinessProfile()) || {};
+      const user = window.AppShell.getUser && window.AppShell.getUser();
+      return { biz: prof.name || prof.businessName || (user && user.businessName) || '', when: new Date().toLocaleString() };
+    };
+    modal.querySelector('[data-action="csv"]').addEventListener('click', (e) => load(e.currentTarget, (rows, what) => {
+      const q = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+      const m = meta();
+      const lines = [[titleOf(what)], [m.biz], [`Printed ${m.when}`], [], ['Product', 'SKU', 'Branch', 'In stock', 'Reserved', 'Minimum level', 'Status', 'Suggested reorder']]
+        .map((r) => r.map(q).join(','));
+      rows.forEach((r) => lines.push([r.name, r.sku, r.branch, r.qty, r.reserved, r.min, r.status, Math.max(0, r.min * 2 - r.qty)].map(q).join(',')));
+      const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = `${what === 'out' ? 'out-of-stock' : what === 'low' ? 'low-stock' : 'low-and-out-of-stock'}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+      window.UI.toast.success('List downloaded');
+    }));
+    modal.querySelector('[data-action="print"]').addEventListener('click', (e) => load(e.currentTarget, (rows, what) => {
+      const m = meta(); const nOut = rows.filter((r) => r.status === 'Out of stock').length; const nLow = rows.length - nOut;
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(titleOf(what))}</title><style>
+        body{font-family:Segoe UI,Arial,sans-serif;color:#0f172a;margin:24px}h1{font-size:20px;margin:0}p{margin:4px 0;color:#475569;font-size:12px}
+        .chips{margin:10px 0 14px;font-size:12px}.chips b{padding:3px 10px;border-radius:999px;margin-right:6px}.o{background:#fee2e2;color:#b91c1c}.l{background:#fef3c7;color:#92400e}
+        table{width:100%;border-collapse:collapse;font-size:12.5px}th{text-align:left;background:#f1f5f9;padding:8px;border-bottom:2px solid #cbd5e1;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+        td{padding:7px 8px;border-bottom:1px solid #e2e8f0}td.n,th.n{text-align:right}tr{page-break-inside:avoid}.s-o{color:#b91c1c;font-weight:700}.s-l{color:#b45309;font-weight:700}
+        @media print{body{margin:10mm}}</style></head><body>
+        <h1>${esc(titleOf(what))}</h1><p>${esc(m.biz)} &middot; Printed ${esc(m.when)}</p>
+        <div class="chips">${what !== 'low' ? `<b class="o">${nOut} out of stock</b>` : ''}${what !== 'out' ? `<b class="l">${nLow} low stock</b>` : ''}</div>
+        <table><thead><tr><th>#</th><th>Product</th><th>SKU</th><th>Branch</th><th class="n">In stock</th><th class="n">Min. level</th><th class="n">Suggested reorder</th><th>Status</th></tr></thead><tbody>
+        ${rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${esc(r.sku)}</td><td>${esc(r.branch)}</td><td class="n">${r.qty}</td><td class="n">${r.min}</td><td class="n">${Math.max(0, r.min * 2 - r.qty)}</td><td class="${r.status === 'Out of stock' ? 's-o' : 's-l'}">${r.status}</td></tr>`).join('')}
+        </tbody></table></body></html>`;
+      const fr = document.createElement('iframe');
+      fr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+      document.body.appendChild(fr);
+      fr.contentDocument.open(); fr.contentDocument.write(html); fr.contentDocument.close();
+      setTimeout(() => { fr.contentWindow.focus(); fr.contentWindow.print(); setTimeout(() => fr.remove(), 60000); }, 300);
+    }));
   }
 
   function sectionTable(title, rows, badgeClass) {
