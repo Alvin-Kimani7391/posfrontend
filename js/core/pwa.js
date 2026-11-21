@@ -69,21 +69,9 @@
   function cleanName(v) {
     return String(v == null ? '' : v).replace(/[\u0000-\u001f<>"]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
   }
-  function shopName() {
-    var n = '';
-    try { var p = JSON.parse(window.localStorage.getItem('pos.businessProfile') || 'null'); n = cleanName(p && (p.name || p.businessName)); } catch (e) { /* ignore */ }
-    if (n) { if (ls.get(CFG.nameKey) !== n) ls.set(CFG.nameKey, n); return n; }
-    return cleanName(ls.get(CFG.nameKey));
-  }
-  /** This shop's id (profile, else the signed-in user): each shop gets its own installed app. */
-  function shopId() {
-    var id = '';
-    try { var pr = JSON.parse(window.localStorage.getItem('pos.businessProfile') || 'null'); id = (pr && (pr._id || pr.id)) || ''; } catch (e) { /* ignore */ }
-    if (!id) { try { var u = JSON.parse(window.localStorage.getItem('pos.user') || 'null'); id = (u && (u.businessId && (u.businessId._id || u.businessId))) || ''; } catch (e) { /* ignore */ } }
-    id = String(id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
-    return id;
-  }
-  function appName() { return shopName() || CFG.appName; }
+  /** One app for every shop: the installed app is always called "Six Star POS" (users sign in with their own email). */
+  function shopName() { return ''; }
+  function appName() { return CFG.appName; }
 
   /** Point the manifest at the shop name; the browser re-reads it and re-offers the install with the right name. */
   var manifestNameApplied = '';
@@ -130,7 +118,7 @@
   function dismissedRecently() {
     try { return window.sessionStorage.getItem(CFG.dismissKey) === '1'; } catch (e) { return false; }
   }
-  function instKey() { var sid = window.__POS_SCOPE ? '' : shopId(); return 'pos.pwa.installed' + (sid ? '.' + sid : ''); }
+  function instKey() { return 'pos.pwa.installed'; }
   function rememberInstalled() { ls.set(instKey(), '1'); }
   function rememberInstalledAs(name) { ls.set(CFG.installedAsKey, name || appName()); }
   /** An app installed before the shop name existed is still called "Six Star POS" (the browser keeps the install-time name). */
