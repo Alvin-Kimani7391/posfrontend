@@ -164,6 +164,7 @@
     let lastSoon = 0;
     return {
       load,
+      hydrate: () => Promise.resolve(hydrate()),
       isReady: () => usable(),
       invalidate() { st.dirty = true; st.loading = null; st.codes = null; },
       /** Quiet reload, at most once per minAge ms. The list keeps answering searches while it downloads. */

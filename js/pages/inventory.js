@@ -375,7 +375,9 @@
 
     try {
       const focused = !!state.productId;
-      const { data, offline: servedOffline } = await fetchStockData(endpoint, { branchId, page: focused ? 1 : state.page, limit: focused ? 100 : state.limit, search: state.search });
+      const params = { branchId, page: focused ? 1 : state.page, limit: focused ? 100 : state.limit, search: state.search };
+      const ckey = `pos.inv.page.v1:${endpoint}|${branchId}|${params.page}|${params.limit}|${params.search}`;
+      const paint = (data, servedOffline) => {
       if (servedOffline) body.insertAdjacentHTML('afterbegin', IO().bannerHtml());
       const location = endpoint === '/warehouse' ? 'WAREHOUSE' : 'RETAIL';
       if (focused) data.items = data.items.filter((r) => String((r.productId && r.productId._id) || r.productId) === String(state.productId));
@@ -420,6 +422,15 @@
       if (!focused) window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; renderStockTable(endpoint, emptyTitle, emptyMessage); });
       window.Permissions.applyPermissionGates(body, window.AppShell.getUser());
       body.querySelectorAll('[data-stock-action]').forEach((btn) => btn.addEventListener('click', () => openStockAction(btn)));
+      };
+      // Show the last list seen on this device at once, then swap in the fresh one (no waiting on the server).
+      let painted = false;
+      if (!focused && !ioActive()) {
+        try { const c = JSON.parse(localStorage.getItem(ckey) || 'null'); if (c && c.data && Array.isArray(c.data.items) && c.data.items.length) { paint(c.data, false); painted = true; } } catch { /* no saved copy */ }
+      }
+      const { data, offline: servedOffline } = await fetchStockData(endpoint, params);
+      if (!focused && !servedOffline) { try { localStorage.setItem(ckey, JSON.stringify({ at: Date.now(), data })); } catch { /* storage full */ } }
+      paint(data, servedOffline);
     } catch (err) {
       body.innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load inventory', message: err.message });
     }

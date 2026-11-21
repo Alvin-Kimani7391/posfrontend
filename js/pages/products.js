@@ -42,7 +42,7 @@
  */
 (function () {
   const state = { page: 1, limit: 10, search: '', categoryId: '', status: '' };
-  const productIndex = window.FastSearch.create({ params: () => ({}), ttl: 60000 }); // all products, searched on the device
+  const productIndex = window.FastSearch.create({ params: () => ({}), ttl: 60000, hydrate: true, serveStale: true }); // all products, searched on the device
   const selected = new Map(); // product id -> name, kept across pages for "print selected stickers"
   let usedBarcodes = null;    // Set of every barcode already in the catalog (lazy, for auto-generation)
   let contentEl;
@@ -1301,7 +1301,21 @@
       }
     }
 
-    tbody.innerHTML = window.UI.skeletonRows(7, 4);
+    // Paint the copy saved on this device straight away (stale-while-revalidate); the fresh list replaces it below.
+    let painted = false;
+    if (state.status !== 'archived') {
+      try {
+        await productIndex.hydrate();
+        const c = productIndex.query({ search: state.search, categoryId: state.categoryId, page: state.page, limit: state.limit });
+        if (c && c.items.length) {
+          renderRows(c.items);
+          window.UI.renderPagination(document.getElementById('pagination'), c, (p) => { state.page = p; fetchAndRender({ local: true }); });
+          window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+          painted = true;
+        }
+      } catch { /* no device copy yet */ }
+    }
+    if (!painted) tbody.innerHTML = window.UI.skeletonRows(7, 4);
 
     try {
       if (window.LiquorTill && window.LiquorTill.active()) await window.LiquorTill.refresh(); // category / ABV / size beside each drink
