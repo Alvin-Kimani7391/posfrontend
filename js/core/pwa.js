@@ -138,7 +138,9 @@
     if (isIos()) return false; // iPhone/iPad cannot tell us the home-screen name
     var shop = shopName();
     if (!shop) return false;
-    if (!(isStandalone() || ls.get(instKey()) === '1')) return false;
+    // Only the OLD app (opened standalone, no shop scope) can be a legacy install. A browser tab is never "legacy":
+    // it offers this shop's own install instead (a phone can hold one app per shop).
+    if (window.__POS_SCOPE || !isStandalone()) return false;
     return ls.get(CFG.installedAsKey) !== shop;
   }
   function renameSnoozed() {

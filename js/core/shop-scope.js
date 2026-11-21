@@ -11,7 +11,25 @@
     try { s = new URL(window.location.href).searchParams.get('shop'); } catch (e) { /* ignore */ }
     if (s && /^[A-Za-z0-9_-]{1,40}$/.test(s)) { try { window.sessionStorage.setItem('pos.scope', s); } catch (e) { /* ignore */ } }
     else { try { s = window.sessionStorage.getItem('pos.scope'); } catch (e) { s = null; } }
-    if (!s || !/^[A-Za-z0-9_-]{1,40}$/.test(s)) return;
+    if (!s || !/^[A-Za-z0-9_-]{1,40}$/.test(s)) {
+      // Normal browser tab: point the manifest at THIS shop before the browser reads it, so Chrome offers a fresh
+      // install for this shop even when another shop's app (or the old "Six Star POS" app) is already on the phone.
+      try {
+        if (!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) {
+          var pr = JSON.parse(window.localStorage.getItem('pos.businessProfile') || 'null');
+          var id = String((pr && (pr._id || pr.id)) || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+          var nm = String((pr && (pr.name || pr.businessName)) || '').replace(/[\u0000-\u001f<>"]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+          if (id && nm) {
+            var fix = function (l) { if (l && l.rel === 'manifest' && (l.getAttribute('href') || '').indexOf('manifest.webmanifest') === 0 && (l.getAttribute('href') || '').indexOf('s=') < 0) l.setAttribute('href', 'manifest.webmanifest?n=' + encodeURIComponent(nm) + '&s=' + encodeURIComponent(id)); };
+            var ex = document.querySelector('link[rel="manifest"]'); if (ex) fix(ex);
+            var mo = new MutationObserver(function (ml) { ml.forEach(function (m) { m.addedNodes.forEach(function (n) { if (n.nodeName === 'LINK') fix(n); }); }); });
+            mo.observe(document.documentElement, { childList: true, subtree: true });
+            document.addEventListener('DOMContentLoaded', function () { mo.disconnect(); });
+          }
+        }
+      } catch (e) { /* ignore */ }
+      return;
+    }
     window.__POS_SCOPE = s;
 
     var P = 's:' + s + ':';
