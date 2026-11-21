@@ -31,6 +31,11 @@
       return;
     }
     window.__POS_SCOPE = s;
+    // keep the shop in the address bar: if the phone restores this window after closing it, the shop id comes back with it
+    try {
+      var cu = new URL(window.location.href);
+      if (cu.searchParams.get('shop') !== s) { cu.searchParams.set('shop', s); window.history.replaceState(window.history.state, '', cu.pathname + cu.search + cu.hash); }
+    } catch (e) { /* ignore */ }
 
     var P = 's:' + s + ':';
     var ls = window.localStorage; var SP = Storage.prototype;
