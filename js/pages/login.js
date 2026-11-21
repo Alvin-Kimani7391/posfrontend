@@ -14,6 +14,12 @@
   const REMEMBERED_KEY = 'pos.lastBusinessId';
 
   document.addEventListener('DOMContentLoaded', init);
+  // Back button can restore this page from memory: clear the welcome screen and, if already signed in, go on to the app.
+  window.addEventListener('pageshow', (e) => {
+    if (!e.persisted) return;
+    if (window.WelcomeSplash) window.WelcomeSplash.dismiss();
+    if (window.Storage && window.Storage.isAuthenticated()) window.HomeRoute.resolve().then((page) => window.location.replace(page));
+  });
 
   function init() {
     if (new URLSearchParams(window.location.search).get('online')) { try { localStorage.removeItem('pos.offlineSession'); } catch { /* ignore */ } }
@@ -81,7 +87,7 @@
           await window.Offline.auth.offlineLogin(box.u.value, box.pin.value);
           const who = users.find((u) => String(u.userId) === String(box.u.value));
           const page = window.WelcomeSplash ? await window.WelcomeSplash.play(who, 'sales.html') : 'sales.html';
-          window.location.href = page;
+          window.location.replace(page);
         }
         catch (err) { showAlert(err.message); box.pin.value = ''; }
       });
@@ -221,7 +227,7 @@
     try {
       page = window.WelcomeSplash ? await window.WelcomeSplash.play(data.user, lookup) : await lookup();
     } catch { /* keep the retail dashboard */ }
-    window.location.href = page;
+    window.location.replace(page); // replace, so Back never returns to the login / welcome screen
   }
 
   function handleLoginError(err, form) {

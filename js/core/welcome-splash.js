@@ -94,6 +94,16 @@
   }
 
   let playing = null;
+  let current = null;
+
+  /** Remove the screen and reset, so a page restored from the back button is never stuck on it. */
+  function dismiss() {
+    if (current && current.parentNode) current.parentNode.removeChild(current);
+    current = null; playing = null;
+    try { document.documentElement.style.overflow = ''; } catch (e) { /* ignore */ }
+  }
+  window.addEventListener('pageshow', (e) => { if (e.persisted) dismiss(); });
+  window.addEventListener('pagehide', () => { if (current) current.style.display = 'none'; });
 
   /**
    * @param {object} user         signed-in user (uses first name)
@@ -131,6 +141,7 @@
         <div class="ws-brand ws-fit" aria-hidden="true">${brand}</div>
         <div class="ws-bar"><i></i></div></div>`;
       document.body.appendChild(root);
+      current = root;
       document.documentElement.style.overflow = 'hidden';
       fitName(root);
       window.addEventListener('resize', () => fitName(root));
@@ -162,5 +173,5 @@
     return playing;
   }
 
-  window.WelcomeSplash = { play };
+  window.WelcomeSplash = { play, dismiss };
 })(window);
