@@ -27,7 +27,7 @@
         }
         window.Storage.setTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
         window.Storage.setUser(data.user);
-        window.location.href = 'admin-dashboard.html';
+        window.location.href = window.WelcomeSplash ? await window.WelcomeSplash.play(data.user, 'admin-dashboard.html') : 'admin-dashboard.html';
       } catch (err) {
         alert(err.message || 'Could not sign in. Please try again.');
       } finally {

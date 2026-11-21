@@ -192,6 +192,7 @@
       'color:var(--color-text-secondary,#475569);font-size:.78rem}',
       '@media (max-width:359px){.pwa-copy span{display:none}}',
       '.pwa-float .btn{height:34px;padding:0 14px;font-size:.85rem;flex:none;border-radius:var(--radius-md,8px)}',
+      '.pwa-float .btn{touch-action:manipulation;-webkit-tap-highlight-color:transparent;min-width:84px;transition:transform .08s,opacity .15s}@media (pointer:coarse){.pwa-float .btn{height:42px;padding:0 18px}}.pwa-float .btn:active{transform:scale(.96)}.pwa-float .btn.pwa-busy{opacity:.75;pointer-events:none}',
       '.pwa-close{flex:none;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;',
       'border:0;background:transparent;color:var(--color-text-muted,#64748b);border-radius:50%;cursor:pointer}',
       '.pwa-close:hover{background:var(--color-bg,#f1f5f9);color:var(--color-text,#0f172a)}',
@@ -373,9 +374,23 @@
         updateEl = null;
         return;
       }
+      if (userRequestedRefresh) return; // already updating: ignore repeat taps
       userRequestedRefresh = true;
-      if (worker) worker.postMessage({ type: 'SKIP_WAITING' });
-      else window.location.reload();
+      // Instant feedback: the button reacts the moment it is tapped.
+      btn.disabled = true;
+      btn.classList.add('pwa-busy');
+      btn.textContent = 'Updating\u2026';
+      // Use the newest waiting worker. The one captured when the card appeared may have been
+      // replaced by a newer deploy, and a message to a replaced worker is silently ignored.
+      var target = (swReg && swReg.waiting) || worker;
+      if (target && target.state !== 'redundant') {
+        try { target.postMessage({ type: 'SKIP_WAITING' }); } catch (err) { window.location.reload(); return; }
+      } else {
+        window.location.reload();
+        return;
+      }
+      // Safety net: if the browser never reports the switch, reload anyway instead of looking frozen.
+      setTimeout(function () { window.location.reload(); }, 2500);
     });
     document.body.appendChild(updateEl);
     syncNavOffset();

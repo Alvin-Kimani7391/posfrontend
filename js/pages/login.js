@@ -77,7 +77,12 @@
       slot.parentNode.insertBefore(box, slot);
       box.addEventListener('submit', async (e) => {
         e.preventDefault();
-        try { await window.Offline.auth.offlineLogin(box.u.value, box.pin.value); window.location.href = 'sales.html'; }
+        try {
+          await window.Offline.auth.offlineLogin(box.u.value, box.pin.value);
+          const who = users.find((u) => String(u.userId) === String(box.u.value));
+          const page = window.WelcomeSplash ? await window.WelcomeSplash.play(who, 'sales.html') : 'sales.html';
+          window.location.href = page;
+        }
         catch (err) { showAlert(err.message); box.pin.value = ''; }
       });
     };
@@ -210,8 +215,12 @@
     if (window.I18n && data.user) window.I18n.adopt(data.user.language, data.country && data.country.language, data.user._id || data.user.id);
     // The login response has no business info, so ask for the business profile (type + switched-on modules)
     // and open the right home: restaurant / accommodation businesses go to their own dashboard.
+    // The welcome screen plays WHILE this lookup runs, so it adds almost no extra waiting.
+    const lookup = () => window.HomeRoute.resolve().catch(() => 'dashboard.html');
     let page = 'dashboard.html';
-    try { page = await window.HomeRoute.resolve(); } catch { /* keep the retail dashboard */ }
+    try {
+      page = window.WelcomeSplash ? await window.WelcomeSplash.play(data.user, lookup) : await lookup();
+    } catch { /* keep the retail dashboard */ }
     window.location.href = page;
   }
 
