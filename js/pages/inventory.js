@@ -41,6 +41,25 @@
   const hooks = { onChanged: null }; // set by the wholesale hub so it can refresh after a receive / adjust
   const afterChange = () => { if (hooks.onChanged) hooks.onChanged(); else renderActiveView(); };
 
+  /* ---- OFFLINE (js/pages/inventory-offline.js): stock list, low stock, receive and adjust work from the till's saved copy ---- */
+  const IO = () => window.InvOffline;
+  const ioActive = () => !!(IO() && IO().active());
+  /** Same call as the server list; offline (or when the server cannot be reached) the till's saved copy answers. */
+  async function fetchStockData(endpoint, params) {
+    if (ioActive()) {
+      if (endpoint !== '/inventory') throw new Error('Warehouse stock needs an internet connection.');
+      return { data: await IO().stockPage(params), offline: true };
+    }
+    try { return await window.Api.get(endpoint, params); }
+    catch (e) { if (endpoint === '/inventory' && IO() && IO().noteFailure(e)) return { data: await IO().stockPage(params), offline: true }; throw e; }
+  }
+  /** Online: POST. Offline: queue the same change on this till (it uploads when the internet is back). */
+  async function postOrQueue(path, body, queueFn) {
+    if (ioActive()) return queueFn();
+    return window.Api.post(path, body);
+  }
+  const pickProduct = (opts) => (ioActive() ? IO().pickProduct(opts) : window.ProductPicker.open(opts));
+
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
@@ -181,6 +200,11 @@
     window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
     loadStockValue();
     renderToolbar();
+    if (ioActive() && !['stock', 'lowstock'].includes(state.view)) {
+      document.getElementById('pagination').innerHTML = '';
+      document.getElementById('view-body').innerHTML = window.UI.emptyStateHtml({ icon: 'alert', title: 'This tab needs internet', message: 'Offline you can view stock, see low / out of stock items, and receive or adjust stock from the "Stock levels" and "Low stock" tabs.' });
+      return;
+    }
     if (state.view === 'overview') return renderOverview();
     if (state.view === 'stock') return renderStockLevels();
     if (state.view === 'warehouse') return renderWarehouseStock();
@@ -328,7 +352,7 @@
     const body = document.getElementById('view-body');
     body.innerHTML = tableShell(['Product', 'SKU', 'On hand', 'Reserved', 'Available', 'Status', 'Actions'], 7, 4);
 
-    const branchId = window.AppShell.getActiveBranchId();
+    const branchId = window.AppShell.getActiveBranchId() || (ioActive() ? 'offline' : '');
     if (!branchId) {
       body.innerHTML = window.UI.emptyStateHtml({ icon: 'branches', title: 'No branch selected' });
       return;
@@ -336,7 +360,8 @@
 
     try {
       const focused = !!state.productId;
-      const { data } = await window.Api.get(endpoint, { branchId, page: focused ? 1 : state.page, limit: focused ? 100 : state.limit, search: state.search });
+      const { data, offline: servedOffline } = await fetchStockData(endpoint, { branchId, page: focused ? 1 : state.page, limit: focused ? 100 : state.limit, search: state.search });
+      if (servedOffline) body.insertAdjacentHTML('afterbegin', IO().bannerHtml());
       const location = endpoint === '/warehouse' ? 'WAREHOUSE' : 'RETAIL';
       if (focused) data.items = data.items.filter((r) => String((r.productId && r.productId._id) || r.productId) === String(state.productId));
       const tbody = body.querySelector('tbody');
@@ -458,12 +483,19 @@
 
     const branchId = window.AppShell.getActiveBranchId();
     try {
-      const { data } = await window.Api.get('/inventory/low-stock', { branchId });
+      let lowOffline = ioActive();
+      let data;
+      if (lowOffline) data = await IO().lowStock();
+      else {
+        try { ({ data } = await window.Api.get('/inventory/low-stock', { branchId })); }
+        catch (e) { if (IO() && IO().noteFailure(e)) { lowOffline = true; data = await IO().lowStock(); } else throw e; }
+      }
       if (!data.lowStock.length && !data.outOfStock.length) {
         body.innerHTML = window.UI.emptyStateHtml({ icon: 'check', title: 'All stocked up', message: 'Nothing is low or out of stock right now.' });
         return;
       }
       body.innerHTML = `
+        ${lowOffline ? IO().bannerHtml() : ''}
         <div style="padding: var(--space-4) var(--space-6) 0;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
           <button class="btn btn-secondary btn-sm" data-sr="out">Print / download out of stock</button>
           <button class="btn btn-secondary btn-sm" data-sr="low">Low stock</button>
@@ -504,7 +536,7 @@
       const what = modal.querySelector('[name="sr-what"]:checked').value;
       window.UI.setButtonLoading(btn, true, 'Preparing…');
       try {
-        const { data } = await window.Api.get('/inventory/low-stock', { branchId });
+        const data = ioActive() ? await IO().lowStock() : (await window.Api.get('/inventory/low-stock', { branchId })).data;
         const mk = (r, status) => ({
           name: r.productId?.name || 'Unknown product', sku: r.productId?.sku || '', branch: r.branchId?.name || '',
           qty: Number(r.quantity) || 0, reserved: Number(r.reservedQuantity) || 0, min: r.lowStockThreshold ?? 5, status,
@@ -768,6 +800,11 @@
     if (btn.disabled) return;
     btn.disabled = true;
     try {
+      if (ioActive()) {
+        const lp = IO().product(pid);
+        if (!lp) throw new Error('This product is not saved on this till.');
+        return (stockAction === 'receive' ? openReceiveModal : openAdjustModal)({ product: lp, variant: null, location: loc });
+      }
       const { data } = await window.Api.get(`/products/${pid}`);
       const product = data.product || data;
       const variant = vid ? ((product.variants || []).find((v) => String(v._id) === String(vid)) || null) : null;
@@ -781,6 +818,7 @@
 
   /** Current on-hand stock of one product / variant in the active branch (RETAIL or WAREHOUSE pool). */
   async function fetchCurrentStock(product, variant, location) {
+    if (ioActive() && location !== 'WAREHOUSE') return IO().current(product);
     const branchId = window.AppShell.getActiveBranchId();
     const endpoint = location === 'WAREHOUSE' ? '/warehouse' : '/inventory';
     const wantVid = variant ? String(variant._id) : '';
@@ -954,7 +992,7 @@
           `;
     };
     modal.querySelector('#pick-product-btn').addEventListener('click', () => {
-      window.ProductPicker.open({ title: 'Select a product to receive', onSelect: applySel });
+      pickProduct({ title: 'Select a product to receive', onSelect: applySel });
     });
     if (preset) {
       applySel({ product: preset.product, variant: preset.variant });
@@ -978,7 +1016,7 @@
       const btn = document.getElementById('receive-save-btn');
       window.UI.setButtonLoading(btn, true, 'Saving…');
       try {
-        await window.Api.post('/inventory/receive', {
+        await postOrQueue('/inventory/receive', {
           branchId,
           productId: selected.product._id,
           variantId: selected.variant?._id,
@@ -991,8 +1029,18 @@
           reason: raw.reason || undefined,
           location: wh() ? (raw.location || 'RETAIL') : undefined,
           serials: selected.product.trackSerialNumber ? serials : undefined,
+        }, () => {
+          if (selected.variant) throw new Error('Variants can only be received when the till is online.');
+          if (wh() && raw.location === 'WAREHOUSE') throw new Error('Warehouse stock can only be received when the till is online.');
+          const f = uk ? uk.factor() : 1;
+          return IO().receive({ product: selected.product, payload: {
+            productId: selected.product._id,
+            quantity: uk ? uk.base(raw.quantity) : Number(raw.quantity),
+            costPriceCents: raw.costPrice ? Math.round((Number(raw.costPrice) / (f || 1)) * 100) : undefined,
+            batchNumber: raw.batchNumber || undefined, expiryDate: raw.expiryDate || undefined, reason: raw.reason || undefined,
+          } });
         });
-        window.UI.toast.success(wh() && raw.location === 'WAREHOUSE' ? 'Stock received into the warehouse' : (uk && uk.factor() !== 1 ? `Stock received: ${uk.base(raw.quantity)} ${selected.product.unit || ''}` : 'Stock received'));
+        window.UI.toast.success(ioActive() ? 'Saved on this till. It uploads when the internet is back.' : wh() && raw.location === 'WAREHOUSE' ? 'Stock received into the warehouse' : (uk && uk.factor() !== 1 ? `Stock received: ${uk.base(raw.quantity)} ${selected.product.unit || ''}` : 'Stock received'));
         window.UI.closeModal();
         afterChange();
       } catch (err) {
@@ -1184,7 +1232,7 @@
 
     modal.querySelector('[data-action="cancel"]').addEventListener('click', window.UI.closeModal);
     modal.querySelector('#pick-product-btn').addEventListener('click', () => {
-      window.ProductPicker.open({ title: 'Select a product to adjust', onSelect: select });
+      pickProduct({ title: 'Select a product to adjust', onSelect: select });
     });
     typeEl.addEventListener('change', recalc);
     qtyEl.addEventListener('input', recalc);
@@ -1233,7 +1281,7 @@
         if (!ok) return;
 
         const values = window.UI.serializeForm(form);
-        await window.Api.post('/inventory/adjust', {
+        await postOrQueue('/inventory/adjust', {
           branchId, productId: selected.product._id, variantId: selected.variant?._id,
           type: r.type,
           // counted stock is sent as the exact difference in the base unit; add/remove keeps the unit the user chose
@@ -1241,7 +1289,12 @@
           unitId: adjMode === 'count' ? undefined : (uk ? uk.unitId() : undefined),
           reason: values.reason || reasonEl.value.trim(),
           location: wh() ? (values.location || 'RETAIL') : undefined,
+        }, () => {
+          if (selected.variant) throw new Error('Variants can only be adjusted when the till is online.');
+          if (pool() === 'WAREHOUSE') throw new Error('Warehouse stock can only be adjusted when the till is online.');
+          return IO().adjust({ product: selected.product, payload: { productId: selected.product._id, quantity: r.qty, adjustType: r.type, reason: values.reason || reasonEl.value.trim() } });
         });
+        if (ioActive()) window.UI.toast.info('Saved on this till. It uploads when the internet is back.');
         window.UI.toast.success(adjMode === 'count' ? `Stock corrected: ${current.quantity} → ${r.newStock} (${up ? '+' : '−'}${r.qty})` : `Stock adjusted: ${current.quantity} → ${r.newStock}`);
         window.UI.closeModal();
         afterChange();

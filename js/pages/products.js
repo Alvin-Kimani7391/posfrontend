@@ -1324,6 +1324,25 @@
         window.UI.toast.info('Offline: showing products saved on this device');
         return;
       }
+      // The Products device copy was never saved (first visit offline): use this till's offline catalog instead.
+      try {
+        const OC = window.Offline && window.Offline.catalog;
+        if (OC) {
+          await window.Offline.init();
+          const t = String(state.search || '').trim();
+          let list = OC.search(t, 1000000).filter((p) => !state.categoryId || String(p.categoryId) === String(state.categoryId));
+          if (list.length || OC.count()) {
+            list = list.slice().sort((x, y) => String(x.name).localeCompare(String(y.name)));
+            const limit = state.limit; const pages = Math.max(1, Math.ceil(list.length / limit)); state.page = Math.min(Math.max(1, state.page), pages);
+            const res2 = { items: list.slice((state.page - 1) * limit, state.page * limit), page: state.page, limit, total: list.length, pages };
+            renderRows(res2.items);
+            window.UI.renderPagination(document.getElementById('pagination'), res2, (p) => { state.page = p; fetchAndRender(); });
+            window.Permissions.applyPermissionGates(contentEl, window.AppShell.getUser());
+            window.UI.toast.info('Offline: showing products saved on this till');
+            return;
+          }
+        }
+      } catch { /* fall through to the message */ }
       tbody.innerHTML = `<tr><td colspan="8">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
     }
   }
