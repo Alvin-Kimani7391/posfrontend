@@ -1488,7 +1488,9 @@
     const E = window.Icons.get;
     const defs = p.status === 'archived' ? [['restore', 'Restore product', E('check')]] : [
       ['edit', 'Edit product', E('edit')],
-      ['view-stock', 'View stock & adjust', E('inventory')],
+      ['receive-stock', 'Receive stock', E('inventory')],
+      ['adjust-stock', 'Adjust stock', E('inventory')],
+      ['view-stock', 'View stock', E('inventory')],
       ['unit-prices', 'Sizes, prices & profit', E('box')],
       ['break-stock', 'Break down stock', E('inventory')],
       ['variants', 'Manage variants', E('box')],
@@ -1496,7 +1498,7 @@
       ['fill-pages', 'Print full A4 pages', E('printer')],
       ['sep'],
       ['archive', 'Archive product', E('trash'), 'danger'],
-    ].filter((d) => d[0] === 'sep' || act(d[0]));
+    ].filter((d) => d[0] === 'sep' || act(/^(receive|adjust)-stock$/.test(d[0]) ? 'view-stock' : d[0]));
     while (defs.length && defs[0][0] === 'sep') defs.shift();
     while (defs.length && defs[defs.length - 1][0] === 'sep') defs.pop();
     if (!defs.length) { window.UI.toast.info('You do not have any actions for this product'); return; }
@@ -1518,7 +1520,12 @@
     requestAnimationFrame(() => { m.classList.add('open'); const f = m.querySelector('.pm-item'); if (f) f.focus({ preventScroll: true }); });
     m.addEventListener('click', (e) => {
       const it = e.target.closest('.pm-item'); if (!it) return;
-      const target = act(it.dataset.pm); closeRowMenu();
+      const pmAct = it.dataset.pm; closeRowMenu();
+      if (pmAct === 'receive-stock' || pmAct === 'adjust-stock') {
+        window.location.href = `inventory.html?productId=${encodeURIComponent(p._id)}&search=${encodeURIComponent(p.name || '')}&action=${pmAct === 'receive-stock' ? 'receive' : 'adjust'}`;
+        return;
+      }
+      const target = act(pmAct);
       if (target) target.click();
     });
     document.addEventListener('keydown', pmKey, true);

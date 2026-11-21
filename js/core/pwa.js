@@ -34,7 +34,8 @@
   'use strict';
 
   var CFG = {
-    appName: 'Six Star POS',
+    appName: 'Six Star POS',          // used only until the shop's own name is known
+    nameKey: 'pos.pwa.shopName', installedAsKey: 'pos.pwa.installedAs', renameDismissKey: 'pos.pwa.renameDismissedAt', renameSnoozeDays: 3,
     swUrl: 'sw.js',
     manifestUrl: 'manifest.webmanifest',
     themeColor: '#0f766e',
@@ -59,6 +60,38 @@
     get: function (k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
     set: function (k, v) { try { window.localStorage.setItem(k, v); } catch (e) { /* ignore */ } },
   };
+
+  /* ------------------------------------------------------------------ *
+   * The installed app is called after the SHOP (e.g. "Alvin Supermarket"), not "Six Star POS".
+   * Chrome / Edge read the name from the manifest when the app is installed, so the manifest link carries the shop name
+   * (manifest.webmanifest?n=...) and sw.js answers that request with the same manifest under the shop's name.
+   * ------------------------------------------------------------------ */
+  function cleanName(v) {
+    return String(v == null ? '' : v).replace(/[\u0000-\u001f<>"]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  }
+  function shopName() {
+    var n = '';
+    try { var p = JSON.parse(window.localStorage.getItem('pos.businessProfile') || 'null'); n = cleanName(p && (p.name || p.businessName)); } catch (e) { /* ignore */ }
+    if (n) { if (ls.get(CFG.nameKey) !== n) ls.set(CFG.nameKey, n); return n; }
+    return cleanName(ls.get(CFG.nameKey));
+  }
+  function appName() { return shopName() || CFG.appName; }
+
+  /** Point the manifest at the shop name; the browser re-reads it and re-offers the install with the right name. */
+  var manifestNameApplied = '';
+  function applyManifestName() {
+    var n = shopName();
+    if (!n || n === manifestNameApplied) return false;
+    var link = document.querySelector('link[rel="manifest"]');
+    if (!link) return false;
+    manifestNameApplied = n;
+    link.setAttribute('href', CFG.manifestUrl + '?n=' + encodeURIComponent(n));
+    var t = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (t) t.setAttribute('content', n);
+    var strong = bannerEl && bannerEl.querySelector('.pwa-copy strong');
+    if (strong && !bannerEl.classList.contains('pwa-rename')) strong.textContent = 'Install ' + n;
+    return true;
+  }
 
   function isStandalone() {
     try {
@@ -89,6 +122,19 @@
     try { return window.sessionStorage.getItem(CFG.dismissKey) === '1'; } catch (e) { return false; }
   }
   function rememberInstalled() { ls.set('pos.pwa.installed', '1'); }
+  function rememberInstalledAs(name) { ls.set(CFG.installedAsKey, name || appName()); }
+  /** An app installed before the shop name existed is still called "Six Star POS" (the browser keeps the install-time name). */
+  function isLegacyInstall() {
+    if (isIos()) return false; // iPhone/iPad cannot tell us the home-screen name
+    var shop = shopName();
+    if (!shop) return false;
+    if (!(isStandalone() || ls.get('pos.pwa.installed') === '1')) return false;
+    return ls.get(CFG.installedAsKey) !== shop;
+  }
+  function renameSnoozed() {
+    var t = Number(ls.get(CFG.renameDismissKey) || 0);
+    return t && (Date.now() - t) < CFG.renameSnoozeDays * 86400000;
+  }
 
   function toast(kind, message) {
     try {
@@ -164,7 +210,7 @@
     addMeta('theme-color', CFG.themeColor);
     addMeta('mobile-web-app-capable', 'yes');
     addMeta('apple-mobile-web-app-capable', 'yes');
-    addMeta('apple-mobile-web-app-title', CFG.appName);
+    addMeta('apple-mobile-web-app-title', appName());
     addMeta('apple-mobile-web-app-status-bar-style', 'default');
     addLink('apple-touch-icon', CFG.appleIconUrl);
     addLink('icon', CFG.faviconUrl, { type: 'image/png', sizes: '32x32' });
@@ -246,17 +292,21 @@
     bannerEl = document.createElement('section');
     bannerEl.className = 'pwa-float pwa-install';
     bannerEl.setAttribute('role', 'region');
-    bannerEl.setAttribute('aria-label', 'Install ' + CFG.appName);
+    bannerEl.setAttribute('aria-label', 'Install ' + appName());
     bannerEl.innerHTML =
       '<img class="pwa-float-icon" src="' + CFG.iconUrl + '" alt="" width="36" height="36">' +
-      '<div class="pwa-copy"><strong>Install ' + CFG.appName + '</strong>' +
+      '<div class="pwa-copy"><strong>Install ' + appName() + '</strong>' +
       '<span>' + (ios ? 'Add it to your home screen. Works like a real app.' : 'Open it like a real app, full screen and fast.') + '</span></div>' +
       '<button type="button" class="btn btn-primary btn-sm" data-pwa-act="install">' + (ios ? 'How' : 'Install') + '</button>' +
       '<button type="button" class="pwa-close" data-pwa-act="dismiss" aria-label="Not now" title="Not now">' + CLOSE_ICON + '</button>';
     bannerEl.addEventListener('click', function (e) {
       var btn = e.target.closest('[data-pwa-act]');
       if (!btn) return;
-      if (btn.getAttribute('data-pwa-act') === 'install') install();
+      if (btn.getAttribute('data-pwa-act') === 'install') {
+        btn.classList.add('pwa-busy'); // instant feedback; the browser dialog opens in the same tick
+        var label = btn.textContent; btn.textContent = 'Opening\u2026';
+        Promise.resolve(install()).then(function () { btn.classList.remove('pwa-busy'); btn.textContent = label; }, function () { btn.classList.remove('pwa-busy'); btn.textContent = label; });
+      }
       else dismissBanner(true);
     });
     document.body.appendChild(bannerEl);
@@ -273,8 +323,8 @@
     sheetEl = document.createElement('div');
     sheetEl.className = 'pwa-sheet-backdrop';
     sheetEl.innerHTML =
-      '<div class="pwa-sheet" role="dialog" aria-modal="true" aria-label="Add ' + CFG.appName + ' to your home screen">' +
-      '<h3>Add ' + CFG.appName + ' to your home screen</h3>' +
+      '<div class="pwa-sheet" role="dialog" aria-modal="true" aria-label="Add ' + appName() + ' to your home screen">' +
+      '<h3>Add ' + appName() + ' to your home screen</h3>' +
       '<p>It takes three taps.</p>' +
       '<ol>' +
       '<li>Tap the <strong>Share</strong> button in the browser toolbar.</li>' +
@@ -298,8 +348,8 @@
     sheetEl = document.createElement('div');
     sheetEl.className = 'pwa-sheet-backdrop';
     sheetEl.innerHTML =
-      '<div class="pwa-sheet" role="dialog" aria-modal="true" aria-label="Install ' + CFG.appName + '">' +
-      '<h3>Install ' + CFG.appName + ' on your phone</h3>' +
+      '<div class="pwa-sheet" role="dialog" aria-modal="true" aria-label="Install ' + appName() + '">' +
+      '<h3>Install ' + appName() + ' on your phone</h3>' +
       '<p>Open it like a real app, full screen.</p>' +
       '<ol><li>Tap the <strong>menu</strong> button of your browser (the three dots).</li>' +
       '<li>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>' +
@@ -311,24 +361,82 @@
     document.body.appendChild(sheetEl);
   }
 
+  /* ------------------------------------------------------------------ *
+   * Soft prompt for people who installed the app when it was still called "Six Star POS"
+   * ------------------------------------------------------------------ */
+  var renameEl = null;
+  function escapeHtml(v) { return String(v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function hideRenameCard() { if (renameEl) { renameEl.remove(); renameEl = null; } }
+  function showRenameCard() {
+    if (renameEl || bannerEl || updateEl || !document.body || !isLegacyInstall() || renameSnoozed()) return;
+    if (document.querySelector(CFG.busySelector)) { setTimeout(showRenameCard, 6000); return; }
+    renameEl = document.createElement('section');
+    renameEl.className = 'pwa-float pwa-rename';
+    renameEl.setAttribute('role', 'region');
+    renameEl.setAttribute('aria-label', 'Update the app name');
+    renameEl.innerHTML =
+      '<img class="pwa-float-icon" src="' + CFG.iconUrl + '" alt="" width="36" height="36">' +
+      '<div class="pwa-copy"><strong>Show ' + escapeHtml(shopName()) + ' as the app name</strong>' +
+      '<span>Uninstall this app and install it again to update its name.</span></div>' +
+      '<button type="button" class="btn btn-primary btn-sm" data-pwa-act="how">How</button>' +
+      '<button type="button" class="pwa-close" data-pwa-act="later" aria-label="Later" title="Later">' + CLOSE_ICON + '</button>';
+    renameEl.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-pwa-act]');
+      if (!btn) return;
+      if (btn.getAttribute('data-pwa-act') === 'how') showRenameGuide();
+      else { ls.set(CFG.renameDismissKey, String(Date.now())); hideRenameCard(); }
+    });
+    document.body.appendChild(renameEl);
+    syncNavOffset();
+  }
+  function showRenameGuide() {
+    if (sheetEl || !document.body) return;
+    hideRenameCard();
+    var n = escapeHtml(shopName());
+    sheetEl = document.createElement('div');
+    sheetEl.className = 'pwa-sheet-backdrop';
+    sheetEl.innerHTML =
+      '<div class="pwa-sheet" role="dialog" aria-modal="true" aria-label="Update the app name">' +
+      '<h3>Your app is still called "' + escapeHtml(CFG.appName) + '"</h3>' +
+      '<p>Installed apps keep the name they had when they were installed. To show <strong>' + n + '</strong> instead, take 1 minute:</p>' +
+      '<ol>' +
+      '<li><strong>Uninstall</strong> the app. On a phone: press and hold its icon, then Uninstall. On a computer: open the app, click the menu (three dots) and choose Uninstall.</li>' +
+      '<li>Open this website in Chrome again and sign in.</li>' +
+      '<li>Tap <strong>Install</strong> on the card that appears. It will be named <strong>' + n + '</strong>.</li>' +
+      '</ol>' +
+      '<p>Your sales and stock are safe on the server. Anything saved offline on this till must be uploaded first (connect to the internet and wait for it to sync).</p>' +
+      '<button type="button" class="btn btn-primary" data-pwa-act="close">Got it</button></div>';
+    function close() { if (sheetEl) { sheetEl.remove(); sheetEl = null; } ls.set(CFG.renameDismissKey, String(Date.now())); }
+    sheetEl.addEventListener('click', function (e) { if (e.target === sheetEl || e.target.closest('[data-pwa-act="close"]')) close(); });
+    document.body.appendChild(sheetEl);
+  }
+
   /** Runs the real install flow. Safe to call from any button. */
   function install() {
-    if (isStandalone() || installedNow) return Promise.resolve('installed');
+    if (isStandalone() || installedNow) { if (isLegacyInstall()) { showRenameGuide(); return Promise.resolve('rename-guide'); } return Promise.resolve('installed'); }
 
     if (deferredPrompt) {
+      var nameAtPrompt = appName();
       var promptEvent = deferredPrompt;
       deferredPrompt = null; // a prompt event can only be used once
       window.__bip = null;
       promptEvent.prompt();
       return promptEvent.userChoice.then(function (choice) {
         var accepted = !!(choice && choice.outcome === 'accepted');
+        if (accepted) { rememberInstalled(); rememberInstalledAs(nameAtPrompt); }
         dismissBanner(!accepted);
         emitChange();
         return accepted ? 'accepted' : 'dismissed';
       }).catch(function () { emitChange(); return 'dismissed'; });
     }
 
+    if (isLegacyInstall()) { // already installed under the old name: tell the user how to rename it (uninstall + install again)
+      showRenameGuide();
+      return Promise.resolve('rename-guide');
+    }
+
     if (isIos()) {
+      rememberInstalledAs(appName());
       showIosGuide();
       return Promise.resolve('ios-guide');
     }
@@ -464,6 +572,8 @@
     e.preventDefault();      // we show our own, better-timed prompt
     deferredPrompt = e;
     window.__bip = e;
+    ls.set('pos.pwa.installed', '0'); // the browser only offers the install when the app is NOT installed (e.g. it was uninstalled)
+    hideRenameCard();
     // If the plain "how to install" card is already showing, swap it for the real one-tap Install card.
     if (bannerEl) { bannerEl.remove(); bannerEl = null; }
     emitChange();
@@ -476,11 +586,12 @@
   window.addEventListener('appinstalled', function () {
     installedNow = true;
     rememberInstalled();
+    rememberInstalledAs(appName());
     deferredPrompt = null;
     dismissBanner(false);
     if (sheetEl) { sheetEl.remove(); sheetEl = null; }
     emitChange();
-    toast('success', CFG.appName + ' installed. Open it from your desktop or home screen.');
+    toast('success', appName() + ' installed. Open it from your desktop or home screen.');
   });
 
   window.addEventListener('online', updateConnectionUi);
@@ -504,8 +615,18 @@
     }).observe(document.body, { childList: true, subtree: true });
   }
 
+  function watchShopName() {
+    var tries = 0;
+    var t = setInterval(function () { tries += 1; applyManifestName(); if (isLegacyInstall()) setTimeout(showRenameCard, 1200); if (tries > 40) clearInterval(t); }, 750);
+    window.addEventListener('storage', function () { applyManifestName(); });
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) applyManifestName(); });
+  }
+
   function onReady() {
     injectStyles();
+    applyManifestName();
+    watchShopName();
+    setTimeout(showRenameCard, 2500);
     refreshTriggers();
     watchTriggers();
     updateConnectionUi();
@@ -515,6 +636,7 @@
 
   // Head tags and the service worker do not need the DOM to be ready.
   ensureHeadTags();
+  applyManifestName();
   if (isStandalone()) { document.documentElement.classList.add('is-pwa'); rememberInstalled(); }
   registerServiceWorker();
 

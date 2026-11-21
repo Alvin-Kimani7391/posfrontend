@@ -4,10 +4,12 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.9.2-online-fix';
+const VERSION = 'v5.9.5-offline-inventory';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
+  'The installed app now carries your shop name; older installs are asked to reinstall once',
+  'Inventory and Products now work offline: view stock, receive and adjust stock, and it uploads when the internet returns',
   'Fixed: the app no longer wrongly says you are offline when your internet is working',
   'Much faster till: products appear the instant you search or scan, and completing a sale is quicker',
   'New Access control page: choose what each employee can do, set groups, and change a whole role at once',
@@ -37,6 +39,8 @@ const CDN_HOSTS = /^(cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|unpkg\.com|fonts\
 // Missing files are skipped (all
 // Settled), so listing a file that does not exist is harmless.
 const PRECACHE = [
+  'js/pages/hx-settings.js', 'js/pages/wholesale-reports.js', 'js/core/welcome-splash.js', 'js/pages/hx-operations.js', 'js/pages/payables.js', 'js/pages/reports-allsales.js', 'js/pages/wholesale.js', 'js/pages/warehouses.js', 'js/pages/billing.js', 'js/pages/wholesale-sales.js', 'js/pages/crm-compat.js', 'js/pages/crm.js',
+  'js/core/barcode-guard.js', 'js/core/unit-conversion-kit.js', 'js/pages/purchase-returns.js', 'js/pages/add-product-guard.js', 'js/pages/sales-stockfix.js', 'js/pages/inventory-offline.js',
   'css/mobile-app.css', 'js/core/mobile-tables.js',
   'hardware/', 'hardware/index.html', 'hardware/css/hw.css', 'hardware/css/hw-pro.css', 'hardware/css/hw-till.css', 'hardware/css/hw-offline.css', 'hardware/css/hw-reports.css', 'hardware/manifest.webmanifest',
   'hardware/js/hw-core.js', 'hardware/js/hw-icons.js', 'hardware/js/hw-fast.js', 'hardware/js/hw-sell.js', 'hardware/js/hw-ops.js', 'hardware/js/hw-back.js', 'hardware/js/hw-products.js', 'hardware/js/hw-dash.js', 'hardware/js/hw-pro.js', 'hardware/js/hw-sales.js', 'hardware/js/hw-reports.js', 'hardware/js/hw-till.js', 'hardware/js/hw-till-more.js', 'hardware/js/hw-pwa.js', 'hardware/js/hw-offline.js',
@@ -157,6 +161,18 @@ self.addEventListener('message', (event) => {
   }
 });
 
+async function shopManifest(rawName) {
+  const name = String(rawName).replace(/[\u0000-\u001f<>"]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const base = new URL('manifest.webmanifest', self.registration.scope).href;
+  let text = null;
+  try { const r = await fetch(base, { cache: 'no-cache' }); if (r && r.ok) text = await r.text(); } catch (e) { /* offline */ }
+  if (!text) { const hit = await (await caches.open(CACHE)).match(base, { ignoreSearch: true }); if (hit) text = await hit.text(); }
+  if (!text) return new Response('{}', { status: 503, headers: { 'Content-Type': 'application/manifest+json' } });
+  const m = JSON.parse(text);
+  if (name) { m.name = name; m.short_name = name.length > 14 ? name.slice(0, 14).trim() : name; }
+  return new Response(JSON.stringify(m), { headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-store' } });
+}
+
 async function networkFirst(event, isNavigation, shell) {
   const request = event.request;
   const cache = await caches.open(CACHE);
@@ -241,6 +257,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.pathname.startsWith('/s/') || url.pathname === '/s' || url.pathname.startsWith('/q/') || url.pathname === '/q' || url.pathname === '/q.html') return; // guest QR menu: always straight from the network
+  // PWA name: manifest.webmanifest?n=<shop name> is the same manifest under the SHOP's name (so the installed app is "Alvin Supermarket", not "Six Star POS")
+  if (url.pathname.endsWith('/manifest.webmanifest') && url.searchParams.get('n')) { event.respondWith(shopManifest(url.searchParams.get('n'))); return; }
   if (url.pathname.endsWith('/sw.js')) return;
 
   if (req.mode === 'navigate') { event.respondWith(fastLocal(event, true, url.pathname.startsWith('/hardware') ? 'hardware/index.html' : '')); return; }

@@ -21,10 +21,12 @@
  * warehouses.html now redirects to inventory.html?step=warehouses.
  */
 (function () {
+  let handoffAction = '';
   const state = { view: 'stock', page: 1, limit: 10, search: '', location: '', productId: '', productName: '', mv: { search: '', categoryId: '', type: '', from: '', to: '' } };
   // opened from Products > "View stock":  inventory.html?productId=...&search=...
   try {
     const q = new URLSearchParams(window.location.search);
+    if (q.get('action') === 'receive' || q.get('action') === 'adjust') handoffAction = q.get('action');
     if (q.get('productId')) { state.productId = q.get('productId'); state.productName = q.get('search') || ''; state.search = q.get('search') || ''; }
   } catch { /* ignore */ }
   const wh = () => !!(window.AppShell.hasFeature && window.AppShell.hasFeature('multiWarehouse'));
@@ -50,7 +52,11 @@
       if (endpoint !== '/inventory') throw new Error('Warehouse stock needs an internet connection.');
       return { data: await IO().stockPage(params), offline: true };
     }
-    try { return await window.Api.get(endpoint, params); }
+    try {
+      const res = await window.Api.get(endpoint, params);
+      if (endpoint === '/inventory' && IO() && res && res.data) IO().remember(res.data.items);
+      return res;
+    }
     catch (e) { if (endpoint === '/inventory' && IO() && IO().noteFailure(e)) return { data: await IO().stockPage(params), offline: true }; throw e; }
   }
   /** Online: POST. Offline: queue the same change on this till (it uploads when the internet is back). */
@@ -93,6 +99,7 @@
     bindHeaderActions();
     bindTabs();
     await renderActiveView();
+    runHandoff();
 
     unsubscribeBranchChange = window.AppShell.onBranchChange(() => {
       state.page = 1;
@@ -794,6 +801,23 @@
     modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
   }
 
+  /** Products > 3 dots > Receive / Adjust stock: open that product's modal straight away (works offline too). */
+  async function runHandoff() {
+    const act = handoffAction; handoffAction = '';
+    if (!act || !state.productId) return;
+    try {
+      if (!ioActive() && IO() && IO().available() && !(window.Connectivity ? window.Connectivity.isOnline() : navigator.onLine)) await IO().ready();
+      let product;
+      if (ioActive()) { await IO().ready(); product = IO().product(state.productId, state.productName); }
+      else {
+        try { const { data } = await window.Api.get(`/products/${state.productId}`); product = data.product || data; }
+        catch (e) { if (IO() && IO().noteFailure(e)) product = IO().product(state.productId, state.productName); else throw e; }
+      }
+      if (!product) throw new Error('Product not found');
+      (act === 'receive' ? openReceiveModal : openAdjustModal)({ product, variant: null, location: 'RETAIL' });
+    } catch (err) { window.UI.toast.error(err.message || 'Could not open the product'); }
+  }
+
   /** Receive / Adjust straight from a stock row: the product (and variant) is already chosen. */
   async function openStockAction(btn) {
     const { stockAction, pid, vid, loc } = btn.dataset;
@@ -801,7 +825,7 @@
     btn.disabled = true;
     try {
       if (ioActive()) {
-        const lp = IO().product(pid);
+        const lp = IO().product(pid, btn.dataset.name);
         if (!lp) throw new Error('This product is not saved on this till.');
         return (stockAction === 'receive' ? openReceiveModal : openAdjustModal)({ product: lp, variant: null, location: loc });
       }
@@ -1493,4 +1517,4 @@
       }
     });
   }
-})(); 
+})(); s
