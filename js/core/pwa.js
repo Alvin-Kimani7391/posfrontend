@@ -75,6 +75,14 @@
     if (n) { if (ls.get(CFG.nameKey) !== n) ls.set(CFG.nameKey, n); return n; }
     return cleanName(ls.get(CFG.nameKey));
   }
+  /** This shop's id (profile, else the signed-in user): each shop gets its own installed app. */
+  function shopId() {
+    var id = '';
+    try { var pr = JSON.parse(window.localStorage.getItem('pos.businessProfile') || 'null'); id = (pr && (pr._id || pr.id)) || ''; } catch (e) { /* ignore */ }
+    if (!id) { try { var u = JSON.parse(window.localStorage.getItem('pos.user') || 'null'); id = (u && (u.businessId && (u.businessId._id || u.businessId))) || ''; } catch (e) { /* ignore */ } }
+    id = String(id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+    return id;
+  }
   function appName() { return shopName() || CFG.appName; }
 
   /** Point the manifest at the shop name; the browser re-reads it and re-offers the install with the right name. */
@@ -85,7 +93,8 @@
     var link = document.querySelector('link[rel="manifest"]');
     if (!link) return false;
     manifestNameApplied = n;
-    link.setAttribute('href', CFG.manifestUrl + '?n=' + encodeURIComponent(n));
+    var sid = window.__POS_SCOPE || shopId();
+    link.setAttribute('href', CFG.manifestUrl + '?n=' + encodeURIComponent(n) + (sid ? '&s=' + encodeURIComponent(sid) : ''));
     var t = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if (t) t.setAttribute('content', n);
     var strong = bannerEl && bannerEl.querySelector('.pwa-copy strong');
@@ -121,14 +130,15 @@
   function dismissedRecently() {
     try { return window.sessionStorage.getItem(CFG.dismissKey) === '1'; } catch (e) { return false; }
   }
-  function rememberInstalled() { ls.set('pos.pwa.installed', '1'); }
+  function instKey() { var sid = window.__POS_SCOPE ? '' : shopId(); return 'pos.pwa.installed' + (sid ? '.' + sid : ''); }
+  function rememberInstalled() { ls.set(instKey(), '1'); }
   function rememberInstalledAs(name) { ls.set(CFG.installedAsKey, name || appName()); }
   /** An app installed before the shop name existed is still called "Six Star POS" (the browser keeps the install-time name). */
   function isLegacyInstall() {
     if (isIos()) return false; // iPhone/iPad cannot tell us the home-screen name
     var shop = shopName();
     if (!shop) return false;
-    if (!(isStandalone() || ls.get('pos.pwa.installed') === '1')) return false;
+    if (!(isStandalone() || ls.get(instKey()) === '1')) return false;
     return ls.get(CFG.installedAsKey) !== shop;
   }
   function renameSnoozed() {
@@ -177,7 +187,7 @@
 
   function canInstall() {
     if (isStandalone() || installedNow) return false;
-    return !!deferredPrompt || ((isIos() || isPhone()) && ls.get('pos.pwa.installed') !== '1');
+    return !!deferredPrompt || ((isIos() || isPhone()) && ls.get(instKey()) !== '1');
   }
 
   function emitChange() {
@@ -572,7 +582,7 @@
     e.preventDefault();      // we show our own, better-timed prompt
     deferredPrompt = e;
     window.__bip = e;
-    ls.set('pos.pwa.installed', '0'); // the browser only offers the install when the app is NOT installed (e.g. it was uninstalled)
+    ls.set(instKey(), '0'); // the browser only offers the install when the app is NOT installed (e.g. it was uninstalled)
     hideRenameCard();
     // If the plain "how to install" card is already showing, swap it for the real one-tap Install card.
     if (bannerEl) { bannerEl.remove(); bannerEl = null; }

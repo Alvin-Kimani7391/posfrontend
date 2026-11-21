@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script src="js/core/shop-scope.js"></script>
 <meta charset="UTF-8" />
 <script>window.__dp=null;window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__dp=e;window.dispatchEvent(new Event('sx-bip'));});window.addEventListener('appinstalled',function(){window.__dp=null;try{localStorage.setItem('store:installed',String(Date.now()));}catch(e){}window.dispatchEvent(new Event('sx-inst'));});</script>
 <script>/* attach the restaurant's manifest as early as possible so the browser can offer "Install" */(function(){try{var m=location.pathname.match(/\/(?:s|q)\/([^\/?#]+)/),t=m?decodeURIComponent(m[1]):(new URLSearchParams(location.search).get('t')||localStorage.getItem('sx.lastToken')||'');if(t&&/^[A-Za-z0-9_-]{8,200}$/.test(t)){var l=document.createElement('link');l.rel='manifest';l.href='/api/store-manifest?t='+encodeURIComponent(t);document.head.appendChild(l);}}catch(e){}})();</script>

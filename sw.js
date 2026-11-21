@@ -4,7 +4,7 @@
  * Cross-origin: only well-known CDNs (icons/fonts/scanner lib), stale-while-revalidate.
  * Place in the SAME folder as dashboard.html (the site root). Bump VERSION on every deploy.
  */
-const VERSION = 'v5.9.7-fast-lists';
+const VERSION = 'v6.0.0-shop-apps';
 /** What changed in this release. The page shows these lines in the update prompt and again once, after the update is applied.
  *  Edit this list togethser with VERSION on every deploy. */
 const NOTES = [
@@ -58,7 +58,7 @@ const PRECACHE = [
   'css/variables.css', 'css/base.css', 'css/components.css', 'css/layout.css', 'css/pos.css', 'css/pos-mobile.css', 'css/split-pay.css', 'css/reports.css',
   'css/tour.css', 'css/announcements.css', 'css/billing.css', 'css/crm.css',
 
-  'js/core/config.js', 'js/core/icons.js', 'js/core/storage.js', 'js/core/api.js', 'js/core/fast-search.js', 'js/core/connectivity.js',
+  'js/core/shop-scope.js', 'js/core/config.js', 'js/core/icons.js', 'js/core/storage.js', 'js/core/api.js', 'js/core/fast-search.js', 'js/core/connectivity.js',
   'js/core/offline-db.js', 'js/core/offline-sync.js', 'js/core/offline-shifts.js', 'js/core/offline-auth.js',
   'js/core/offline-sale.js', 'js/core/wholesale.js', 'js/core/password-toggle.js', 'js/core/offline-ui.js', 'js/core/offline-settings.js',
   'js/core/permissions.js', 'js/core/ui.js', 'js/core/ui-polish.js', 'js/core/notification-types.js', 'js/core/notifications.js',
@@ -161,7 +161,7 @@ self.addEventListener('message', (event) => {
   }
 });
 
-async function shopManifest(rawName) {
+async function shopManifest(rawName, rawShop) {
   const name = String(rawName).replace(/[\u0000-\u001f<>"]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
   const base = new URL('manifest.webmanifest', self.registration.scope).href;
   let text = null;
@@ -169,6 +169,12 @@ async function shopManifest(rawName) {
   if (!text) { const hit = await (await caches.open(CACHE)).match(base, { ignoreSearch: true }); if (hit) text = await hit.text(); }
   if (!text) return new Response('{}', { status: 503, headers: { 'Content-Type': 'application/manifest+json' } });
   const m = JSON.parse(text);
+  const shop = String(rawShop || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+  if (shop) { // one installed app per shop: own app id, opens straight into that shop's scope
+    m.id = 'shop-' + shop;
+    m.start_url = 'dashboard.html?source=pwa&shop=' + shop;
+    (m.shortcuts || []).forEach((sc) => { if (sc.url) sc.url += (sc.url.includes('?') ? '&' : '?') + 'shop=' + shop; });
+  }
   if (name) { m.name = name; m.short_name = name.length > 14 ? name.slice(0, 14).trim() : name; }
   return new Response(JSON.stringify(m), { headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-store' } });
 }
@@ -258,7 +264,7 @@ self.addEventListener('fetch', (event) => {
   }
   if (url.pathname.startsWith('/s/') || url.pathname === '/s' || url.pathname.startsWith('/q/') || url.pathname === '/q' || url.pathname === '/q.html') return; // guest QR menu: always straight from the network
   // PWA name: manifest.webmanifest?n=<shop name> is the same manifest under the SHOP's name (so the installed app is "Alvin Supermarket", not "Six Star POS")
-  if (url.pathname.endsWith('/manifest.webmanifest') && url.searchParams.get('n')) { event.respondWith(shopManifest(url.searchParams.get('n'))); return; }
+  if (url.pathname.endsWith('/manifest.webmanifest') && (url.searchParams.get('n') || url.searchParams.get('s'))) { event.respondWith(shopManifest(url.searchParams.get('n') || '', url.searchParams.get('s') || '')); return; }
   if (url.pathname.endsWith('/sw.js')) return;
 
   if (req.mode === 'navigate') { event.respondWith(fastLocal(event, true, url.pathname.startsWith('/hardware') ? 'hardware/index.html' : '')); return; }
