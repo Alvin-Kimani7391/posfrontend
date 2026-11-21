@@ -127,6 +127,7 @@
           <p>${wh() ? 'Retail and warehouse stock, movement history, and transfers.' : 'Stock levels, movement history, and inter-branch transfers.'}</p>
         </div>
         <div class="flex gap-2" style="flex-wrap:wrap">
+          <button class="btn btn-secondary" id="refresh-inv-btn" title="Reload the stock figures">&#x21bb; Refresh</button>
           <button class="btn btn-secondary" id="adjust-stock-btn" data-requires-permission="inventory.adjust">${window.Icons.get('edit')} Adjust</button>
           <button class="btn btn-secondary" id="receive-stock-btn" data-requires-permission="inventory.receive">${window.Icons.get('plus')} Receive stock</button>
           ${window.UnitKit ? `<button class="btn btn-secondary" id="break-stock-btn" data-requires-permission="inventory.adjust" title="Break a bag into sellable sizes">${window.Icons.get('inventory')} Break down</button>` : ''}
@@ -159,6 +160,13 @@
   }
 
   function bindHeaderActions() {
+    document.getElementById('refresh-inv-btn').addEventListener('click', async (e) => {
+      const b = e.currentTarget; if (b.disabled) return;
+      b.disabled = true; const t = b.innerHTML; b.innerHTML = '&#x21bb; Refreshing...';
+      try { await renderActiveView(); window.UI.toast.success('Refreshed'); }
+      catch { window.UI.toast.error('Could not refresh'); }
+      finally { b.disabled = false; b.innerHTML = t; }
+    });
     document.getElementById('adjust-stock-btn').addEventListener('click', openAdjustModal);
     document.getElementById('receive-stock-btn').addEventListener('click', openReceiveModal);
     window.AppShell.runUrlAction?.('receive-stock-btn'); // opened from the setup guide
@@ -1517,4 +1525,4 @@
       }
     });
   }
-})(); s
+})(); 
