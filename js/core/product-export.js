@@ -95,9 +95,9 @@
   async function fetchAll(status) {
     const out = []; let page = 1, pages = 1;
     do {
-      const { data } = await window.Api.get('/products', { page, limit: 500, status: status || undefined });
+      const { data } = await window.Api.get('/products', { page, limit: 100, status: status || undefined });
       out.push(...(data.items || [])); pages = data.pages || 1; page += 1;
-    } while (page <= pages && page < 100);
+    } while (page <= pages && page <= 300);
     return out;
   }
   async function fetchStock(ids, branchId, onProgress) {
