@@ -7,6 +7,9 @@
  * label per row down a continuous strip for a thermal receipt printer: name + price on the left, barcode on the
  * right, a dashed cut line between labels. The page is sized to the roll width (@page size Nmm auto, no margins).
  *
+ * SHOP NAME: the "Show shop name" tick adds / removes the shop name on every label (sheet and receipt roll) and in the live
+ * preview. Every block of a label has an explicit height worked out from the real text width, so nothing can overlap.
+ *
  * DISCOUNTS: a product's standing per-unit discount (defaultDiscount, set on the Products page) is
  * shown here as Was / Now / Save. The owner can print ALL products (discounted ones are marked
  * with the struck-through old price) or ONLY the discounted products.
@@ -27,7 +30,8 @@
   const esc = (v) => window.UI.escapeHtml(v == null ? '' : v);
 
   let contentEl;
-  const state = { rows: [], selected: new Set(), search: '', categoryId: '', size: 'medium', media: 'sheet', copies: 1, showSku: true, mode: 'all', categories: [], businessName: '' };
+  const state = { rows: [], selected: new Set(), search: '', categoryId: '', size: 'medium', media: 'sheet', copies: 1, showSku: true, showShop: prefShop(), mode: 'all', categories: [], businessName: '' };
+  function prefShop() { try { return window.Storage.getPref('shelfShowShop', true) !== false; } catch { return true; } }
 
   const CACHE_KEY = 'sl_rows_v2';
   const CACHE_MS = 10 * 60 * 1000;
@@ -41,7 +45,7 @@
     if (!contentEl) return;
     // The page is drawn at ONCE; products stream in behind it.
     render();
-    window.AppShell.whenProfileReady().then((prof) => { state.businessName = prof?.name || window.AppShell.getUser()?.businessName || ''; }).catch(() => {});
+    window.AppShell.whenProfileReady().then((prof) => { state.businessName = prof?.name || window.AppShell.getUser()?.businessName || ''; renderPreview(); }).catch(() => {});
     loadCategories().then((cats) => {
       state.categories = cats;
       const sel = document.getElementById('sl-cat');
@@ -157,7 +161,9 @@
             </select></label>
           <label class="sl-inline">Copies <input class="input" id="sl-copies" type="number" min="1" max="20" value="${state.copies}" style="width:70px" /></label>
           <label class="sl-inline"><input type="checkbox" id="sl-sku" ${state.showSku ? 'checked' : ''} /> Show SKU</label>
+          <label class="sl-inline"><input type="checkbox" id="sl-shop" ${state.showShop ? 'checked' : ''} /> Show shop name</label>
         </div>
+        <div class="sl-pv" style="margin-top:var(--space-3)"><div class="sl-pv-box" id="sl-pv"></div><div class="sl-pv-note" id="sl-pv-note"></div></div>
         <div class="sl-actions">
           <span class="text-sm text-secondary" id="sl-count"></span>
           <span style="flex:1"></span>
@@ -197,6 +203,7 @@
     const all = document.getElementById('sl-all');
     if (all) all.checked = rows.length > 0 && rows.every((r) => state.selected.has(r.id));
     updateCount();
+    renderPreview();
   }
 
   // O(n): the old version re-filtered the whole list once per product.
@@ -213,24 +220,181 @@
     document.getElementById('sl-search').addEventListener('input', window.UI.debounce((e) => { state.search = e.target.value.trim().toLowerCase(); shown = SHOW_STEP; renderBody(); }, 120));
     document.getElementById('sl-cat').addEventListener('change', (e) => { state.categoryId = e.target.value; shown = SHOW_STEP; renderBody(); });
     document.getElementById('sl-mode').addEventListener('change', (e) => { state.mode = e.target.value; shown = SHOW_STEP; renderBody(); });
-    document.getElementById('sl-size').addEventListener('change', (e) => { state.size = e.target.value; });
+    document.getElementById('sl-size').addEventListener('change', (e) => { state.size = e.target.value; renderPreview(); });
     document.getElementById('sl-media').addEventListener('change', (e) => {
       state.media = e.target.value;
       document.getElementById('sl-size').disabled = state.media !== 'sheet'; // roll labels have a fixed size
+      renderPreview();
     });
     document.getElementById('sl-copies').addEventListener('change', (e) => { state.copies = Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 1)); e.target.value = state.copies; });
-    document.getElementById('sl-sku').addEventListener('change', (e) => { state.showSku = e.target.checked; });
-    document.getElementById('sl-all').addEventListener('change', (e) => { touched = true; visible().forEach((r) => (e.target.checked ? state.selected.add(r.id) : state.selected.delete(r.id))); renderBody(); });
+    document.getElementById('sl-sku').addEventListener('change', (e) => { state.showSku = e.target.checked; renderPreview(); });
+    document.getElementById('sl-shop').addEventListener('change', (e) => {
+      state.showShop = e.target.checked;
+      try { window.Storage.setPref('shelfShowShop', state.showShop); } catch { /* optional */ }
+      if (state.showShop && !shopName()) window.UI.toast.info('No shop name is set yet. Add it in Settings → Business profile.');
+      renderPreview();
+    });
+    document.getElementById('sl-all').addEventListener('change', (e) => { touched = true; setTimeout(renderPreview, 0); visible().forEach((r) => (e.target.checked ? state.selected.add(r.id) : state.selected.delete(r.id))); renderBody(); });
     const body = document.getElementById('sl-body');
     body.addEventListener('change', (e) => {
       const cb = e.target.closest('input[data-id]'); if (!cb) return;
       touched = true;
       cb.checked ? state.selected.add(cb.dataset.id) : state.selected.delete(cb.dataset.id);
-      updateCount();
+      updateCount(); renderPreview();
     });
     document.getElementById('sl-more').addEventListener('click', (e) => { if (e.target.closest('#sl-show-more')) { shown += SHOW_STEP; renderBody(); } });
     document.getElementById('sl-print-list').addEventListener('click', () => print('list'));
     document.getElementById('sl-print-labels').addEventListener('click', () => print('labels'));
+  }
+
+
+  /* ---------------- label layout engine (no overlap) ---------------- */
+  const LH = 1.15;
+  const cl = (v, a, b) => Math.max(a, Math.min(b, v));
+  let ctx2d = null; const emMem = new Map();
+  function em(word) {
+    let v = emMem.get(word);
+    if (v === undefined) {
+      try { if (!ctx2d) { ctx2d = document.createElement('canvas').getContext('2d'); ctx2d.font = 'bold 100px Arial, Helvetica, sans-serif'; } v = ctx2d.measureText(word).width / 100; }
+      catch { v = word.length * 0.58; }
+      v *= 1.05; emMem.set(word, v);
+    }
+    return v;
+  }
+  function wrapLines(text, f, boxW) {
+    const maxEm = boxW / f; const sp = em(' '); let lines = 1; let cur = 0;
+    for (const w of String(text).split(/\s+/).filter(Boolean)) {
+      const ww = em(w);
+      if (ww > maxEm) { const parts = Math.ceil(ww / maxEm); if (cur > 0) lines++; lines += parts - 1; cur = ww - (parts - 1) * maxEm; continue; }
+      if (cur === 0) cur = ww; else if (cur + sp + ww <= maxEm) cur += sp + ww; else { lines++; cur = ww; }
+    }
+    return lines;
+  }
+  const fitMem = new Map();
+  function fitFont(text, boxW, boxH, fMax, fMin) {
+    const key = `${text}|${boxW.toFixed(1)}|${boxH.toFixed(1)}|${fMax.toFixed(1)}|${fMin.toFixed(1)}`;
+    let r = fitMem.get(key); if (r) return r;
+    r = { f: fMin, ok: false };
+    for (let f = fMax; f >= fMin - 1e-6; f -= 0.05) { if (wrapLines(text, f, boxW) * f * LH <= boxH + 1e-6) { r = { f, ok: true }; break; } }
+    if (fitMem.size > 20000) fitMem.clear();
+    fitMem.set(key, r); return r;
+  }
+  const shopName = () => (state.showShop ? String(state.businessName || '').trim() : '');
+  const fmt = (n) => window.UI.formatMoney(n);
+  const uniq = (rows) => Array.from(new Set(rows.map((r) => String(r.name || '')))).sort((a, b) => b.length - a.length).slice(0, 40);
+
+  function pickNameBox(names, iw, nameMax, prefFn, minFn) {
+    for (let n = 1; n <= 4; n++) {
+      const box = Math.min(nameMax, n * prefFn * LH);
+      if (names.every((t) => fitFont(t, iw, box, prefFn, minFn).f >= prefFn * 0.82)) return box;
+      if (box >= nameMax - 1e-6) break;
+    }
+    return nameMax;
+  }
+  function sheetPlan(sz, rows, shop) {
+    const px = 2.5; const py = 2; const bd = 0.6; const iw = sz.w - 2 * px - bd; const ih = sz.h - 2 * py - bd; const g = 0.5;
+    const names = uniq(rows); const anyDisc = rows.some((r) => r.hasDiscount);
+    const maxLen = rows.slice(0, 2000).reduce((m, r) => Math.max(m, fmt(r.hasDiscount ? r.now : r.price).length, r.hasDiscount ? fmt(r.price).length + 4 : 0), 6);
+    const prefFn = cl(sz.h * 0.085, 2.3, 4.8); const minFn = 1.7;
+    const scales = [1, 0.88, 0.78, 0.68, 0.6]; let out = null;
+    for (let si = 0; si < scales.length; si++) {
+      const sc = scales[si]; const last = si === scales.length - 1;
+      let fs = shop ? cl(sz.h * 0.065 * sc, 1.5, 2.8) : 0; if (fs) fs = Math.min(fs, iw / (em(shop.toUpperCase()) * 1.06)); const shopH = fs ? fs * 1.25 : 0;
+      const fc = cl(sz.h * 0.06 * sc, 1.5, 2.6); const codeH = fc * 1.25;
+      const fp = Math.min(cl(sz.h * 0.16 * sc, 3, 10), iw / (maxLen * 0.64));
+      const fw = Math.min(fp * 0.5, (iw * 0.55) / ((maxLen + 4) * 0.56)); const fv = fw * 0.85;
+      const pH = anyDisc ? fw * 1.3 + 0.4 + fp * 0.85 * 1.15 + 0.4 : fp * 1.15;
+      const fixed = [shopH, codeH, pH].filter(Boolean);
+      const avail = ih - fixed.reduce((a, b) => a + b, 0) - (fixed.length + 1) * g;
+      const bcMin = Math.min(Math.max(6, sz.h * 0.2), Math.max(1, avail * 0.55));
+      let nameMax = avail - bcMin;
+      if (nameMax < minFn * LH && !last) continue;
+      nameMax = Math.max(minFn * LH, nameMax);
+      const nameH = pickNameBox(names, iw, nameMax, prefFn, minFn);
+      if (!last && !names.every((t) => fitFont(t, iw, nameH, prefFn, minFn).ok)) continue;
+      out = { px, py, g, iw, prefFn, minFn, fs, shopH, fc, codeH, fp, fw, fv, pH, nameH, bcMax: iw * 0.5 };
+      break;
+    }
+    return out;
+  }
+  function sheetLabels(cells, sz, rows) {
+    const shop = shopName(); const p = sheetPlan(sz, rows, shop);
+    const vars = `--lb-w:${sz.w}mm;--lb-h:${sz.h}mm;--lb-px:${p.px}mm;--lb-py:${p.py}mm;--lb-g:${p.g}mm;--lb-nameH:${p.nameH.toFixed(2)}mm;--lb-pH:${p.pH.toFixed(2)}mm;--lb-fp:${p.fp.toFixed(2)}mm;--lb-fw:${p.fw.toFixed(2)}mm;--lb-fv:${p.fv.toFixed(2)}mm;--lb-fc:${p.fc.toFixed(2)}mm;--lb-codeH:${p.codeH.toFixed(2)}mm;--lb-fs:${p.fs.toFixed(2)}mm;--lb-shopH:${p.shopH.toFixed(2)}mm;--lb-bcMax:${p.bcMax.toFixed(1)}mm`;
+    const svgs = new Map();
+    const bc = (code) => { if (!svgs.has(code)) svgs.set(code, window.Barcode.svg(code, { fluid: true, height: 40, module: 2, quiet: 8 })); return svgs.get(code); };
+    const html = `<div class="lb-grid" style="${vars}">${cells.map((r) => {
+      const fit = fitFont(String(r.name || ''), p.iw, p.nameH, p.prefFn, p.minFn); const f = fit.f;
+      const cn = fit.ok ? 0 : Math.max(1, Math.floor((p.nameH + 0.01) / (f * LH)));
+      return `<div class="lb${r.hasDiscount ? ' lb-disc' : ''}">
+        <div class="lb-name"><span style="font-size:${f.toFixed(2)}mm${cn ? `;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${cn};overflow:hidden` : ''}">${esc(r.name)}</span></div>
+        <div class="lb-pblock">${r.hasDiscount
+          ? `<div class="lb-offer"><div class="lb-was-row"><span class="lb-was">Was ${fmt(r.price)}</span><span class="lb-save">SAVE ${fmt(r.discount)}</span></div><div class="lb-price"><span class="lb-now">NOW</span> ${fmt(r.now)}</div></div>`
+          : `<div class="lb-price">${fmt(r.price)}</div>`}</div>
+        <div class="lb-bc">${bc(r.barcode)}</div>
+        <div class="lb-code">${esc(r.barcode)}${state.showSku && r.fromSku === false && r.sku ? ` · ${esc(r.sku)}` : ''}</div>
+        ${p.shopH ? `<div class="lb-shop">${esc(shop)}</div>` : ''}
+      </div>`;
+    }).join('')}</div>`;
+    return { html, plan: p };
+  }
+  function rollPlan(roll, rows, shop) {
+    const narrow = roll.paper <= 58; const px = 1; const py = 1.5; const bd = 0.3; const g = 0.6;
+    const iw = roll.w - 2 * px; const ih = roll.h - 2 * py - bd;
+    const infoW = iw * (narrow ? 0.46 : 0.44); const names = uniq(rows); const anyDisc = rows.some((r) => r.hasDiscount);
+    const maxLen = rows.slice(0, 2000).reduce((m, r) => Math.max(m, fmt(r.hasDiscount ? r.now : r.price).length + (r.hasDiscount ? 4 : 0), r.hasDiscount ? fmt(r.price).length + 4 : 0), 6);
+    const scales = [1, 0.88, 0.78, 0.68, 0.6]; let out = null;
+    for (let si = 0; si < scales.length; si++) {
+      const sc = scales[si]; const last = si === scales.length - 1;
+      let fs = shop ? cl(roll.h * 0.075 * sc, 1.5, 2.6) : 0; if (fs) fs = Math.min(fs, iw / (em(shop.toUpperCase()) * 1.06)); const shopH = fs ? fs * 1.25 : 0;
+      const mainH = ih - shopH - (shopH ? g : 0);
+      const fp = Math.min(cl(mainH * 0.22 * sc, 3, 8), infoW / (maxLen * 0.64));
+      const fw = Math.min(fp * 0.5, infoW * 0.5 / ((maxLen + 4) * 0.56)); const fv = fw * 0.85;
+      const pH = anyDisc ? fw * 1.3 + 0.4 + fp * 0.85 * 1.15 : fp * 1.15;
+      const prefFn = cl(mainH * 0.12, 2.2, 3.8); const minFn = 1.6;
+      let nameMax = mainH - pH - g; if (nameMax < minFn * LH && !last) continue;
+      nameMax = Math.max(minFn * LH, nameMax);
+      const nameH = pickNameBox(names, infoW, nameMax, prefFn, minFn);
+      if (!last && !names.every((t) => fitFont(t, infoW, nameH, prefFn, minFn).ok)) continue;
+      const fc = cl(mainH * 0.1 * sc, 1.5, 2.4);
+      out = { px, py, g, iw, infoW, prefFn, minFn, fs, shopH, fp, fw, fv, pH, nameH, fc, codeH: fc * 1.25 };
+      break;
+    }
+    return out;
+  }
+  function rollLabels(cells, roll, rows) {
+    const shop = shopName(); const p = rollPlan(roll, rows, shop);
+    const vars = `--rl-w:${roll.w}mm;--rl-h:${roll.h}mm;--rl-px:${p.px}mm;--rl-py:${p.py}mm;--rl-g:${p.g}mm;--rl-infoW:${p.infoW.toFixed(2)}mm;--rl-nameH:${p.nameH.toFixed(2)}mm;--rl-pH:${p.pH.toFixed(2)}mm;--rl-fp:${p.fp.toFixed(2)}mm;--rl-fw:${p.fw.toFixed(2)}mm;--rl-fv:${p.fv.toFixed(2)}mm;--rl-fc:${p.fc.toFixed(2)}mm;--rl-codeH:${p.codeH.toFixed(2)}mm;--rl-fs:${p.fs.toFixed(2)}mm;--rl-shopH:${p.shopH.toFixed(2)}mm`;
+    const svgs = new Map();
+    const bc = (code) => { if (!svgs.has(code)) svgs.set(code, window.Barcode.svg(code, { fluid: true, height: 40, module: 2, quiet: 8 })); return svgs.get(code); };
+    const html = `<div class="rl-roll" style="${vars}">${cells.map((r) => {
+      const fit = fitFont(String(r.name || ''), p.infoW, p.nameH, p.prefFn, p.minFn); const f = fit.f;
+      const cn = fit.ok ? 0 : Math.max(1, Math.floor((p.nameH + 0.01) / (f * LH)));
+      return `<div class="rl${r.hasDiscount ? ' rl-disc' : ''}">
+        ${p.shopH ? `<div class="rl-shop">${esc(shop)}</div>` : ''}
+        <div class="rl-main">
+          <div class="rl-info">
+            <div class="rl-name"><span style="font-size:${f.toFixed(2)}mm${cn ? `;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${cn};overflow:hidden` : ''}">${esc(r.name)}</span></div>
+            <div class="rl-pblock">${r.hasDiscount
+              ? `<div class="rl-was-row"><span class="rl-was">Was ${fmt(r.price)}</span><span class="rl-save">SAVE ${fmt(r.discount)}</span></div><div class="rl-price"><span class="rl-now">NOW</span> ${fmt(r.now)}</div>`
+              : `<div class="rl-price">${fmt(r.price)}</div>`}</div>
+          </div>
+          <div class="rl-barcode">
+            <div class="rl-bc">${bc(r.barcode)}</div>
+            <div class="rl-code">${esc(r.barcode)}${state.showSku && r.fromSku === false && r.sku ? ` · ${esc(r.sku)}` : ''}</div>
+          </div>
+        </div></div>`;
+    }).join('')}</div>`;
+    return { html, plan: p };
+  }
+  function renderPreview() {
+    const box = document.getElementById('sl-pv'); const note = document.getElementById('sl-pv-note');
+    if (!box) return;
+    const rows = state.rows.length ? chosen() : [];
+    if (!rows.length) { box.innerHTML = '<div class="text-muted text-sm" style="padding:12px">Select a product to see the label.</div>'; if (note) note.textContent = ''; return; }
+    const sample = rows.slice(0, 400);
+    const pick = sample.reduce((a, r) => (r.hasDiscount && !a.hasDiscount) || (r.hasDiscount === a.hasDiscount && r.name.length > a.name.length) ? r : a, sample[0]);
+    box.innerHTML = ROLLS[state.media] ? rollLabels([pick], ROLLS[state.media], sample).html : sheetLabels([pick], SIZES[state.size], sample).html;
+    if (note) note.textContent = `Preview of “${pick.name}” as it will print.${state.showShop && !state.businessName ? ' No shop name is set yet (Settings → Business profile).' : ''}`;
   }
 
   /* ---------------- printing ---------------- */
@@ -254,22 +418,8 @@
       const roll = ROLLS[state.media];
       const cells = [];
       rows.forEach((r) => { for (let i = 0; i < state.copies; i++) cells.push(r); });
-      const narrow = roll.paper <= 58;
-      area.innerHTML = `<div class="rl-roll${narrow ? ' rl-narrow' : ''}" style="--rl-w:${roll.w}mm;--rl-h:${roll.h}mm">
-        ${cells.map((r) => `<div class="rl${r.hasDiscount ? ' rl-disc' : ''}">
-          <div class="rl-info">
-            <div class="rl-name">${esc(r.name)}</div>
-            ${r.hasDiscount
-              ? `<div class="rl-was-row"><span class="rl-was">Was ${window.UI.formatMoney(r.price)}</span><span class="rl-save">SAVE ${window.UI.formatMoney(r.discount)}</span></div><div class="rl-price"><span class="rl-now">NOW</span> ${window.UI.formatMoney(r.now)}</div>`
-              : `<div class="rl-price">${window.UI.formatMoney(r.price)}</div>`}
-          </div>
-          <div class="rl-barcode">
-            <div class="rl-bc">${window.Barcode.svg(r.barcode, { fluid: true, height: 40, module: 2, quiet: 8 })}</div>
-            <div class="rl-code">${esc(r.barcode)}${state.showSku && r.fromSku === false && r.sku ? ` · ${esc(r.sku)}` : ''}</div>
-          </div>
-        </div>`).join('')}</div>`;
+      area.innerHTML = rollLabels(cells, roll, rows).html;
       document.body.dataset.printMode = 'labels';
-      // The roll is as wide as the paper and as long as the labels: size the page to it (no margins).
       pageStyle = document.createElement('style');
       pageStyle.id = 'sl-page-style';
       pageStyle.textContent = `@page { size: ${roll.paper}mm auto; margin: 0; } @media print { body[data-print-mode] { margin: 0 !important; } }`;
@@ -278,17 +428,7 @@
       const sz = SIZES[state.size];
       const cells = [];
       rows.forEach((r) => { for (let i = 0; i < state.copies; i++) cells.push(r); });
-      area.innerHTML = `<div class="lb-grid" style="--lb-w:${sz.w}mm;--lb-h:${sz.h}mm">
-        ${cells.map((r) => `<div class="lb${r.hasDiscount ? ' lb-disc' : ''}">
-          <div class="lb-name">${esc(r.name)}</div>
-          ${r.hasDiscount ? `<div class="lb-offer">
-            <div class="lb-was-row"><span class="lb-was">Was ${window.UI.formatMoney(r.price)}</span><span class="lb-save">SAVE ${window.UI.formatMoney(r.discount)}</span></div>
-            <div class="lb-price"><span class="lb-now">NOW</span> ${window.UI.formatMoney(r.now)}</div>
-          </div>` : `<div class="lb-price">${window.UI.formatMoney(r.price)}</div>`}
-          <div class="lb-bc">${window.Barcode.svg(r.barcode, { fluid: true, height: 40, module: 2, quiet: 8 })}</div>
-          <div class="lb-code">${esc(r.barcode)}${state.showSku && r.fromSku === false && r.sku ? ` · ${esc(r.sku)}` : ''}</div>
-          ${state.businessName ? `<div class="lb-shop">${esc(state.businessName)}</div>` : ''}
-        </div>`).join('')}</div>`;
+      area.innerHTML = sheetLabels(cells, sz, rows).html;
       document.body.dataset.printMode = 'labels';
     }
     const done = () => { window.removeEventListener('afterprint', done); document.body.removeAttribute('data-print-mode'); area.innerHTML = ''; if (pageStyle) pageStyle.remove(); window.BusinessSetup?.markStepDone('labels'); };

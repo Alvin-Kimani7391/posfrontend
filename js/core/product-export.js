@@ -32,6 +32,11 @@
     { k: 'wh', l: 'Warehouse stock', g: 'Stock', stock: 1, get: (r) => r.wh },
     { k: 'costval', l: 'Stock value (cost)', g: 'Stock', stock: 1, get: (r) => (r.stock === '' ? '' : Math.round(num(r.stock) * num(r.cost) * 100) / 100) },
     { k: 'retailval', l: 'Stock value (retail)', g: 'Stock', stock: 1, get: (r) => (r.stock === '' ? '' : Math.round(num(r.stock) * num(r.price) * 100) / 100) },
+    { k: 'trackBatch', l: 'Track batch', g: 'Batch & expiry', imp: 1, get: (r) => (r.trackBatch ? 'Yes' : 'No') },
+    { k: 'trackExpiry', l: 'Track expiry', g: 'Batch & expiry', imp: 1, get: (r) => (r.trackExpiry ? 'Yes' : 'No') },
+    { k: 'batchNo', l: 'Batch number', g: 'Batch & expiry', imp: 1, batch: 1, get: (r) => r.batchNo },
+    { k: 'expiry', l: 'Expiry date', g: 'Batch & expiry', imp: 1, batch: 1, get: (r) => r.expiry },
+    { k: 'serial', l: 'Track serial numbers', g: 'Batch & expiry', get: (r) => (r.serial ? 'Yes' : 'No') },
     { k: 'status', l: 'Status', g: 'Other', get: (r) => r.status },
     { k: 'variants', l: 'Variants', g: 'Other', get: (r) => r.variants },
     { k: 'created', l: 'Date added', g: 'Other', get: (r) => r.created },
@@ -39,7 +44,8 @@
   const PRESETS = {
     all: { label: 'Everything', keys: () => FIELDS.map((f) => f.k) },
     import: { label: 'Import-ready (re-importable)', keys: () => FIELDS.filter((f) => f.imp).map((f) => f.k) },
-    nostock: { label: 'Import-ready, no stock', keys: () => FIELDS.filter((f) => f.imp && !f.stock).map((f) => f.k) },
+    nostock: { label: 'Import-ready, no stock', keys: () => FIELDS.filter((f) => f.imp && !f.stock && !f.batch).map((f) => f.k) },
+    tracked: { label: 'Batch / expiry list', keys: () => ['name', 'sku', 'barcode', 'category', 'unit', 'cost', 'price', 'stock', 'trackBatch', 'trackExpiry', 'batchNo', 'expiry'] },
     price: { label: 'Price list', keys: () => ['name', 'sku', 'barcode', 'category', 'unit', 'price'] },
     none: { label: 'Clear all', keys: () => [] },
   };
@@ -113,6 +119,20 @@
     }));
     return map;
   }
+  /** every active batch of the branch, grouped by product id: Map(productId -> [{no, expiry, qty, vid}]) */
+  async function fetchBatches(branchId) {
+    const map = new Map(); let page = 1, pages = 1;
+    do {
+      const { data } = await window.Api.get('/batches', { branchId, status: 'active', page, limit: 100 });
+      (data.items || data.batches || []).forEach((b) => {
+        const pid = String((b.productId && b.productId._id) || b.productId || ''); if (!pid || !(Number(b.quantity) > 0)) return;
+        const a = map.get(pid) || []; a.push({ no: b.batchNumber || '', expiry: b.expiryDate ? String(b.expiryDate).slice(0, 10) : '', qty: Number(b.quantity) || 0, vid: b.variantId ? String(b.variantId._id || b.variantId) : '' }); map.set(pid, a);
+      });
+      pages = data.pages || 1; page += 1;
+    } while (page <= pages && page <= 300);
+    map.forEach((a) => a.sort((x, y) => (x.expiry || '9999').localeCompare(y.expiry || '9999')));
+    return map;
+  }
   /** one flat record per product (variants optionally as their own rows) */
   function flatten(p, expandVariants) {
     const base = {
@@ -120,12 +140,12 @@
       brand: p.brand || '', unit: p.unit || '', description: p.description || '', image: p.image || p.imageUrl || '',
       cost: p.costPrice == null ? '' : num(p.costPrice), price: p.sellingPrice == null ? '' : num(p.sellingPrice), tax: p.taxRate == null ? '' : num(p.taxRate),
       discount: num(p.defaultDiscount) || '', wprice: num(p.wholesalePrice) || '', moq: num(p.moq) || '', reorder: p.lowStockThreshold == null ? '' : num(p.lowStockThreshold),
-      status: p.status || '', created: p.createdAt ? String(p.createdAt).slice(0, 10) : '', variants: p.hasVariants ? (p.variants || []).length : '', stock: '', wh: '', hasVariants: !!p.hasVariants,
+      trackBatch: !!(p.trackBatch || p.trackExpiry), trackExpiry: !!p.trackExpiry, serial: !!p.trackSerialNumber, batchNo: '', expiry: '', status: p.status || '', created: p.createdAt ? String(p.createdAt).slice(0, 10) : '', variants: p.hasVariants ? (p.variants || []).length : '', stock: '', wh: '', hasVariants: !!p.hasVariants,
     };
     if (p.hasVariants && expandVariants && (p.variants || []).length) {
       return p.variants.map((v) => ({
         ...base, name: `${base.name}${(v.name || v.label) ? ` - ${v.name || v.label}` : ''}`, sku: v.sku || base.sku, barcode: v.barcode || '',
-        price: v.sellingPrice == null ? base.price : num(v.sellingPrice), cost: v.costPrice == null ? base.cost : num(v.costPrice), variants: '', _variant: true,
+        price: v.sellingPrice == null ? base.price : num(v.sellingPrice), cost: v.costPrice == null ? base.cost : num(v.costPrice), variants: '', _variant: true, _vid: v._id,
       }));
     }
     return [base];
@@ -137,7 +157,7 @@
     const S = {
       products: [], archived: null, stock: null, loaded: false,
       scope: selectedIds.length ? 'selected' : 'all', cats: new Set(), picked: new Set(selectedIds), pickSearch: '',
-      status: 'active', search: '', stockFilter: '', variants: true, cols: new Set(PRESETS.import.keys()), busy: false,
+      status: 'active', search: '', stockFilter: '', trackFilter: '', batches: null, perBatch: true, variants: true, cols: new Set(PRESETS.import.keys()), busy: false,
     };
     const modal = window.UI.openModal({
       title: 'Export products', maxWidth: '1100px',
@@ -157,6 +177,14 @@
         if (S.scope === 'pick' && !S.picked.has(p._id)) return false;
         if (S.scope === 'selected' && !S.picked.has(p._id)) return false;
         if (q && !`${p.name} ${p.sku} ${p.barcode}`.toLowerCase().includes(q)) return false;
+        if (S.trackFilter) {
+          const b = !!(p.trackBatch || p.trackExpiry), x = !!p.trackExpiry;
+          if (S.trackFilter === 'batch' && !b) return false;
+          if (S.trackFilter === 'expiry' && !x) return false;
+          if (S.trackFilter === 'either' && !(b || x)) return false;
+          if (S.trackFilter === 'both' && !(b && x)) return false;
+          if (S.trackFilter === 'none' && (b || x)) return false;
+        }
         if (S.stockFilter && S.stock) {
           const st = stockOf(p); const qty = st && st.tracked ? num(st.quantity) : null;
           if (S.stockFilter === 'out' && !(qty !== null && qty <= 0)) return false;
@@ -168,6 +196,7 @@
       });
     }
     const colsOrdered = () => FIELDS.filter((f) => S.cols.has(f.k));
+    const needBatches = () => colsOrdered().some((f) => f.batch);
     const needStock = () => colsOrdered().some((f) => f.stock) || !!S.stockFilter;
 
     const catList = () => {
@@ -201,7 +230,9 @@
             <select class="select" data-x="stockf" style="max-width:190px"><option value="">Any stock level</option><option value="in" ${S.stockFilter === 'in' ? 'selected' : ''}>In stock</option><option value="low" ${S.stockFilter === 'low' ? 'selected' : ''}>Low stock</option><option value="out" ${S.stockFilter === 'out' ? 'selected' : ''}>Out of stock</option><option value="untracked" ${S.stockFilter === 'untracked' ? 'selected' : ''}>Stock not tracked</option></select>
             <input class="input" data-x="search" placeholder="Name / SKU contains…" value="${esc(S.search)}" style="flex:1;min-width:140px"/>
           </div>
-          <label class="pio-sw" style="margin-top:10px"><input type="checkbox" data-x="variants" ${S.variants ? 'checked' : ''}/> Put each variant on its own row</label>
+          <div class="pio-row" style="margin-top:10px"><select class="select" data-x="trackf" style="max-width:260px" aria-label="Batch and expiry tracking"><option value="">Any batch / expiry tracking</option><option value="either" ${S.trackFilter === 'either' ? 'selected' : ''}>Batch OR expiry tracked</option><option value="both" ${S.trackFilter === 'both' ? 'selected' : ''}>Batch AND expiry tracked</option><option value="batch" ${S.trackFilter === 'batch' ? 'selected' : ''}>Batch tracked (incl. expiry)</option><option value="expiry" ${S.trackFilter === 'expiry' ? 'selected' : ''}>Expiry tracked</option><option value="none" ${S.trackFilter === 'none' ? 'selected' : ''}>Not tracked</option></select></div>
+          <label class="pio-sw" style="margin-top:10px"><input type="checkbox" data-x="variants" ${S.variants ? 'checked' : ''}/> Put each variant on its own row</label><br>
+          <label class="pio-sw" style="margin-top:6px"><input type="checkbox" data-x="perbatch" ${S.perBatch ? 'checked' : ''}/> One row per batch (batch number, expiry and quantity of each batch)</label>
         </div>
         <div class="pio-card"><h4>2 · Which columns?<span class="pio-sub">${S.cols.size} of ${FIELDS.length}</span></h4>
           <div class="pio-row" style="margin-bottom:10px">${Object.entries(PRESETS).map(([k, p]) => `<button type="button" class="btn btn-ghost btn-sm" data-x="preset" data-k="${k}">${p.label}</button>`).join('')}</div>
@@ -210,7 +241,7 @@
         </div>
       </div>
       <div class="pio-card"><h4>Preview<span class="pio-sub">first ${Math.min(6, list.length)} of ${list.length}</span></h4>
-        ${S.cols.size && list.length ? `<div class="pio-tablewrap" style="max-height:200px"><table class="pio-table"><thead><tr>${colsOrdered().map((f) => `<th>${esc(f.l)}</th>`).join('')}</tr></thead><tbody>${list.slice(0, 6).flatMap((p) => flatten(p, S.variants)).slice(0, 6).map((r) => `<tr>${colsOrdered().map((f) => `<td>${f.stock && !S.stock ? '<span class="pio-sub">loaded on export</span>' : esc(f.get(r))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<div class="pio-note warn">Choose at least one column and one product to see a preview.</div>'}
+        ${S.cols.size && list.length ? `<div class="pio-tablewrap" style="max-height:200px"><table class="pio-table"><thead><tr>${colsOrdered().map((f) => `<th>${esc(f.l)}</th>`).join('')}</tr></thead><tbody>${list.slice(0, 6).flatMap((p) => flatten(p, S.variants)).slice(0, 6).map((r) => `<tr>${colsOrdered().map((f) => `<td>${(f.stock && !S.stock) || (f.batch && !S.batches) ? '<span class="pio-sub">loaded on export</span>' : esc(f.get(r))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<div class="pio-note warn">Choose at least one column and one product to see a preview.</div>'}
       </div>`;
       const ok = S.cols.size > 0 && list.length > 0 && !S.busy;
       $('xlsx').disabled = !ok; $('csv').disabled = !ok;
@@ -220,6 +251,10 @@
 
     async function ensure() {
       if (S.status !== 'active' && !S.archived) { try { S.archived = await fetchAll('archived'); } catch { S.archived = []; window.UI.toast.error('Could not load archived products'); } }
+      if (needBatches() && !S.batches) {
+        if (!branchId) { S.batches = new Map(); window.UI.toast.warning('Select a branch at the top of the page to include batch numbers and expiry dates.'); }
+        else { S.busy = true; $('sum').textContent = 'Loading batches…'; try { S.batches = await fetchBatches(branchId); } catch { S.batches = new Map(); window.UI.toast.error('Could not load batches'); } S.busy = false; }
+      }
       if (needStock() && !S.stock) {
         S.busy = true; $('sum').textContent = 'Loading stock levels…';
         try { S.stock = await fetchStock([...pool()].map((p) => String(p._id)), branchId); } catch { window.UI.toast.error('Could not load stock levels'); S.stock = new Map(); }
@@ -236,6 +271,8 @@
       else if (k === 'status') { S.status = t.value; S.stock = null; S.cats.clear(); }
       else if (k === 'stockf') S.stockFilter = t.value;
       else if (k === 'variants') S.variants = t.checked;
+      else if (k === 'trackf') S.trackFilter = t.value;
+      else if (k === 'perbatch') S.perBatch = t.checked;
       else if (k === 'col') { t.checked ? S.cols.add(t.value) : S.cols.delete(t.value); }
       else return;
       await ensure(); render();
@@ -264,7 +301,9 @@
           const st = stockOf(p);
           flatten(p, S.variants).forEach((r) => {
             if (!r._variant && st && st.tracked) { r.stock = num(st.quantity); r.wh = num(st.warehouse); }
-            rows.push(cols.map((c) => { const v = c.get(r); return v == null ? '' : v; }));
+            const bs = needBatches() && S.batches ? (S.batches.get(String(p._id)) || []).filter((b) => (r._variant ? b.vid === String(r._vid) : !b.vid)) : [];
+            const out = S.perBatch && bs.length ? bs.map((b) => ({ ...r, batchNo: b.no, expiry: b.expiry, stock: b.qty })) : [{ ...r, batchNo: bs[0] ? bs[0].no : '', expiry: bs[0] ? bs[0].expiry : '' }];
+            out.forEach((o) => rows.push(cols.map((c) => { const v = c.get(o); return v == null ? '' : v; })));
           });
         });
         const stamp = new Date().toISOString().slice(0, 10);

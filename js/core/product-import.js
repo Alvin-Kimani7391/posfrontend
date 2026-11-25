@@ -10,13 +10,13 @@
   const MAX_ROWS = 2000;            // backend limit per import (IMPORT_MAX_ROWS)
   const CHUNK_ROWS = 300;           // rows per request
   const CHUNK_BYTES = 600 * 1024;   // backend JSON body limit is 1 MB
-  const HEADERS = ['Name', 'SKU', 'Barcode', 'Category', 'Brand', 'Unit', 'Cost price', 'Selling price', 'Tax rate %', 'Reorder level', 'Opening stock', 'Description', 'Image URL'];
+  const HEADERS = ['Name', 'SKU', 'Barcode', 'Category', 'Brand', 'Unit', 'Cost price', 'Selling price', 'Tax rate %', 'Reorder level', 'Opening stock', 'Track batch', 'Track expiry', 'Batch number', 'Expiry date', 'Description', 'Image URL'];
   const SAMPLE = [
-    ['Fresh Milk 500ml', 'MILK-500', '6161101234567', 'Dairy', 'Brookside', 'piece', 48, 65, 0, 10, 24, 'Long life milk', ''],
-    ['Cement 50kg', '', '', 'Building', 'Bamburi', 'bag', 700, 820, 16, 20, 100, '', ''],
-    ['Sugar 1kg', '', '', 'Groceries', '', 'kg', 150, 190, 0, 20, 50, '', ''],
+    ['Fresh Milk 500ml', 'MILK-500', '6161101234567', 'Dairy', 'Brookside', 'piece', 48, 65, 0, 10, 24, 'Yes', 'Yes', 'MLK-2611', '2027-03-31', 'Long life milk', ''],
+    ['Cement 50kg', '', '', 'Building', 'Bamburi', 'bag', 700, 820, 16, 20, 100, 'No', 'No', '', '', '', ''],
+    ['Paracetamol 500mg', 'PARA-500', '', 'Pharmacy', 'Generic', 'strip', 20, 35, 0, 30, 200, 'Yes', 'No', 'PCM-77', '', '', ''],
   ];
-  const KNOWN = ['name', 'product', 'productname', 'item', 'itemname', 'sku', 'code', 'itemcode', 'productcode', 'barcode', 'ean', 'upc', 'category', 'group', 'department', 'brand', 'make', 'manufacturer', 'unit', 'uom', 'cost', 'costprice', 'buyingprice', 'purchaseprice', 'bp', 'sellingprice', 'price', 'retailprice', 'sp', 'sellprice', 'taxrate', 'tax', 'vat', 'vatrate', 'reorderlevel', 'minstock', 'lowstock', 'openingstock', 'stock', 'quantity', 'qty', 'onhand', 'description', 'details', 'notes', 'imageurl', 'image', 'photo'];
+  const KNOWN = ['name', 'product', 'productname', 'item', 'itemname', 'sku', 'code', 'itemcode', 'productcode', 'barcode', 'ean', 'upc', 'category', 'group', 'department', 'brand', 'make', 'manufacturer', 'unit', 'uom', 'cost', 'costprice', 'buyingprice', 'purchaseprice', 'bp', 'sellingprice', 'price', 'retailprice', 'sp', 'sellprice', 'taxrate', 'tax', 'vat', 'vatrate', 'reorderlevel', 'minstock', 'lowstock', 'openingstock', 'stock', 'quantity', 'qty', 'onhand', 'trackbatch', 'trackexpiry', 'batchnumber', 'expirydate', 'description', 'details', 'notes', 'imageurl', 'image', 'photo'];
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : s);
 
@@ -154,6 +154,10 @@
     { k: 'tax', l: 'Tax rate %', t: 'pct', al: ['taxrate', 'tax', 'vat', 'vatrate'] },
     { k: 'reorder', l: 'Reorder level', t: 'num', al: ['reorderlevel', 'minstock', 'lowstock'] },
     { k: 'stock', l: 'Opening stock', t: 'num', al: ['openingstock', 'stock', 'quantity', 'qty', 'onhand', 'openingquantity'] },
+    { k: 'trackBatch', l: 'Track batch', local: 1, al: ['trackbatch', 'batchtracking', 'tracksbatch'] },
+    { k: 'trackExpiry', l: 'Track expiry', local: 1, al: ['trackexpiry', 'expirytracking', 'tracksexpiry', 'hasexpiry'] },
+    { k: 'batchNo', l: 'Batch number', local: 1, al: ['batchnumber', 'batchno', 'batch', 'lotnumber', 'lot'] },
+    { k: 'expiry', l: 'Expiry date', local: 1, al: ['expirydate', 'expiry', 'expdate', 'exp', 'bestbefore'] },
     { k: 'description', l: 'Description', al: ['description', 'details', 'notes'] },
     { k: 'image', l: 'Image URL', al: ['imageurl', 'image', 'photo'] },
   ];
@@ -165,6 +169,28 @@
   const parseNum = (v) => { const s = String(v == null ? '' : v).replace(/kes|ksh|\$|,|\s/gi, ''); if (s === '') return null; const n = Number(s); return Number.isFinite(n) ? n : NaN; };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  const yesNo = (v) => { const s = norm(v); if (!s) return null; if (['yes', 'y', 'true', '1', 'x', 'tick'].includes(s)) return true; if (['no', 'n', 'false', '0'].includes(s)) return false; return undefined; };
+  const pad = (n) => String(n).padStart(2, '0');
+  /** '' -> null, valid -> 'YYYY-MM-DD', invalid -> undefined. Accepts 2027-03-31, 31/03/2027, 31-03-27, Excel serials, "31 Mar 2027" */
+  function parseDate(v) {
+    const s = String(v == null ? '' : v).trim(); if (!s) return null; let y, m, d, x;
+    if ((x = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(s))) { y = +x[1]; m = +x[2]; d = +x[3]; }
+    else if ((x = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(s))) { d = +x[1]; m = +x[2]; y = +x[3]; if (y < 100) y += 2000; }
+    else if (/^\d{5}(\.\d+)?$/.test(s)) { const dt = new Date(Math.round((Number(s) - 25569) * 86400000)); y = dt.getUTCFullYear(); m = dt.getUTCMonth() + 1; d = dt.getUTCDate(); }
+    else { const dt = new Date(s); if (Number.isNaN(dt.getTime())) return undefined; y = dt.getFullYear(); m = dt.getMonth() + 1; d = dt.getDate(); }
+    const chk = new Date(Date.UTC(y, m - 1, d)); if (y < 2000 || y > 2100 || chk.getUTCMonth() !== m - 1 || chk.getUTCDate() !== d) return undefined;
+    return `${y}-${pad(m)}-${pad(d)}`;
+  }
+  /** what batch / expiry tracking does this row ask for? (flags may be given, or inferred from a batch number / expiry date) */
+  function tracking(rec, inc, first) {
+    const c = rec.cells; const g = (k) => (inc.has(k) ? c[k] || '' : '');
+    const tb = yesNo(g('trackBatch')), te = yesNo(g('trackExpiry')); const batchNo = g('batchNo').trim(); const ex = parseDate(g('expiry'));
+    let expiry = te === true || (te == null && !!ex); let batch = tb === true || (tb == null && (!!batchNo || expiry));
+    if (first) { expiry = expiry || first.expiry; batch = batch || first.batch; }
+    if (expiry) batch = true;
+    return { batch, expiry, batchNo, expiryDate: ex || '', explicit: tb != null || te != null, bad: { trackBatch: tb === undefined, trackExpiry: te === undefined, expiry: ex === undefined } };
+  }
+
   function downloadTemplate() {
     const blob = window.ProductExport.xlsxBlob([HEADERS, ...SAMPLE], { sheetName: 'Products' });
     window.ProductExport.download(blob, 'products-template.xlsx');
@@ -175,7 +201,7 @@
     const S = {
       step: 1, fileName: '', parsed: null, map: [], include: new Set(), recs: [], opts: { mode: 'CREATE_ONLY', createCategories: true, defaultTaxRate: 0 },
       tab: 'all', q: '', cats: new Set(), page: 1, checking: false, checked: false, stale: false, checkProg: 0, checkMsg: '',
-      run: { state: 'idle', done: 0, total: 0, created: 0, updated: 0, skipped: 0, failed: 0, start: 0, note: '', cursor: 0, queue: [] }, savedAny: false,
+      run: { state: 'idle', done: 0, total: 0, created: 0, updated: 0, skipped: 0, failed: 0, batches: 0, start: 0, note: '', cursor: 0, queue: [] }, savedAny: false,
     };
     const modal = window.UI.openModal({ title: 'Import products', maxWidth: '1100px', bodyHtml: '<div class="pio" data-i="root"></div>', footerHtml: '<div data-i="foot" style="display:contents"></div>' });
     const backdrop = modal.closest('.modal-backdrop');
@@ -217,7 +243,16 @@
       validateAll(); S.checked = false;
     }
     function validateRec(rec) {
-      const inc = new Set(incFields().map((f) => f.k)); const e = [], w = [], c = rec.cells;
+      const inc = new Set(incFields().map((f) => f.k)); const e = [], w = [], c = rec.cells; const extra = rec.extraOf != null;
+      const first = extra ? S.recs[rec.extraOf] : null; const tr = tracking(rec, inc, first ? tracking(first, inc) : null);
+      ['trackBatch', 'trackExpiry'].forEach((k) => { if (inc.has(k) && tr.bad[k]) e.push({ f: k, m: `${FBY[k].l} "${c[k]}" - use Yes or No` }); });
+      if (inc.has('expiry') && tr.bad.expiry) e.push({ f: 'expiry', m: `Expiry date "${c.expiry}" is not a valid date (use YYYY-MM-DD or DD/MM/YYYY)` });
+      const stockN = inc.has('stock') ? parseNum(c.stock) : null; const hasStock = stockN != null && !Number.isNaN(stockN) && stockN > 0;
+      if (tr.expiry && hasStock && !tr.expiryDate && !tr.bad.expiry) e.push({ f: inc.has('expiry') ? 'expiry' : 'stock', m: 'Expiry date is required for opening stock of an expiry-tracked product' });
+      if (extra && !hasStock) e.push({ f: 'stock', m: `Extra batch of row ${first.n} needs a quantity in Opening stock` });
+      if (tr.expiryDate && tr.expiryDate < new Date().toISOString().slice(0, 10)) w.push({ f: 'expiry', m: 'Expiry date is already in the past' });
+      if (!extra && (tr.batchNo || tr.expiryDate) && !hasStock) w.push({ f: inc.has('batchNo') ? 'batchNo' : 'expiry', m: 'Batch / expiry is saved with opening stock - this row has none, so only tracking is switched on' });
+      if (extra) { rec.lErr = e; rec.lWarn = w; return; }
       if (inc.has('name') && !c.name) e.push({ f: 'name', m: 'Name is required' });
       if (inc.has('name') && c.name && c.name.length > 200) e.push({ f: 'name', m: 'Name is longer than 200 characters' });
       if (!inc.has('price')) e.push({ f: 'price', m: 'Selling price column is not included' });
@@ -232,22 +267,28 @@
       rec.lErr = e; rec.lWarn = w;
     }
     function validateAll() {
+      const inc = new Set(incFields().map((f) => f.k)); const firstBySku = new Map();
+      S.recs.forEach((r) => {
+        r.extraOf = null; const sku = (r.cells.sku || '').trim().toLowerCase(); if (!sku || !inc.has('sku')) return;
+        if (!firstBySku.has(sku)) { firstBySku.set(sku, r.id); return; }
+        const tr = tracking(r, inc); if (tr.batchNo || tr.expiryDate) r.extraOf = firstBySku.get(sku);
+      });
       S.recs.forEach(validateRec);
       ['sku', 'barcode'].forEach((k) => {
         if (!S.map.includes(k) || !S.include.has(k)) return;
         const seen = new Map();
-        S.recs.forEach((r) => { const v = (r.cells[k] || '').trim().toLowerCase(); if (!v) return; if (seen.has(v)) { r.lWarn.push({ f: k, m: `Duplicate ${FBY[k].l} in file (also row ${seen.get(v)})` }); } else seen.set(v, r.n); });
+        S.recs.forEach((r) => { const v = (r.cells[k] || '').trim().toLowerCase(); if (!v || r.extraOf != null) return; if (seen.has(v)) { r.lWarn.push({ f: k, m: `Duplicate ${FBY[k].l} in file (also row ${seen.get(v)})` }); } else seen.set(v, r.n); });
       });
     }
-    const errs = (r) => [...r.lErr, ...r.sErr];
+    const errs = (r) => { const e = [...r.lErr, ...r.sErr]; if (r.extraOf != null) { const f = S.recs[r.extraOf]; if (errs(f).length) e.push({ f: null, m: `Main product row ${f.n} has a problem` }); } return e; };
     const warns = (r) => [...r.lWarn, ...r.sWarn];
-    const status = (r) => (errs(r).length ? 'error' : r.srv === 'skip' ? 'skip' : r.srv === 'update' ? 'update' : r.srv === 'new' ? 'new' : 'pending');
-    const importable = (r) => ['new', 'update', 'pending'].includes(status(r));
+    const status = (r) => (errs(r).length ? 'error' : r.extraOf != null ? (status(S.recs[r.extraOf]) === 'skip' ? 'skip' : 'extra') : r.srv === 'skip' ? 'skip' : r.srv === 'update' ? 'update' : r.srv === 'new' ? 'new' : 'pending');
+    const importable = (r) => ['new', 'update', 'pending', 'extra'].includes(status(r));
 
     /* ---- API ---- */
     const sendRows = (recs) => {
-      const fl = incFields();
-      return [fl.map((f) => f.l), ...recs.map((r) => fl.map((f) => { const v = r.cells[f.k] || ''; if (f.t) { const n = parseNum(v); return n === null || Number.isNaN(n) ? v : String(n); } return v; }))];
+      const fl = incFields().filter((f) => !f.local); const inc = new Set(incFields().map((f) => f.k));
+      return [fl.map((f) => f.l), ...recs.map((r) => fl.map((f) => { let v = r.cells[f.k] || ''; if (f.k === 'stock') { const tr = tracking(r, inc); if (tr.batch || tr.expiry) v = ''; } if (f.t) { const n = parseNum(v); return n === null || Number.isNaN(n) ? v : String(n); } return v; }))];
     };
     async function post(recs, dryRun) {
       const body = { rows: sendRows(recs), dryRun, mode: S.opts.mode, createCategories: S.opts.createCategories, defaultTaxRate: S.opts.defaultTaxRate };
@@ -266,7 +307,7 @@
       });
     }
     async function checkRecs(recs) {
-      const todo = recs.filter((r) => !r.lErr.length);
+      const todo = recs.filter((r) => !r.lErr.length && r.extraOf == null);
       recs.forEach((r) => { r.srv = null; r.sErr = []; r.sWarn = []; r.reason = ''; });
       for (let i = 0; i < todo.length; i += 100) {
         const part = todo.slice(i, i + 100);
@@ -343,16 +384,18 @@
     }
 
     /* ======================= STEP 3 : review ======================= */
+    const isTracked = (r) => { const tr = tracking(r, new Set(incFields().map((f) => f.k)), r.extraOf != null ? tracking(S.recs[r.extraOf], new Set(incFields().map((f) => f.k))) : null); return tr.batch || tr.expiry; };
     const counts = () => {
-      const c = { all: S.recs.length, ready: 0, error: 0, warn: 0, skip: 0, sel: 0 };
-      S.recs.forEach((r) => { const s = status(r); if (s === 'error') c.error += 1; else if (s === 'skip') c.skip += 1; else c.ready += 1; if (warns(r).length) c.warn += 1; if (r.sel && importable(r)) c.sel += 1; });
+      const c = { all: S.recs.length, ready: 0, error: 0, warn: 0, skip: 0, sel: 0, tracked: 0 };
+      S.recs.forEach((r) => { const s = status(r); if (s === 'error') c.error += 1; else if (s === 'skip') c.skip += 1; else c.ready += 1; if (warns(r).length) c.warn += 1; if (isTracked(r)) c.tracked += 1; if (r.sel && importable(r)) c.sel += 1; });
       return c;
     };
     const filtered = () => {
       const q = S.q.trim().toLowerCase();
       return S.recs.filter((r) => {
         const s = status(r);
-        if (S.tab === 'ready' && !(s === 'new' || s === 'update' || s === 'pending')) return false;
+        if (S.tab === 'ready' && !(s === 'new' || s === 'update' || s === 'pending' || s === 'extra')) return false;
+        if (S.tab === 'tracked' && !isTracked(r)) return false;
         if (S.tab === 'error' && s !== 'error') return false;
         if (S.tab === 'warn' && !warns(r).length) return false;
         if (S.tab === 'skip' && s !== 'skip') return false;
@@ -390,7 +433,7 @@
         : c.error ? `<div class="pio-note warn">${c.error} product(s) have problems and are left out. Click a red cell to fix it here, or fix the file and re-import them later.</div>` : '<div class="pio-note ok">Everything checked out. Choose what to import below.</div>';
       const rt = modal.querySelector('[data-i="retry"]'); if (rt) rt.addEventListener('click', runCheck);
       const stat = (k, label, v, cls) => `<button type="button" class="pio-stat ${cls} ${S.tab === k ? 'on' : ''}" data-i="tab" data-k="${k}"><span>${label}</span><strong>${v}</strong></button>`;
-      $('stats').innerHTML = stat('all', 'All rows', c.all, '') + stat('ready', 'Ready', c.ready, 'good') + stat('error', 'Problems', c.error, c.error ? 'bad' : '') + stat('warn', 'Warnings', c.warn, c.warn ? 'warn' : '') + stat('skip', 'Already exist', c.skip, '') + stat('sel', 'Selected', c.sel, 'good');
+      $('stats').innerHTML = stat('all', 'All rows', c.all, '') + stat('ready', 'Ready', c.ready, 'good') + stat('error', 'Problems', c.error, c.error ? 'bad' : '') + stat('warn', 'Warnings', c.warn, c.warn ? 'warn' : '') + stat('tracked', 'Batch / expiry', c.tracked, '') + stat('skip', 'Already exist', c.skip, '') + stat('sel', 'Selected', c.sel, 'good');
       const cr = modal.querySelector('[data-i="catrow"]');
       if (cr) {
         const m = new Map(); S.recs.forEach((r) => { const v = (r.cells.category || '').trim() || '__none'; m.set(v, (m.get(v) || 0) + 1); });
@@ -399,7 +442,7 @@
       const fl = incFields(); const slice = list.slice((S.page - 1) * 100, S.page * 100);
       const cell = (r, f) => { const e = r.lErr.concat(r.sErr).filter((x) => x.f === f.k), w = warns(r).filter((x) => x.f === f.k); const v = r.cells[f.k] || '';
         return `<td class="${e.length ? 'bad' : w.length ? 'warn' : ''}" data-rid="${r.id}" data-f="${f.k}" title="${esc([...e, ...w].map((x) => x.m).join('\n') || 'Click to edit')}">${esc(v) || (e.length ? '<i>missing</i>' : '')}</td>`; };
-      const badge = { new: ['New', 'badge-success'], update: ['Will update', 'badge-info'], skip: ['Exists', 'badge-neutral'], error: ['Problem', 'badge-danger'], pending: ['Unchecked', 'badge-neutral'] };
+      const badge = { new: ['New', 'badge-success'], update: ['Will update', 'badge-info'], extra: ['Extra batch', 'badge-info'], skip: ['Exists', 'badge-neutral'], error: ['Problem', 'badge-danger'], pending: ['Unchecked', 'badge-neutral'] };
       $('table').innerHTML = `<div class="pio-tablewrap"><table class="pio-table"><thead><tr><th class="pio-stick"><input type="checkbox" data-i="all" ${slice.length && slice.filter(importable).every((r) => r.sel) && slice.some(importable) ? 'checked' : ''}/></th><th>Row</th><th>Status</th>${fl.map((f) => `<th>${f.l}</th>`).join('')}<th>What's wrong</th></tr></thead><tbody>
         ${slice.map((r) => { const s = status(r); const b = badge[s]; const rowIssues = [...errs(r), ...warns(r).map((x) => ({ ...x, m: `⚠ ${x.m}` }))].map((x) => `${x.f && FBY[x.f] ? `<b>${FBY[x.f].l}:</b> ` : ''}${esc(x.m)}`);
           return `<tr class="${s === 'error' ? 'err' : ''} ${r.sel && importable(r) ? '' : 'off'}"><td class="pio-stick"><input type="checkbox" data-i="rowsel" data-rid="${r.id}" ${r.sel && importable(r) ? 'checked' : ''} ${importable(r) ? '' : 'disabled'}/></td><td>${r.n}</td><td><span class="badge ${b[1]}">${b[0]}</span></td>${fl.map((f) => cell(r, f)).join('')}<td class="pio-errs">${rowIssues.join('<br>') || (r.reason ? `<span class="pio-sub">${esc(r.reason)}</span>` : '')}</td></tr>`; }).join('') || `<tr><td colspan="${fl.length + 4}" style="text-align:center;padding:24px" class="pio-sub">No rows match this filter</td></tr>`}</tbody></table></div>
@@ -413,8 +456,8 @@
     const fmtT = (s) => (s < 60 ? `${Math.max(1, Math.round(s))}s` : `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`);
     function startImport() {
       const queue = S.recs.filter((r) => r.sel && importable(r)); if (!queue.length) return;
-      Object.assign(S.run, { state: 'running', done: 0, total: queue.length, created: 0, updated: 0, skipped: 0, failed: 0, start: Date.now(), note: '', cursor: 0, queue });
-      S.recs.forEach((r) => { r.fin = ''; r.finMsg = ''; });
+      Object.assign(S.run, { state: 'running', done: 0, total: queue.length, created: 0, updated: 0, skipped: 0, failed: 0, batches: 0, start: Date.now(), note: '', cursor: 0, queue });
+      S.recs.forEach((r) => { r.fin = ''; r.finMsg = ''; r.postErr = ''; }); pidCache.clear();
       S.step = 4; view(); loop();
     }
     async function loop() {
@@ -424,14 +467,16 @@
         if (R.state === 'stopped') { paintRun(); return; }
         const part = R.queue.slice(R.cursor, R.cursor + CHUNK);
         try {
-          const data = await post(part, false);
+          const sp = part.filter((r) => r.extraOf == null);
+          const data = sp.length ? await post(sp, false) : { results: [] };
           (data.results || []).forEach((x, i) => {
-            const r = part[x.row ? x.row - 2 : i]; if (!r) return; const st = String(x.status || '').toUpperCase();
+            const r = sp[x.row ? x.row - 2 : i]; if (!r) return; const st = String(x.status || '').toUpperCase();
             if (st === 'ERROR') { r.fin = 'failed'; r.finMsg = (x.errors || [x.reason]).filter(Boolean).join(' · '); R.failed += 1; }
             else if (st.includes('SKIP')) { r.fin = 'skipped'; r.finMsg = x.reason || 'Already exists'; R.skipped += 1; }
             else if (st.includes('UPDATE')) { r.fin = 'updated'; R.updated += 1; S.savedAny = true; }
             else { r.fin = 'created'; R.created += 1; S.savedAny = true; }
           });
+          await applyTracking(part);
           R.cursor += part.length; R.done = R.cursor; R.note = '';
         } catch (e) {
           R.state = 'paused'; R.note = `${e.message || 'Connection problem'} - the import is paused. Press Resume to retry from where it stopped.`; paintRun(); return;
@@ -441,21 +486,64 @@
       R.state = 'done'; paintRun();
       if (S.savedAny) window.UI.toast.success(`Import complete: ${R.created} added, ${R.updated} updated`);
     }
+    /** After the products exist: switch batch / expiry tracking on, receive opening stock WITH its batch number + expiry, add extra batches. */
+    const pidCache = new Map();
+    async function findPid(rec) {
+      if (pidCache.has(rec.id)) return pidCache.get(rec.id);
+      const c = rec.cells; const lc = (s) => String(s || '').trim().toLowerCase(); let pid = null;
+      for (const term of [c.sku, c.barcode, c.name].filter((x) => x && String(x).trim())) {
+        const { data } = await window.Api.get('/products', { search: String(term).trim(), limit: 100 });
+        const items = data.items || [];
+        const hit = items.find((p) => c.sku && lc(p.sku) === lc(c.sku)) || items.find((p) => c.barcode && lc(p.barcode) === lc(c.barcode)) || items.find((p) => lc(p.name) === lc(c.name));
+        if (hit) { pid = hit._id; break; }
+      }
+      if (!pid) throw new Error('could not find the product after importing it');
+      pidCache.set(rec.id, pid); return pid;
+    }
+    async function applyTracking(part) {
+      const inc = new Set(incFields().map((f) => f.k)); const R = S.run;
+      const jobs = part.filter((r) => {
+        if (r.extraOf != null) return true;
+        if (r.fin !== 'created' && r.fin !== 'updated') return false;
+        const tr = tracking(r, inc); return tr.batch || tr.expiry || tr.explicit;
+      });
+      let ci = 0;
+      await Promise.all(Array.from({ length: Math.min(4, jobs.length) }, async () => {
+        while (ci < jobs.length) {
+          const r = jobs[ci++]; const first = r.extraOf != null ? S.recs[r.extraOf] : null;
+          try {
+            if (first && first.fin !== 'created') { r.fin = first.fin === 'updated' ? 'skipped' : 'failed'; r.finMsg = first.fin === 'updated' ? 'Product already existed - extra batch stock not added' : `Main product row ${first.n} was not imported`; if (r.fin === 'failed') R.failed += 1; else R.skipped += 1; continue; }
+            const tr = tracking(r, inc, first ? tracking(first, inc) : null); const base = first || r;
+            const pid = await findPid(base);
+            if (!first && (tr.batch || tr.expiry || tr.explicit)) await window.Api.put(`/products/${pid}`, { trackBatch: tr.batch || tr.expiry, trackExpiry: tr.expiry });
+            const q = inc.has('stock') ? parseNum(r.cells.stock) : null;
+            if ((first || r.fin === 'created') && q > 0 && (tr.batch || tr.expiry)) {
+              const cost = inc.has('cost') ? parseNum(base.cells.cost) : null;
+              await window.Api.post('/inventory/receive', { branchId, productId: pid, quantity: q, batchNumber: tr.batchNo || undefined, expiryDate: tr.expiryDate || undefined, costPrice: cost > 0 ? cost : undefined, reason: 'Initial stock (import)' });
+              if (first) { r.fin = 'batch'; R.batches += 1; S.savedAny = true; }
+            } else if (first) { r.fin = 'failed'; r.finMsg = 'No quantity to receive'; R.failed += 1; }
+          } catch (err) {
+            r.postErr = `Product saved, but batch/expiry step failed: ${err.message || err}`;
+            if (first) { r.fin = 'failed'; r.finMsg = r.postErr; R.failed += 1; }
+          }
+        }
+      }));
+    }
     function viewRun() { $('root').innerHTML = `${stepBar()}<div data-i="run"></div>`; paintRun(); }
     function paintRun() {
       if (S.step !== 4 || !$('run')) return; const R = S.run; const pct = R.total ? Math.round((R.done / R.total) * 100) : 0;
       const el = (Date.now() - R.start) / 1000; const eta = R.done && R.state === 'running' ? ` · about ${fmtT((el / R.done) * (R.total - R.done))} left` : '';
       const title = { running: 'Importing…', pausing: 'Pausing after this batch…', paused: 'Paused', done: 'Import finished', stopped: 'Import stopped' }[R.state];
-      const bad = S.recs.filter((r) => r.fin === 'failed' || r.fin === 'skipped');
+      const bad = S.recs.filter((r) => r.fin === 'failed' || r.fin === 'skipped' || r.postErr);
       $('run').innerHTML = `<div class="pio-card"><h4>${title}<span class="pio-sub">${R.done} / ${R.total} · ${pct}%${eta}</span></h4>
         <div class="pio-bar ${R.state === 'paused' ? 'paused' : R.state === 'done' ? 'done' : ''}"><i style="width:${pct}%"></i></div>
         ${R.note ? `<div class="pio-note bad" style="margin-top:10px">${esc(R.note)}</div>` : ''}</div>
-        <div class="pio-stats">${[['Added', R.created, 'good'], ['Updated', R.updated, ''], ['Skipped', R.skipped, ''], ['Failed', R.failed, R.failed ? 'bad' : ''], ['Remaining', R.total - R.done, '']].map(([l, v, c]) => `<div class="pio-stat ${c}" style="cursor:default"><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
-        ${bad.length ? `<div class="pio-card"><h4>Not imported <span class="pio-sub">${bad.length}</span></h4><div class="pio-tablewrap" style="max-height:220px"><table class="pio-table"><thead><tr><th>Row</th><th>Product</th><th>SKU</th><th>Reason</th></tr></thead><tbody>${bad.map((r) => `<tr><td>${r.n}</td><td>${esc(r.cells.name)}</td><td>${esc(r.cells.sku)}</td><td class="pio-errs">${esc(r.finMsg)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
+        <div class="pio-stats">${[['Added', R.created, 'good'], ['Updated', R.updated, ''], ['Skipped', R.skipped, ''], ...(R.batches ? [['Extra batches', R.batches, 'good']] : []), ['Failed', R.failed, R.failed ? 'bad' : ''], ['Remaining', R.total - R.done, '']].map(([l, v, c]) => `<div class="pio-stat ${c}" style="cursor:default"><span>${l}</span><strong>${v}</strong></div>`).join('')}</div>
+        ${bad.length ? `<div class="pio-card"><h4>Not imported <span class="pio-sub">${bad.length}</span></h4><div class="pio-tablewrap" style="max-height:220px"><table class="pio-table"><thead><tr><th>Row</th><th>Product</th><th>SKU</th><th>Reason</th></tr></thead><tbody>${bad.map((r) => `<tr><td>${r.n}</td><td>${esc(r.cells.name)}</td><td>${esc(r.cells.sku)}</td><td class="pio-errs">${esc(r.finMsg || r.postErr)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
       const st = R.state; const f = $('foot');
       if (st === 'running' || st === 'pausing') f.innerHTML = `<span class="pio-foot-l">Keep this window open until it finishes</span><button type="button" class="btn btn-secondary" data-i="pause" ${st === 'pausing' ? 'disabled' : ''}>⏸ Pause</button><button type="button" class="btn btn-danger" data-i="stop">Stop</button>`;
       else if (st === 'paused') f.innerHTML = '<button type="button" class="btn btn-danger" data-i="stop">Stop import</button><button type="button" class="btn btn-primary" data-i="resume">▶ Resume</button>';
-      else f.innerHTML = `${S.recs.some((r) => r.fin === 'failed' || r.lErr.length || r.sErr.length) ? '<button type="button" class="btn btn-secondary" data-i="report">Download problem report</button>' : ''}<button type="button" class="btn btn-secondary" data-i="again">Import another file</button><button type="button" class="btn btn-primary" data-i="close">Done</button>`;
+      else f.innerHTML = `${S.recs.some((r) => r.fin === 'failed' || r.postErr || r.lErr.length || r.sErr.length) ? '<button type="button" class="btn btn-secondary" data-i="report">Download problem report</button>' : ''}<button type="button" class="btn btn-secondary" data-i="again">Import another file</button><button type="button" class="btn btn-primary" data-i="close">Done</button>`;
       const on = (k, fn) => { const b = $(k); if (b) b.addEventListener('click', fn); };
       on('pause', () => { R.state = 'pausing'; paintRun(); }); on('resume', () => loop());
       on('stop', () => { R.state = 'stopped'; paintRun(); }); on('close', closeNow);
@@ -463,7 +551,7 @@
     }
     function downloadReport() {
       const fl = incFields(); const rows = [['Row', ...fl.map((f) => f.l), 'Problem']];
-      S.recs.filter((r) => r.fin === 'failed' || r.lErr.length || r.sErr.length).forEach((r) => rows.push([r.n, ...fl.map((f) => r.cells[f.k] || ''), r.fin === 'failed' ? r.finMsg : errs(r).map((x) => `${x.f && FBY[x.f] ? `${FBY[x.f].l}: ` : ''}${x.m}`).join(' | ')]));
+      S.recs.filter((r) => r.fin === 'failed' || r.postErr || r.lErr.length || r.sErr.length).forEach((r) => rows.push([r.n, ...fl.map((f) => r.cells[f.k] || ''), r.fin === 'failed' || r.postErr ? (r.finMsg || r.postErr) : errs(r).map((x) => `${x.f && FBY[x.f] ? `${FBY[x.f].l}: ` : ''}${x.m}`).join(' | ')]));
       window.ProductExport.download(window.ProductExport.xlsxBlob(rows, { sheetName: 'Problems' }), 'import-problems.xlsx');
     }
 
