@@ -126,6 +126,25 @@
 
   /* ---------------- VAT helpers ---------------- */
 
+  /**
+   * VAT INCLUSIVE, no lost cents. The backend works in whole cents: round(qty x unitCost) then adds round(net x rate). An ex-VAT unit cost
+   * (15 / 1.16 = 12.9310...) cannot be stored exactly, so 20 x 15 came out as 299.98. Here we find the ex-VAT amount whose VAT-added
+   * total is EXACTLY what the supplier is owed, pick the unit cost that covers it, and carry the sub-cent remainder in the line's own
+   * `discount` field. Result: line total = price x quantity to the cent, VAT is still recorded, cost price (total / qty) is exact.
+   */
+  function exactInclusiveLine(line, inclTotal) {
+    const T = Math.round(inclTotal * 100); const q = Number(line.quantity); const r = Number(line.taxRate) || 0;
+    if (!(T > 0) || !(q > 0)) return;
+    const tot = (net) => net + Math.round(net * (r / 100));
+    let net = Math.round(T / (1 + r / 100)); let found = false;
+    for (let d = 0; d <= 5 && !found; d++) for (const n of [net - d, net + d]) if (tot(n) === T) { net = n; found = true; break; }
+    if (!found) return;
+    let u = Math.ceil(net / q - 1e-9);
+    while (Math.round(q * u) < net) u += 1;
+    const disc = Math.round(q * u) - net;
+    line.unitCost = u / 100; line.discount = disc / 100;
+  }
+
   /** entered price -> { exVat, inclVat } depending on how the owner is entering prices */
   function splitPrice(entered, mode, rate) {
     const m = 1 + (Number(rate) || 0) / 100;
@@ -1411,6 +1430,14 @@
     .pc-list{max-height:50vh;overflow:auto;padding:2px}
     .pc-card{border:1px solid var(--color-border,#e2e8f0);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--color-surface,#fff)}
     .pc-card.pc-skip{opacity:.7;border-style:dashed}
+    .pc-head{cursor:pointer;align-items:center}
+    .pc-num{flex:0 0 auto;width:26px;height:26px;border-radius:50%;background:var(--color-primary,#2563eb);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-right:10px}
+    .pc-headmain{display:flex;align-items:center;flex:1;min-width:0}
+    .pc-sum{font-size:12px;color:var(--color-text-secondary,#64748b);margin-top:2px}
+    .pc-chev{transition:transform .15s;margin:0 6px;color:var(--color-text-secondary,#64748b)}
+    .pc-card.pc-collapsed .pc-chev{transform:rotate(-90deg)}
+    .pc-card.pc-collapsed .pc-body{display:none}
+    .pc-body{margin-top:10px}
     .pc-card.pc-row-bad{border-color:#d93025;background:#fff5f4}
     .pc-head{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
     .pc-name{font-weight:700}.pc-sku{font-size:12px;color:var(--color-text-secondary,#64748b)}
@@ -1557,13 +1584,13 @@
             </div>
           </div>
 
+          <div class="pc-list" id="purchase-items"></div>
           <div class="pc-bar">
             <button type="button" class="btn btn-primary" id="add-item-btn">${window.Icons.get('plus')} Add product</button>
             <span class="pc-hint">Choose the supplier first. Products you add are saved to that supplier and appear automatically next time - you only type quantities. Progress is saved as you type.</span>
           </div>
           <div id="pc-fill-note"></div>
 
-          <div class="pc-list" id="purchase-items"></div>
 
           <div class="pc-foot">
             <div>
@@ -1707,6 +1734,11 @@
     /** Update everything that depends on numbers WITHOUT re-drawing inputs (keeps the keyboard open on phones). */
     function refreshCalc() {
       list.querySelectorAll('[data-calc]').forEach((el) => { el.innerHTML = calcHtml(items[Number(el.dataset.calc)]); });
+      list.querySelectorAll('[data-sum]').forEach((el) => {
+        const it = items[Number(el.dataset.sum)]; if (!it) return;
+        const q = Number(it.quantity) || 0;
+        el.textContent = q > 0 ? `${fmtN(q)} ${unitLabel(it) || 'pcs'} · ${money(splitPrice(packPrice(it), vat.mode, vat.rate).inclVat * q)}` : 'No quantity yet';
+      });
       list.querySelectorAll('[data-pricebox]').forEach((el) => { const i = Number(el.dataset.pricebox); el.innerHTML = priceBoxHtml(items[i], i); });
       list.querySelectorAll('[data-lab]').forEach((el) => {
         const it = items[Number(el.dataset.idx)]; if (!it) return;
@@ -1736,14 +1768,18 @@
       const saved = supId && memGet(supId).items[itemKey(it)];
       const unitOpts = UNITS.map((u) => `<option value="${u}"${!it.customUnit && it.unitName === u ? ' selected' : ''}>${u === 'Piece' ? 'Piece (single)' : u}</option>`).join('') + `<option value="__other"${it.customUnit ? ' selected' : ''}>Other…</option>`;
       return `
-      <div class="pc-card${isActive(it) ? '' : ' pc-skip'}" data-row="${i}">
-        <div class="pc-head">
-          <div>
+      <div class="pc-card${isActive(it) ? '' : ' pc-skip'}${it._open ? '' : ' pc-collapsed'}" data-row="${i}">
+        <div class="pc-head" data-toggle="${i}">
+          <span class="pc-num">${i + 1}</span>
+          <div class="pc-headmain"><div style="min-width:0">
             <div class="pc-name">${esc(it.product.name)}${vlabel ? ` <span class="text-muted">(${esc(vlabel)})</span>` : ''}${liquor ? liquorChip(it) : ''}${saved ? '<span class="pc-tag">saved for supplier</span>' : ''}</div>
             ${sku ? `<div class="pc-sku">SKU: ${esc(sku)}</div>` : ''}
-          </div>
+            <div class="pc-sum" data-sum="${i}"></div>
+          </div></div>
+          <span class="pc-chev" aria-hidden="true">&#9662;</span>
           <button type="button" class="btn btn-ghost btn-sm btn-icon" data-remove="${i}" title="Remove" aria-label="Remove">${window.Icons.get('trash')}</button>
         </div>
+        <div class="pc-body">
         <div class="pc-grid">
           <div class="field"><label>Bought in</label>
             <select class="select" data-unit="${i}">${unitOpts}</select>
@@ -1760,6 +1796,7 @@
         </div>
         <div class="pc-result" data-calc="${i}"></div>
         <div data-pricebox="${i}" style="margin-top:8px"></div>
+        </div>
       </div>`;
     }
 
@@ -1777,6 +1814,15 @@
         if (q) { q.focus(); q.select(); }
       }
     }
+
+    /* ---------- expand / collapse numbered product sections ---------- */
+    list.addEventListener('click', (e) => {
+      const h = e.target.closest('.pc-head'); if (!h || e.target.closest('[data-remove]')) return;
+      const i = Number(h.dataset.toggle); const it = items[i]; if (!it) return;
+      it._open = !it._open;
+      h.closest('.pc-card').classList.toggle('pc-collapsed', !it._open);
+    });
+    const openOnly = (idx) => items.forEach((x, k) => { x._open = k === idx; });
 
     /* ---------- one set of delegated listeners (cards are re-drawn often) ---------- */
     list.addEventListener('keydown', (e) => { if (e.target.type === 'number' && ['e', 'E', '+', '-'].includes(e.key)) e.preventDefault(); });
@@ -1898,11 +1944,12 @@
           if (same >= 0) {
             items[same].quantity = (Number(items[same].quantity) || 0) + 1;
             window.UI.toast.info(`${product.name}: quantity is now ${fmtN(items[same].quantity)}`);
-            renderItems(same); persist(); return;
+            openOnly(same); renderItems(same); persist(); return;
           }
           const mem = memGet(supId).items[itemKey(probe)];
           const it = mem ? { ...fromEntry(mem), quantity: 1 } : probe;
           items.push(it);
+          openOnly(items.length - 1);
           renderItems(items.length - 1, isBulk(it) ? 'quantity' : 'quantity');
           persist();
           if (!mem) window.UI.toast.info(`${product.name} saved under ${supName()} - it will appear next time`);
@@ -1927,6 +1974,8 @@
       draft.items.forEach((o) => { try { items.push(reviveItem(o)); } catch (e) { /* skip bad line */ } });
       if (items.length) window.UI.toast.info(`Unfinished purchase restored (${items.length} product${items.length === 1 ? '' : 's'})`);
     }
+    openOnly(items.length - 1);
+    items.forEach((x, k) => { x._open = k === items.length - 1; });
     renderItems();
 
     /* ---------- close / discard ---------- */
@@ -1945,7 +1994,7 @@
       if (!active.length) return window.UI.toast.error(items.length ? 'Enter a quantity for at least one product' : 'Add at least one item');
       const cards = list.querySelectorAll('.pc-card');
       cards.forEach((r) => r.classList.remove('pc-row-bad'));
-      const flag = (it) => { const c = cards[items.indexOf(it)]; if (c) { c.classList.add('pc-row-bad'); c.scrollIntoView({ block: 'center' }); } };
+      const flag = (it) => { const c = cards[items.indexOf(it)]; if (c) { it._open = true; c.classList.remove('pc-collapsed'); c.classList.add('pc-row-bad'); c.scrollIntoView({ block: 'center' }); } };
       const odd = active.find((it) => it.unitName !== 'Piece' && packOf(it) === 1);
       if (odd) {
         flag(odd);
@@ -1977,6 +2026,7 @@
           unitCost: splitPrice(packPrice(it), vat.mode, rate).exVat / packOf(it), // ex-VAT cost of ONE piece; backend adds VAT via taxRate
           taxRate: rate,
         };
+        if (vat.mode === 'INCLUSIVE') exactInclusiveLine(line, packPrice(it) * it.quantity);
         if (it.priceUpdate) { line.updatePrices = true; line.sellingPrice = it.priceUpdate.sellingPrice; line.defaultDiscount = it.priceUpdate.discount; }
         return line;
       })));

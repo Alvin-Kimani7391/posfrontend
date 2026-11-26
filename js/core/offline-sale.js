@@ -55,19 +55,32 @@
         const p = it.product; const v = it.variant;
         if (it.overridePriceEnabled) fail('Price changes are not allowed offline. Remove the changed price on ' + p.name + '.');
         if (p.trackSerialNumber) fail(`${p.name} needs a serial number. Sell it when the till is online.`);
-        // Retail, or the wholesale price once this sale holds >= MOQ of the product (same rule as the server).
-        const priced = window.Wholesale ? window.Wholesale.resolve(p, v, qtyMap.get(String(p._id))) : { unit: v ? v.sellingPrice : p.sellingPrice, priceType: 'RETAIL' };
-        const unit = cents(priced.unit);
-        const qty = Number(it.quantity);
-        const disc = cents(it.discount);
+        // PACKET / CARTON / DEAL line: the backend sells these natively - quantity and price are PER PACK, with unitId / unitFactor
+        // (stock is deducted in base units = quantity x factor, exactly like an online sale).
+        let unit; let qty; let disc; let priced; let factor = 1;
+        const pu = it.unitId ? ((p.units || []).find((x) => String(x._id) === String(it.unitId))) : null;
+        if (it.unitId && !pu) fail(`${p.name}: this pack size is not saved on this till. Sell it as single pieces or reconnect to the internet.`);
+        if (pu) {
+          factor = Number(pu.factor) || 1;
+          const basePrice = v ? v.sellingPrice : p.sellingPrice;
+          unit = pu.retailPrice != null && pu.retailPrice !== '' && Number(pu.retailPrice) > 0 ? cents(pu.retailPrice) : Math.round(cents(basePrice) * factor); // same rule as the backend (retailUnitPrice)
+          priced = { unit: unit / 100, priceType: 'RETAIL' };
+        } else {
+          // Retail, or the wholesale price once this sale holds >= MOQ of the product (same rule as the server).
+          priced = window.Wholesale ? window.Wholesale.resolve(p, v, qtyMap.get(String(p._id))) : { unit: v ? v.sellingPrice : p.sellingPrice, priceType: 'RETAIL' };
+          unit = cents(priced.unit);
+        }
+        qty = Number(it.quantity);
+        disc = cents(it.discount);
         const rate = p.taxRate || 0;
         const c = lineCalc(unit, qty, disc, rate, inclusive);
         if (disc > c.gross) fail(`Discount on ${p.name} is more than the line total.`);
         // an offer applied by the till (promoApplied) is the owner's own preset, like a standing product discount; the server re-checks it against the offers that were running
-        const preset = Math.min(Math.max(Math.round(cents(p.defaultDiscount) * qty), it.promoApplied ? disc : 0), c.gross);
+        const preset = Math.min(Math.max(Math.round(cents(p.defaultDiscount) * factor * qty), it.promoApplied ? disc : 0), c.gross);
         const manual = disc - preset;
         if (manual > 1 && maxPct < 100 && manual > Math.round((c.gross * maxPct) / 100)) fail(`Discount on ${p.name} is above the ${maxPct}% limit for offline sales.`);
-        items.push({ productId: p._id, variantId: v ? v._id : undefined, name: nameOf(p, v), quantity: qty, unitPriceCents: unit, priceType: priced.priceType, discountCents: disc, taxRate: rate, taxAmountCents: c.tax, totalCents: c.total });
+        const unitExtra = pu ? { unitId: String(pu._id), unitName: pu.name || 'pack', unitFactor: factor } : {};
+        items.push({ productId: p._id, variantId: v ? v._id : undefined, name: nameOf(p, v) + (pu ? ` (${pu.name || 'pack'})` : ''), ...unitExtra, quantity: qty, unitPriceCents: unit, priceType: priced.priceType, discountCents: disc, taxRate: rate, taxAmountCents: c.tax, totalCents: c.total });
         subtotal += c.gross; itemDisc += disc; tax += c.tax; linesTotal += c.total; afterItem += c.gross - disc;
       }
       const cartDiscCents = cents(cartDiscount);

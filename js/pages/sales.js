@@ -4470,11 +4470,10 @@
     const wholesale = isWs();
     const off = window.Offline;
     const offlineNow = isOfflineNow();
-    if (!wholesale && offlineNow && state.cart.some((i) => i.unitId)) { window.UI.toast.error('Packet and deal lines need an internet connection. Switch them to single pieces to sell offline.'); return false; }
     const PT = window.PharmacyTill;
     const pharmacyOffline = PT && PT.active() ? PT.offlineIssue(state.cart) : '';
     if (PT && PT.active() && !wholesale && !offlineNow && state.pharmacy.sig !== PT.sig(state.cart)) { window.UI.toast.error('The cart changed. Review the pharmacy details and try again.'); return false; }
-    const canOffline = !wholesale && !pharmacyOffline && !state.cart.some((i) => i.unitId) && !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
+    const canOffline = !wholesale && !pharmacyOffline && !!off && off.isReady() && off.device.enrolled() && off.context.policyOn();
     let onCredit = false;
     if (wholesale) {
       if (offlineNow) { window.UI.toast.error('Wholesale sales need an internet connection.'); return false; }
