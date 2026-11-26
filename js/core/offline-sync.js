@@ -173,16 +173,21 @@
     },
     async pullFeed(type) {
       let cursor = await DB.kvGet(`cursor:${type}`);
-      let total = 0;
+      let total = 0; let first = true;
+      const since0 = cursor ? Date.parse(String(cursor).split('|')[0]) : NaN; // rows read again only because of the overlap are not 'changes' (no needless catalog reload)
       for (;;) {
         const q = { deviceId: D.id(), type, limit: 500 };
-        if (cursor) q.cursor = cursor;
+        // OVERLAP: the server stamps a row with its time when the change is WRITTEN, but a transaction (a purchase being received, a sale)
+        // becomes visible only when it COMMITS, a moment later. A till that asked in between would move its cursor past that row and never
+        // see it (a received purchase that "disappeared"). So every pull starts 5 minutes before the saved cursor; re-reading a row is harmless.
+        if (cursor) { const [iso] = String(cursor).split('|'); const t = Date.parse(iso); q.cursor = first && Number.isFinite(t) ? `${new Date(t - 5 * 60 * 1000).toISOString()}|000000000000000000000000` : cursor; }
+        first = false; // later pages continue from the real cursor (no overlap, so the loop always ends)
         const { data } = await window.Api.get('/sync/catalog', q, { headers: D.headers(), background: true, timeoutMs: 60000 });
         const put = []; const del = [];
         (data.items || []).forEach((r) => ((DROP_WHEN_INACTIVE.has(type) && r.status && r.status !== 'active') ? del.push(r.id) : put.push(r)));
         await DB.bulkPut(type, put);
         await DB.bulkDelete(type, del);
-        total += (data.items || []).length;
+        total += (data.items || []).filter((r) => !Number.isFinite(since0) || !r.updatedAt || Date.parse(r.updatedAt) > since0).length;
         if (data.nextCursor) { cursor = data.nextCursor; await DB.kvSet(`cursor:${type}`, cursor); }
         Cat.progress = { type, total };
         Offline.emit('catalog', Cat.progress);

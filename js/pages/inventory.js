@@ -426,7 +426,7 @@
       // Show the last list seen on this device at once, then swap in the fresh one (no waiting on the server).
       let painted = false;
       if (!focused && !ioActive()) {
-        try { const c = JSON.parse(localStorage.getItem(ckey) || 'null'); if (c && c.data && Array.isArray(c.data.items) && c.data.items.length) { paint(c.data, false); painted = true; } } catch { /* no saved copy */ }
+        try { const c = JSON.parse(localStorage.getItem(ckey) || 'null'); if (c && c.data && Array.isArray(c.data.items) && c.data.items.length && Date.now() - (Number(c.at) || 0) < 120000) { paint(c.data, false); painted = true; } } catch { /* no saved copy */ } // only a list seen in the last 2 minutes is shown first: an older one can show 'Out of stock' for stock received since
       }
       const { data, offline: servedOffline } = await fetchStockData(endpoint, params);
       if (!focused && !servedOffline) { try { localStorage.setItem(ckey, JSON.stringify({ at: Date.now(), data })); } catch { /* storage full */ } }

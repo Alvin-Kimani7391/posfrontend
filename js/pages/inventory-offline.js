@@ -21,10 +21,11 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const DEFAULT_MIN = 5;
   let forced = false; // set when a request failed because the server could not be reached
+  let forcedAt = 0;   // ...but only for a short while: one slow / failed request must never pin Inventory to the (older) device copy for the whole session
 
   const available = () => !!O() && !!O().catalog;
   const online = () => !window.Connectivity || window.Connectivity.isOnline();
-  const active = () => available() && (forced || !online());
+  const active = () => { if (forced && Date.now() - forcedAt > 20000) forced = false; return available() && (forced || !online()); };
 
   /* Extra product sources for a till whose offline catalog has not downloaded yet:
      (1) the stock list last seen online (saved by remember()), (2) the product search copy kept by FastSearch. */
@@ -123,7 +124,8 @@
   const current = (p) => ({ quantity: onHand(p), reserved: 0 });
 
   const isNetworkError = (e) => !!e && (e.code === 'NETWORK_ERROR' || e.code === 'OFFLINE' || e.status === 0 || /offline|could not reach|network|failed to fetch/i.test(String(e.message || '')));
-  const noteFailure = (e) => { if (isNetworkError(e) && available()) forced = true; return forced; };
+  const noteFailure = (e) => { if (isNetworkError(e) && available()) { forced = true; forcedAt = Date.now(); } return forced; };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) forced = false; }); // coming back to the tab: ask the server again
   window.addEventListener('online', () => { forced = false; });
   if (window.Connectivity && window.Connectivity.onChange) window.Connectivity.onChange((on) => { if (on) forced = false; });
 
