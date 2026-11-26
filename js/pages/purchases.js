@@ -380,7 +380,7 @@
   }
 
   const PICKER_CSS = `
-    .fp-ov{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.55);display:flex;align-items:flex-start;justify-content:center;padding:6vh 12px 12px;backdrop-filter:blur(2px)}
+    .fp-ov{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.55);display:flex;align-items:flex-start;justify-content:center;padding:6vh 12px 12px}
     .fp-box{width:100%;max-width:640px;max-height:86vh;display:flex;flex-direction:column;background:var(--color-surface,#fff);color:var(--color-text,#0f172a);border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:hidden;animation:fp-in .12s ease-out}
     @keyframes fp-in{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
     .fp-head{display:flex;align-items:center;gap:10px;padding:12px 14px 0}
@@ -394,6 +394,8 @@
     .fp-list{overflow:auto;padding:4px 8px 8px;min-height:140px;flex:1;overscroll-behavior:contain}
     .fp-row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;border:1px solid transparent;background:transparent;color:inherit;font:inherit;padding:10px 12px;border-radius:12px;cursor:pointer}
     .fp-row:hover,.fp-row.on{background:var(--color-primary-50,#eef2ff);border-color:var(--color-primary,#4f46e5)}
+    .fp-list{contain:content;-webkit-overflow-scrolling:touch;transform:translateZ(0)}
+    .fp-row{content-visibility:auto;contain-intrinsic-size:auto 58px}
     .fp-main{flex:1;min-width:0;display:flex;flex-direction:column}
     .fp-main b{font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .fp-main small,.fp-side small{font-size:12px;color:var(--color-text-secondary,#64748b);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -469,15 +471,17 @@
         else list.innerHTML = `<div class="fp-note">No product matches “${esc(term)}”.<br/>Check the spelling, or add the product in Products first.</div>`;
         return;
       }
-      list.innerHTML = (term ? '' : '<div class="fp-sec">Recently added</div>') + entries.map(rowHtml).join('');
-      const on = list.querySelector('.fp-row.on'); if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
+      list.innerHTML = (term ? '' : '<div class="fp-sec">Recent &amp; all products</div>') + entries.map(rowHtml).join('');
+      list.scrollTop = 0;
     }
 
-    function setActive(n) {
+    function setActive(n, noScroll) {
       if (!entries.length) return;
+      const prev = list.querySelector('.fp-row.on');
       active = (n + entries.length) % entries.length;
-      list.querySelectorAll('.fp-row').forEach((r, i) => { r.classList.toggle('on', i === active); r.setAttribute('aria-selected', String(i === active)); });
-      const on = list.querySelector('.fp-row.on'); if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
+      if (prev) { prev.classList.remove('on'); prev.setAttribute('aria-selected', 'false'); }
+      const on = list.querySelector(`.fp-row[data-i="${active}"]`);
+      if (on) { on.classList.add('on'); on.setAttribute('aria-selected', 'true'); if (!noScroll && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' }); }
     }
 
     function serverFill(t, my, replace) {
@@ -493,7 +497,15 @@
 
     function search(raw) {
       term = String(raw || '').trim(); const my = ++seq;
-      if (!term) { entries = recents().map((r) => ({ product: r.product, variant: r.variant })); active = 0; paint(); return; }
+      if (!term) {
+        entries = recents().map((r) => ({ product: r.product, variant: r.variant })); active = 0;
+        // products listed at once: recent ones first, then the first products of the device copy (or the server when the copy is not ready yet)
+        let more = null;
+        if (ix) { try { const q = ix.query({ page: 1, limit: 40 }); more = q && q.items; } catch (e) { more = null; } }
+        if (Array.isArray(more)) { const have = new Set(entries.map(fpEntryKey)); fpEntries(more, '').forEach((e) => { if (!have.has(fpEntryKey(e))) entries.push(e); }); entries = entries.slice(0, 40); paint(); }
+        else { paint(entries.length ? undefined : 'loading'); serverFill('', my, false); }
+        return;
+      }
       let local = null;
       if (ix) { try { local = ix.search(term, 40); } catch (e) { local = null; } }
       if (Array.isArray(local)) { // answered from the device copy: instant
@@ -533,9 +545,9 @@
     }
     document.addEventListener('keydown', onKey, true);
 
-    input.addEventListener('input', () => search(input.value));
+    let rq = 0; input.addEventListener('input', () => { cancelAnimationFrame(rq); rq = requestAnimationFrame(() => search(input.value)); });
     list.addEventListener('click', (ev) => { const r = ev.target.closest('.fp-row'); if (r) select(Number(r.dataset.i)); });
-    list.addEventListener('mousemove', (ev) => { const r = ev.target.closest('.fp-row'); if (r && Number(r.dataset.i) !== active) setActive(Number(r.dataset.i)); });
+    list.addEventListener('mouseover', (ev) => { const r = ev.target.closest('.fp-row'); if (r && Number(r.dataset.i) !== active) setActive(Number(r.dataset.i), true); });
     keepBox.addEventListener('change', () => { keepOpen = keepBox.checked; lsSet(FP_KEEP_KEY(), keepOpen); input.focus(); });
     el.querySelector('.fp-x').addEventListener('click', close);
     el.addEventListener('mousedown', (ev) => { if (ev.target === el) close(); });
@@ -1061,7 +1073,7 @@
             <td class="font-semibold">${window.UI.formatMoney(p.total)}</td>
             <td><span class="badge ${PAY_BADGE[p.paymentStatus]}">${p.paymentStatus}</span></td>
             <td><span class="badge ${RECV_BADGE[p.receivedStatus]}">${p.receivedStatus}</span>${RET_BADGE[p.returnStatus] ? ` <span class="badge ${RET_BADGE[p.returnStatus][0]}">${RET_BADGE[p.returnStatus][1]}</span>` : ''}</td>
-            <td class="actions"><button class="btn btn-secondary btn-sm" data-action="view">View</button>${p.receivedStatus === 'RECEIVED' && p.returnStatus !== 'FULL' ? '<button class="btn btn-secondary btn-sm" data-action="return" data-requires-permission="purchases.return">Return</button>' : ''}</td>
+            <td class="actions"><button class="btn btn-secondary btn-sm" data-action="view">View</button><button class="btn btn-secondary btn-sm" data-action="print" title="Print purchase">Print</button>${p.receivedStatus === 'RECEIVED' && p.returnStatus !== 'FULL' ? '<button class="btn btn-secondary btn-sm" data-action="return" data-requires-permission="purchases.return">Return</button>' : ''}</td>
           </tr>
         `).join('');
       }
@@ -1070,12 +1082,123 @@
       document.querySelectorAll('#purchases-tbody [data-action="view"]').forEach((btn) => {
         btn.addEventListener('click', () => openDetailModal(btn.closest('tr').dataset.id));
       });
+      document.querySelectorAll('#purchases-tbody [data-action="print"]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          try { const { data } = await window.Api.get(`/purchases/${btn.closest('tr').dataset.id}`); printPurchase(data.purchase); }
+          catch (err) { window.UI.toast.error(err.message || 'Could not load the purchase'); }
+        });
+      });
       document.querySelectorAll('#purchases-tbody [data-action="return"]').forEach((btn) => {
         btn.addEventListener('click', () => openReturnWizard(btn.closest('tr').dataset.id));
       });
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="7">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load purchases', message: err.message })}</td></tr>`;
     }
+  }
+
+  /* ---------------- print a purchase ---------------- */
+  function printPurchase(p) {
+    const M = (n) => window.UI.formatMoney(Number(n) || 0);
+    const D = (d) => (d ? window.UI.formatDate(d) : '—');
+    const N = (n) => { const x = Math.round((Number(n) || 0) * 1000) / 1000; return x.toLocaleString('en-KE', { maximumFractionDigits: 3 }); };
+    const biz = (window.AppShell.getBusinessProfile && window.AppShell.getBusinessProfile()) || {};
+    const sup = p.supplierId || {};
+    const user = (window.AppShell.getUser && window.AppShell.getUser()) || {};
+    const items = p.items || [];
+    const vatTxt = p.vatMode && p.vatMode !== 'NONE' ? `${VAT_LABEL[p.vatMode]} @ ${p.vatRate}%` : 'No VAT';
+    const recvTone = { RECEIVED: '#15803d', PARTIAL: '#b45309', PENDING: '#475569' };
+    const payTone = { PAID: '#15803d', PARTIAL: '#b45309', UNPAID: '#b91c1c' };
+    const totalPieces = items.reduce((t, i) => t + (Number(i.quantity) || 0) * (Number(i.unitFactor) || 1), 0);
+    const totalRecv = items.reduce((t, i) => t + (Number(i.receivedQuantity) || 0) * (Number(i.unitFactor) || 1), 0);
+    const rows = items.map((i, k) => {
+      const f = Number(i.unitFactor) || 1; const q = Number(i.quantity) || 0;
+      const unit = i.unitName && i.unitName !== 'piece' ? esc(i.unitName) : 'pcs';
+      const recv = Number(i.receivedQuantity) || 0;
+      const rs = recv >= q ? 'Received' : recv > 0 ? 'Partial' : 'Pending';
+      const loc = i.receivedLocation === 'WAREHOUSE' ? 'Warehouse' : i.receivedLocation === 'RETAIL' ? 'Shop floor' : '';
+      return `<tr>
+        <td class="c">${k + 1}</td>
+        <td><b>${esc(i.nameSnapshot)}</b>${f > 1 ? `<div class="sub">1 ${unit} = ${N(f)} pieces &middot; ${N(q * f)} pieces total</div>` : ''}</td>
+        <td class="r">${N(q)} <span class="sub">${unit}</span></td>
+        <td class="r">${M(i.unitCost)}</td>
+        <td class="r">${Number(i.discount) > 0 ? M(i.discount) : '—'}</td>
+        <td class="r">${i.taxRate ? `${i.taxRate}%` : '—'}</td>
+        <td class="r"><b>${M(i.total)}</b><div class="sub">${M((Number(i.total) || 0) / (q * f || 1))} / piece</div></td>
+        <td class="c"><span class="pill ${rs.toLowerCase()}">${rs}</span><div class="sub">${recv ? `${N(recv)} of ${N(q)}` : ''}${loc ? `${recv ? ' &middot; ' : ''}${loc}` : ''}</div></td>
+      </tr>`;
+    }).join('');
+    const css = `
+      @page{size:A4;margin:12mm}
+      *{box-sizing:border-box}
+      body{font:12px/1.45 "Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#0f172a;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding-bottom:14px;border-bottom:3px solid #4f46e5}
+      .biz h1{margin:0 0 3px;font-size:20px;letter-spacing:-.3px}
+      .biz div{color:#475569;font-size:11.5px}
+      .doc{text-align:right}
+      .doc .t{font-size:22px;font-weight:800;color:#4f46e5;letter-spacing:.06em;text-transform:uppercase}
+      .doc .n{font-size:15px;font-weight:700;margin-top:2px}
+      .badges{margin-top:6px;display:flex;gap:6px;justify-content:flex-end}
+      .badge{display:inline-block;padding:3px 10px;border-radius:999px;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.04em}
+      .cards{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px;margin:16px 0}
+      .card{border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;background:#f8fafc}
+      .card h3{margin:0 0 6px;font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#64748b}
+      .kv{display:flex;justify-content:space-between;gap:10px;padding:2px 0}
+      .kv span:first-child{color:#64748b}.kv span:last-child{font-weight:600;text-align:right}
+      table{width:100%;border-collapse:collapse}
+      thead th{background:#4f46e5;color:#fff;font-size:10px;letter-spacing:.06em;text-transform:uppercase;text-align:left;padding:8px 7px}
+      thead th.r,td.r{text-align:right}thead th.c,td.c{text-align:center}
+      tbody td{padding:7px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+      tbody tr:nth-child(even){background:#f8fafc}
+      tr{break-inside:avoid}
+      .sub{color:#64748b;font-size:10.5px;font-weight:400}
+      .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700}
+      .pill.received{background:#dcfce7;color:#166534}.pill.partial{background:#fef3c7;color:#92400e}.pill.pending{background:#e2e8f0;color:#334155}
+      .bottom{display:grid;grid-template-columns:1fr 280px;gap:18px;margin-top:16px;break-inside:avoid}
+      .notes{border:1px dashed #cbd5e1;border-radius:10px;padding:10px 12px;min-height:70px}
+      .notes h3{margin:0 0 4px;font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#64748b}
+      .tot .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #e2e8f0}
+      .tot .grand{background:#4f46e5;color:#fff;border-radius:8px;padding:9px 10px;margin:6px 0;font-size:15px;font-weight:800;border:0}
+      .tot .bal{font-weight:800;color:#b91c1c}
+      .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:46px;break-inside:avoid}
+      .sign div{border-top:1px solid #0f172a;padding-top:5px;text-align:center;font-size:10.5px;color:#475569}
+      .foot{margin-top:18px;text-align:center;color:#94a3b8;font-size:10px}
+    `;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Purchase ${esc(p.purchaseNumber)}</title><style>${css}</style></head><body>
+      <div class="top">
+        <div class="biz"><h1>${esc(biz.name || 'Purchase order')}</h1>${biz.address ? `<div>${esc(biz.address)}</div>` : ''}${biz.phone ? `<div>Tel: ${esc(biz.phone)}</div>` : ''}${biz.kraPin ? `<div>KRA PIN: ${esc(biz.kraPin)}</div>` : ''}</div>
+        <div class="doc"><div class="t">Purchase</div><div class="n">${esc(p.purchaseNumber)}</div>
+          <div class="badges"><span class="badge" style="background:${recvTone[p.receivedStatus] || '#475569'}">${esc(p.receivedStatus || '')}</span><span class="badge" style="background:${payTone[p.paymentStatus] || '#475569'}">${esc(p.paymentStatus || '')}</span>${p.returnStatus && p.returnStatus !== 'NONE' ? `<span class="badge" style="background:#7c3aed">RETURN ${esc(p.returnStatus)}</span>` : ''}</div></div>
+      </div>
+      <div class="cards">
+        <div class="card"><h3>Supplier</h3><div style="font-size:14px;font-weight:700">${esc(sup.name || '—')}</div>${sup.phone ? `<div class="sub">Tel: ${esc(sup.phone)}</div>` : ''}${p.invoiceNumber ? `<div class="kv" style="margin-top:6px"><span>Supplier invoice #</span><span>${esc(p.invoiceNumber)}</span></div>` : ''}${p.invoiceDate ? `<div class="kv"><span>Invoice date</span><span>${D(p.invoiceDate)}</span></div>` : ''}</div>
+        <div class="card"><h3>Purchase details</h3><div class="kv"><span>Purchase date</span><span>${D(p.purchaseDate)}</span></div><div class="kv"><span>Due date</span><span>${D(p.dueDate)}</span></div><div class="kv"><span>VAT</span><span>${esc(vatTxt)}</span></div><div class="kv"><span>Products</span><span>${items.length}</span></div></div>
+        <div class="card"><h3>Stock</h3><div class="kv"><span>Pieces ordered</span><span>${N(totalPieces)}</span></div><div class="kv"><span>Pieces received</span><span>${N(totalRecv)}</span></div><div class="kv"><span>Outstanding</span><span>${N(Math.max(0, totalPieces - totalRecv))}</span></div>${p.invoiceMatchStatus && p.invoiceMatchStatus !== 'NOT_RECORDED' ? `<div class="kv"><span>Invoice check</span><span>${esc(String(p.invoiceMatchStatus).replace(/_/g, ' '))}</span></div>` : ''}</div>
+      </div>
+      <table>
+        <thead><tr><th class="c" style="width:28px">#</th><th>Product</th><th class="r">Quantity</th><th class="r">Unit cost${p.vatMode && p.vatMode !== 'NONE' ? ' (ex-VAT)' : ''}</th><th class="r">Discount</th><th class="r">VAT</th><th class="r">Line total</th><th class="c">Received</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="bottom">
+        <div class="notes"><h3>Notes</h3>${p.notes ? esc(p.notes) : '<span class="sub">—</span>'}</div>
+        <div class="tot">
+          <div class="row"><span>Subtotal</span><span>${M(p.subtotal)}</span></div>
+          ${Number(p.discount) > 0 ? `<div class="row"><span>Discount</span><span>− ${M(p.discount)}</span></div>` : ''}
+          <div class="row"><span>VAT</span><span>${M(p.tax)}</span></div>
+          <div class="row grand"><span>TOTAL</span><span>${M(p.total)}</span></div>
+          ${Number(p.returnedAmount) > 0 ? `<div class="row"><span>Returned to supplier</span><span>− ${M(p.returnedAmount)}</span></div>` : ''}
+          <div class="row"><span>Amount paid</span><span>${M(p.amountPaid)}</span></div>
+          <div class="row bal"><span>Balance due</span><span>${M(p.balance)}</span></div>
+        </div>
+      </div>
+      <div class="sign"><div>Prepared by${user.name ? ` (${esc(user.name)})` : ''}</div><div>Received by</div><div>Supplier / delivery rep</div></div>
+      <div class="foot">Printed ${esc(new Date().toLocaleString('en-KE'))} &middot; ${esc(p.purchaseNumber)}</div>
+    </body></html>`;
+    const f = document.createElement('iframe');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+    document.body.appendChild(f);
+    const d = f.contentWindow.document; d.open(); d.write(html); d.close();
+    const go = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { window.UI.toast.error('Could not open the print window'); } setTimeout(() => f.remove(), 60000); };
+    if (f.contentWindow.document.readyState === 'complete') setTimeout(go, 150); else f.onload = () => setTimeout(go, 150);
   }
 
   /* ---------------- detail ---------------- */
@@ -1114,6 +1237,7 @@
       `,
       footerHtml: `
         <button class="btn btn-secondary" data-action="close">Close</button>
+        <button class="btn btn-secondary" data-action="print">${window.Icons && window.Icons.get ? window.Icons.get('printer') || '' : ''} Print</button>
         ${canReturn ? `<button class="btn btn-secondary" data-action="return-goods">Return goods</button>` : ''}
         ${canPay ? `<button class="btn btn-secondary" data-action="pay">Record payment</button>` : ''}
         ${canReceive ? `<button class="btn btn-primary" data-action="receive">Mark received</button>` : ''}
@@ -1124,6 +1248,7 @@
     if (gallery) bindCards(gallery, (purchase.attachments || []).map(remoteItem));
 
     modal.querySelector('[data-action="close"]').addEventListener('click', window.UI.closeModal);
+    modal.querySelector('[data-action="print"]').addEventListener('click', () => printPurchase(purchase));
     modal.querySelector('[data-action="return-goods"]')?.addEventListener('click', () => { window.UI.closeModal(); openReturnWizard(purchase._id); });
     modal.querySelector('[data-action="receive"]')?.addEventListener('click', () => { window.UI.closeModal(); openReceiveDialog(purchase); });
     modal.querySelector('[data-action="pay"]')?.addEventListener('click', () => {
@@ -1435,9 +1560,19 @@
     .pc-headmain{display:flex;align-items:center;flex:1;min-width:0}
     .pc-sum{font-size:12px;color:var(--color-text-secondary,#64748b);margin-top:2px}
     .pc-chev{transition:transform .15s;margin:0 6px;color:var(--color-text-secondary,#64748b)}
+    .pc-chev{width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--color-surface-2,#eef2ff);color:var(--color-primary,#4f46e5);transition:transform .25s cubic-bezier(.4,0,.2,1),background .2s,color .2s;flex:none}
+    .pc-head:hover .pc-chev{background:var(--color-primary,#4f46e5);color:#fff}
+    .pc-chev svg{width:16px;height:16px;display:block}
     .pc-card.pc-collapsed .pc-chev{transform:rotate(-90deg)}
-    .pc-card.pc-collapsed .pc-body{display:none}
-    .pc-body{margin-top:10px}
+    .pc-card{transition:box-shadow .2s,border-color .2s}
+    .pc-card:not(.pc-collapsed){border-color:var(--color-primary,#4f46e5);box-shadow:0 4px 18px rgba(79,70,229,.12)}
+    .pc-body{display:grid;grid-template-rows:1fr;transition:grid-template-rows .28s cubic-bezier(.4,0,.2,1),margin .28s;margin-top:10px}
+    .pc-body>.pc-body-in{overflow:hidden;min-height:0}
+    .pc-card.pc-collapsed .pc-body{grid-template-rows:0fr;margin-top:0}
+    .pc-card.pc-collapsed .pc-body>.pc-body-in{visibility:hidden;transition:visibility 0s .28s}
+    .pc-tools{display:flex;gap:6px;justify-content:flex-end;margin-bottom:6px}
+    .pc-tools button{border:1px solid var(--color-border,#e2e8f0);background:var(--color-surface,#fff);color:inherit;border-radius:999px;padding:4px 12px;font-size:12px;cursor:pointer}
+    .pc-tools button:hover{border-color:var(--color-primary,#4f46e5);color:var(--color-primary,#4f46e5)}
     .pc-card.pc-row-bad{border-color:#d93025;background:#fff5f4}
     .pc-head{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
     .pc-name{font-weight:700}.pc-sku{font-size:12px;color:var(--color-text-secondary,#64748b)}
@@ -1584,6 +1719,7 @@
             </div>
           </div>
 
+          <div class="pc-tools" id="pc-tools" hidden><button type="button" data-all="open">Expand all</button><button type="button" data-all="close">Collapse all</button></div>
           <div class="pc-list" id="purchase-items"></div>
           <div class="pc-bar">
             <button type="button" class="btn btn-primary" id="add-item-btn">${window.Icons.get('plus')} Add product</button>
@@ -1776,10 +1912,10 @@
             ${sku ? `<div class="pc-sku">SKU: ${esc(sku)}</div>` : ''}
             <div class="pc-sum" data-sum="${i}"></div>
           </div></div>
-          <span class="pc-chev" aria-hidden="true">&#9662;</span>
+          <span class="pc-chev" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
           <button type="button" class="btn btn-ghost btn-sm btn-icon" data-remove="${i}" title="Remove" aria-label="Remove">${window.Icons.get('trash')}</button>
         </div>
-        <div class="pc-body">
+        <div class="pc-body"><div class="pc-body-in">
         <div class="pc-grid">
           <div class="field"><label>Bought in</label>
             <select class="select" data-unit="${i}">${unitOpts}</select>
@@ -1796,15 +1932,17 @@
         </div>
         <div class="pc-result" data-calc="${i}"></div>
         <div data-pricebox="${i}" style="margin-top:8px"></div>
-        </div>
+        </div></div>
       </div>`;
     }
 
     function renderItems(focusIdx, focusField) {
       if (!items.length) {
+        toolsEl.hidden = true;
         list.innerHTML = `<div class="pc-empty"><b>No products added yet</b><br>Pick the supplier, then click <b>Add product</b>. Products you add are remembered for that supplier.</div>`;
         refreshCalc(); return;
       }
+      toolsEl.hidden = items.length < 2;
       list.innerHTML = items.map(cardHtml).join('');
       refreshCalc();
       if (focusIdx != null) {
@@ -1822,6 +1960,8 @@
       it._open = !it._open;
       h.closest('.pc-card').classList.toggle('pc-collapsed', !it._open);
     });
+    const toolsEl = modal.querySelector('#pc-tools');
+    toolsEl.addEventListener('click', (e) => { const b = e.target.closest('[data-all]'); if (!b) return; const o = b.dataset.all === 'open'; items.forEach((x) => { x._open = o; }); list.querySelectorAll('.pc-card').forEach((c) => c.classList.toggle('pc-collapsed', !o)); });
     const openOnly = (idx) => items.forEach((x, k) => { x._open = k === idx; });
 
     /* ---------- one set of delegated listeners (cards are re-drawn often) ---------- */
