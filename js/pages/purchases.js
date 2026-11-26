@@ -1097,11 +1097,26 @@
   }
 
   /* ---------------- print a purchase ---------------- */
-  function printPurchase(p) {
+  /** Shop name, location and phone for the printout: the purchase's branch first, then the business record (each is optional; a role that may not read one simply skips it). */
+  let printHeadCache = null;
+  async function printHeader(p) {
+    const k = String(p.branchId || '');
+    if (printHeadCache && printHeadCache.k === k) return printHeadCache.v;
+    const prof = (window.AppShell.getBusinessProfile && window.AppShell.getBusinessProfile()) || {};
+    const v = { name: prof.name || '', address: '', phone: '', kraPin: '', branchName: '' };
+    const bid = p.branchId && (p.branchId._id || p.branchId);
+    try { const { data } = await window.Api.get(`/branches/${bid}`); const b = data.branch || {}; v.branchName = b.name || ''; v.address = b.address || ''; v.phone = b.phone || ''; } catch (e) { /* no branch access */ }
+    try { const { data } = await window.Api.get('/business'); const b = data.business || {}; v.name = b.name || v.name; v.address = v.address || b.address || ''; v.phone = v.phone || b.phone || ''; v.kraPin = b.kraPin || b.taxPin || ''; } catch (e) { /* no settings access */ }
+    printHeadCache = { k, v };
+    return v;
+  }
+
+  async function printPurchase(p) {
+    const head = await printHeader(p);
     const M = (n) => window.UI.formatMoney(Number(n) || 0);
     const D = (d) => (d ? window.UI.formatDate(d) : '—');
     const N = (n) => { const x = Math.round((Number(n) || 0) * 1000) / 1000; return x.toLocaleString('en-KE', { maximumFractionDigits: 3 }); };
-    const biz = (window.AppShell.getBusinessProfile && window.AppShell.getBusinessProfile()) || {};
+    const biz = head;
     const sup = p.supplierId || {};
     const user = (window.AppShell.getUser && window.AppShell.getUser()) || {};
     const items = p.items || [];
@@ -1165,7 +1180,7 @@
     `;
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Purchase ${esc(p.purchaseNumber)}</title><style>${css}</style></head><body>
       <div class="top">
-        <div class="biz"><h1>${esc(biz.name || 'Purchase order')}</h1>${biz.address ? `<div>${esc(biz.address)}</div>` : ''}${biz.phone ? `<div>Tel: ${esc(biz.phone)}</div>` : ''}${biz.kraPin ? `<div>KRA PIN: ${esc(biz.kraPin)}</div>` : ''}</div>
+        <div class="biz"><h1>${esc(biz.name || 'Purchase order')}</h1>${biz.branchName && biz.branchName !== biz.name ? `<div style="font-weight:600">${esc(biz.branchName)}</div>` : ''}${biz.address ? `<div>${esc(biz.address)}</div>` : ''}${biz.phone ? `<div>Tel: ${esc(biz.phone)}</div>` : ''}${biz.kraPin ? `<div>KRA PIN: ${esc(biz.kraPin)}</div>` : ''}</div>
         <div class="doc"><div class="t">Purchase</div><div class="n">${esc(p.purchaseNumber)}</div>
           <div class="badges"><span class="badge" style="background:${recvTone[p.receivedStatus] || '#475569'}">${esc(p.receivedStatus || '')}</span><span class="badge" style="background:${payTone[p.paymentStatus] || '#475569'}">${esc(p.paymentStatus || '')}</span>${p.returnStatus && p.returnStatus !== 'NONE' ? `<span class="badge" style="background:#7c3aed">RETURN ${esc(p.returnStatus)}</span>` : ''}</div></div>
       </div>
