@@ -136,9 +136,9 @@
     const T = Math.round(inclTotal * 100); const q = Number(line.quantity); const r = Number(line.taxRate) || 0;
     if (!(T > 0) || !(q > 0)) return;
     const tot = (net) => net + Math.round(net * (r / 100));
-    let net = Math.round(T / (1 + r / 100)); let found = false;
-    for (let d = 0; d <= 5 && !found; d++) for (const n of [net - d, net + d]) if (tot(n) === T) { net = n; found = true; break; }
-    if (!found) return;
+    let net = Math.round(T / (1 + r / 100)); let found = false; let best = net;
+    for (let d = 0; d <= 40 && !found; d++) for (const n of [net - d, net + d]) { if (n < 0) continue; if (tot(n) === T) { net = n; found = true; break; } if (Math.abs(tot(n) - T) < Math.abs(tot(best) - T)) best = n; }
+    if (!found) net = best; // an exact VAT split can be impossible for some amounts: take the closest (1 cent off at most)
     let u = Math.ceil(net / q - 1e-9);
     while (Math.round(q * u) < net) u += 1;
     const disc = Math.round(q * u) - net;
@@ -1484,12 +1484,12 @@
   }
   const serializeItem = (it) => ({
     product: it.product, variant: it.variant || null, quantity: it.quantity, price: it.price, priceMode: it.priceMode, canon: it.canon,
-    pack: it.pack, unitName: it.unitName, customUnit: !!it.customUnit, priceUpdate: it.priceUpdate || null, promptedFor: it.promptedFor || null,
+    pack: it.pack, unitName: it.unitName, customUnit: !!it.customUnit, priceUpdate: it.priceUpdate || null, promptedFor: it.promptedFor || null, discount: Number(it.discount) || 0,
   });
   const reviveItem = (o) => ({
     product: o.product, variant: o.variant || null, quantity: Number(o.quantity) || 0, price: Number(o.price) || 0, priceMode: o.priceMode || 'pack',
     canon: o.canon != null ? o.canon : null, pack: o.pack || 1, unitName: o.unitName || 'Piece', customUnit: !!o.customUnit,
-    priceUpdate: o.priceUpdate || null, promptedFor: o.promptedFor || null,
+    priceUpdate: o.priceUpdate || null, promptedFor: o.promptedFor || null, discount: Number(o.discount) || 0,
   });
 
   /* supplier memory */
@@ -1746,6 +1746,9 @@
           <div class="pc-foot">
             <div>
               <div class="field"><label>Supplier invoice <span class="text-muted">(optional)</span></label><div id="invoice-picker"></div></div>
+              <div class="field"><label>Supplier discount on the whole purchase <span class="text-muted">(optional)</span></label>
+                <input class="input" type="number" min="0" step="0.01" inputmode="decimal" name="totalDiscount" id="pc-total-discount" placeholder="0" />
+                <span class="text-xs text-muted">Shared across the products for the amount to pay only. Product costs and selling prices stay as entered.</span></div>
               <div class="field"><label>Notes <span class="text-muted">(optional)</span></label><textarea class="textarea" name="notes" rows="2"></textarea></div>
             </div>
             <div class="pc-totals" id="purchase-summary"></div>
@@ -1773,7 +1776,7 @@
       const inv = form.invoiceNumber ? form.invoiceNumber.value : '';
       const notes = form.notes ? form.notes.value : '';
       if (!items.length && !supId && !inv && !notes) clearDraft();
-      else lsSet(DRAFT_KEY(), { v: 2, savedAt: Date.now(), supplierId: supId, supplierName: supName(), invoiceNumber: inv, notes, vatMode: vat.mode, vatRate: vat.rate, items: items.map(serializeItem) });
+      else lsSet(DRAFT_KEY(), { v: 2, savedAt: Date.now(), supplierId: supId, supplierName: supName(), invoiceNumber: inv, notes, vatMode: vat.mode, vatRate: vat.rate, totalDiscount: Number(form.totalDiscount && form.totalDiscount.value) || 0, items: items.map(serializeItem) });
       renderDraftBanner();
     }
     const persistSoon = () => { clearTimeout(timer); timer = setTimeout(persist, 250); };
@@ -1902,14 +1905,43 @@
         const p = splitPrice(packPrice(it), vat.mode, vat.rate);
         ex += p.exVat * it.quantity; incl += p.inclVat * it.quantity; units += it.quantity * packOf(it); active += 1;
       });
+      const plan = discountPlan();
+      const payable = plan.t / 100;
+      if (plan.own + plan.whole > 0) { const e2 = payable / (1 + (vat.mode === 'NONE' ? 0 : vat.rate) / 100); ex = e2; incl = payable; }
       modal.querySelector('#purchase-summary').innerHTML = `
         <div><span>Products in this purchase</span><b>${active}</b></div>
         <div><span>Total pieces received</span><b>${fmtN(units)}</b></div>
         ${skipped ? `<div class="text-muted"><span>Saved lines with no quantity (skipped)</span><span>${skipped}</span></div>` : ''}
         ${vat.mode && vat.mode !== 'NONE' ? `<div><span>Subtotal excl. VAT</span><span>${money(ex)}</span></div><div><span>VAT (${vat.rate}%)</span><span>${money(incl - ex)}</span></div>` : ''}
-        <div class="pc-grand"><span>Total</span><span>${money(incl)}</span></div>`;
+        ${plan.own + plan.whole > 0 ? `<div><span>Total before discount</span><span>${money(plan.t0 / 100)}</span></div>
+        ${plan.own > 0 ? `<div style="color:var(--color-success,#15803d)"><span>Product discounts</span><span>− ${money(plan.own / 100)}</span></div>` : ''}
+        ${plan.whole > 0 ? `<div style="color:var(--color-success,#15803d)"><span>Discount on whole purchase</span><span>− ${money(plan.whole / 100)}</span></div>` : ''}` : ''}
+        <div class="pc-grand"><span>${plan.own + plan.whole > 0 ? 'Total to pay supplier' : 'Total'}</span><span>${money(payable)}</span></div>`;
       const sb = modal.querySelector('#purchase-save-btn');
-      if (sb && !sb.dataset.loading) sb.textContent = active ? `Create purchase · ${money(incl)}` : 'Create purchase';
+      if (sb && !sb.dataset.loading) sb.textContent = active ? `Create purchase · ${money(payable)}` : 'Create purchase';
+    }
+
+    /**
+     * Supplier discounts. Returns, per active product, the amount payable in cents BEFORE discounts (t0) and AFTER (t).
+     * Product discount comes off its own line; the whole-purchase discount is shared across lines in proportion to what each still costs
+     * (largest-remainder, so the pieces add up to the exact discount, to the cent).
+     */
+    function discountPlan() {
+      const act = items.filter(isActive);
+      const rows = act.map((it) => {
+        const t0 = Math.round(splitPrice(packPrice(it), vat.mode, vat.mode === 'NONE' ? 0 : vat.rate).inclVat * it.quantity * 100);
+        const own = Math.min(t0, Math.max(0, Math.round((Number(it.discount) || 0) * 100)));
+        return { it, t0, own, left: t0 - own, share: 0 };
+      });
+      const base = rows.reduce((t, r) => t + r.left, 0);
+      let whole = Math.min(base, Math.max(0, Math.round((Number(form.totalDiscount && form.totalDiscount.value) || 0) * 100)));
+      if (whole > 0 && base > 0) {
+        let used = 0;
+        rows.forEach((r) => { const exact = (whole * r.left) / base; r.share = Math.floor(exact); r.frac = exact - r.share; used += r.share; });
+        rows.slice().sort((a, b) => b.frac - a.frac).slice(0, whole - used).forEach((r) => { r.share += 1; });
+      } else whole = 0;
+      rows.forEach((r) => { r.t = r.left - r.share; });
+      return { rows, whole, own: rows.reduce((t, r) => t + r.own, 0), t0: rows.reduce((t, r) => t + r.t0, 0), t: rows.reduce((t, r) => t + r.t, 0) };
     }
 
     function cardHtml(it, i) {
@@ -1945,6 +1977,9 @@
             <input class="input" type="number" min="0" step="0.01" inputmode="decimal" value="${it.price || ''}" placeholder="0" data-field="price" data-idx="${i}" />
             ${bulk ? `<div class="pc-seg"><button type="button" data-pmode="pack" data-idx="${i}" class="${it.priceMode !== 'unit' ? 'on' : ''}"><span data-lab="segpack" data-idx="${i}">Per ${esc(unitLabel(it))}</span></button><button type="button" data-pmode="unit" data-idx="${i}" class="${it.priceMode === 'unit' ? 'on' : ''}">Per piece</button></div>` : ''}</div>
         </div>
+        <div class="field" style="margin-top:8px"><label>Supplier discount on this product <span class="text-muted">(total amount taken off, optional)</span></label>
+          <input class="input" type="number" min="0" step="0.01" inputmode="decimal" value="${it.discount || ''}" placeholder="0" data-field="discount" data-idx="${i}" />
+          <span class="text-xs text-muted">Lowers what you pay the supplier. The product's cost and selling price are not changed.</span></div>
         <div class="pc-result" data-calc="${i}"></div>
         <div data-pricebox="${i}" style="margin-top:8px"></div>
         </div></div>
@@ -1967,6 +2002,8 @@
         if (q) { q.focus(); q.select(); }
       }
     }
+
+    form.totalDiscount.addEventListener('input', () => { refreshCalc(); persistSoon(); });
 
     /* ---------- expand / collapse numbered product sections ---------- */
     list.addEventListener('click', (e) => {
@@ -2125,6 +2162,7 @@
       if (draft.supplierId && (suppliers.some((s) => s._id === draft.supplierId))) { supId = draft.supplierId; supSel.value = supId; }
       if (draft.invoiceNumber) form.invoiceNumber.value = draft.invoiceNumber;
       if (draft.notes) form.notes.value = draft.notes;
+      if (draft.totalDiscount && form.totalDiscount) form.totalDiscount.value = draft.totalDiscount;
       if (draft.vatMode) applyVat(draft.vatMode, draft.vatRate);
       draft.items.forEach((o) => { try { items.push(reviveItem(o)); } catch (e) { /* skip bad line */ } });
       if (items.length) window.UI.toast.info(`Unfinished purchase restored (${items.length} product${items.length === 1 ? '' : 's'})`);
@@ -2170,9 +2208,14 @@
       fd.append('branchId', branchId);
       fd.append('supplierId', raw.supplierId);
       if (raw.invoiceNumber) fd.append('invoiceNumber', raw.invoiceNumber);
-      if (raw.notes) fd.append('notes', raw.notes);
+      const discNote = plan.own + plan.whole > 0 ? `Supplier discount: ${money(plan.own / 100 + plan.whole / 100)}${plan.whole > 0 ? ` (incl. ${money(plan.whole / 100)} on the whole purchase)` : ''}. Total before discount: ${money(plan.t0 / 100)}.` : '';
+      const noteAll = [raw.notes, discNote].filter(Boolean).join('\n');
+      if (noteAll) fd.append('notes', noteAll);
       fd.append('vatMode', vat.mode);
       fd.append('vatRate', rate);
+      const plan = discountPlan();
+      const planOf = new Map(plan.rows.map((r) => [r.it, r]));
+      const costFix = []; // products whose cost must be put back to the undiscounted figure after the purchase is saved
       fd.append('items', JSON.stringify(active.map((it) => {
         const line = {
           productId: it.product._id,
@@ -2181,8 +2224,15 @@
           unitCost: splitPrice(packPrice(it), vat.mode, rate).exVat / packOf(it), // ex-VAT cost of ONE piece; backend adds VAT via taxRate
           taxRate: rate,
         };
-        if (vat.mode === 'INCLUSIVE') exactInclusiveLine(line, packPrice(it) * it.quantity);
-        if (it.priceUpdate) { line.updatePrices = true; line.sellingPrice = it.priceUpdate.sellingPrice; line.defaultDiscount = it.priceUpdate.discount; }
+        const pr = planOf.get(it);
+        const discounted = pr && pr.t < pr.t0;
+        // exact amount owed: VAT-inclusive entries, and any line the supplier discounted, are solved to the cent (the difference travels in the line's discount field)
+        if (vat.mode === 'INCLUSIVE' || discounted) exactInclusiveLine(line, pr ? pr.t / 100 : packPrice(it) * it.quantity);
+        if (it.priceUpdate) {
+          line.updatePrices = true; line.sellingPrice = it.priceUpdate.sellingPrice; line.defaultDiscount = it.priceUpdate.discount;
+          // the backend sets cost = amount owed / pieces, which would bake the supplier discount into the cost: put it back afterwards
+          if (discounted) costFix.push({ it, cost: pr.t0 / 100 / line.quantity });
+        }
         return line;
       })));
       picker.getFiles().forEach((f) => fd.append('invoices', f, f.name));
@@ -2193,6 +2243,12 @@
       window.UI.setButtonLoading(btn, true, 'Creating…');
       try {
         await window.Api.upload('/purchases', fd);
+        for (const f of costFix) {
+          try {
+            const url = f.it.variant ? `/products/${f.it.product._id}/variants/${f.it.variant._id}` : `/products/${f.it.product._id}`;
+            await window.Api.put(url, { costPrice: Math.round(f.cost * 100) / 100 });
+          } catch (e) { window.UI.toast.warning(`${f.it.product.name}: cost price could not be restored after the discount - check it in Products.`); }
+        }
         memUpsert(supId, items, vat); // remember latest units & prices for next time
         done = true; clearTimeout(timer); clearDraft(); renderDraftBanner();
         window.UI.toast.success(`Purchase created${updatedCount ? ` - ${updatedCount} product price${updatedCount > 1 ? 's' : ''} updated` : ''}${skipped ? ` (${skipped} saved line${skipped > 1 ? 's' : ''} without quantity skipped)` : ''}`);
