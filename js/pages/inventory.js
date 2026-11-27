@@ -248,6 +248,33 @@
     });
   }
 
+  /** "x" inside a search bar: shows while there is something to clear, one click resets the box (and any filters via onClear). */
+  function attachSearchClear(input, opts) {
+    opts = opts || {};
+    const host = input && input.closest('.input-group');
+    if (!host || input._clearX) return;
+    if (!document.getElementById('sx-clear-style')) {
+      const st = document.createElement('style'); st.id = 'sx-clear-style';
+      st.textContent = '.sx-clear{position:absolute;top:50%;transform:translateY(-50%);width:28px;height:28px;padding:0;border:0;border-radius:50%;background:var(--color-bg,#f1f3f5);color:var(--color-text-muted,#667085);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;line-height:1;z-index:2}.sx-clear:hover{background:var(--color-border,#e4e7ec);color:var(--color-text,#101828)}.sx-clear[hidden]{display:none}';
+      document.head.appendChild(st);
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'sx-clear'; btn.hidden = true;
+    btn.title = 'Clear search and filters'; btn.setAttribute('aria-label', 'Clear search and filters'); btn.innerHTML = '&times;';
+    host.appendChild(btn);
+    const sync = () => {
+      const on = !!input.value || !!(opts.active && opts.active());
+      btn.hidden = !on;
+      const hasCam = !!host.querySelector('.bg-search-scan');
+      btn.style.right = hasCam ? '44px' : '8px';
+      input.style.paddingRight = on ? (hasCam ? '78px' : '40px') : '';
+    };
+    input._clearX = btn; input._syncClear = sync;
+    input.addEventListener('input', sync);
+    btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); input.value = ''; opts.onClear && opts.onClear(); sync(); input.focus(); });
+    setTimeout(sync, 0); // after the camera icon is attached
+  }
+
   function renderToolbar() {
     const toolbar = document.getElementById('view-toolbar');
     const searchable = ['stock', 'warehouse', 'overview'].includes(state.view);
@@ -265,6 +292,11 @@
         else renderOverview();
       };
       const searchInput = document.getElementById('search-input');
+      const resetAll = () => {
+        state.search = ''; state.productId = ''; state.productName = ''; state.location = ''; state.page = 1;
+        try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+        runSearch();
+      };
       searchInput.addEventListener('input', window.UI.debounce((e) => {
         state.search = e.target.value.trim();
         state.page = 1;
@@ -275,7 +307,7 @@
         window.BarcodeGuard.attachSearchScan(searchInput, {
           title: 'Scan product barcode',
           onCode: (code) => {
-            searchInput.value = code; state.search = code; state.page = 1;
+            searchInput.value = code; state.search = code; state.page = 1; if (searchInput._syncClear) searchInput._syncClear();
             runSearch();
             window.BarcodeGuard.check(code).then((r) => {
               if (r.unknown) return;
@@ -285,6 +317,7 @@
           },
         });
       }
+      attachSearchClear(searchInput, { active: () => !!(state.search || state.productId), onClear: resetAll });
       document.getElementById('reconcile-btn')?.addEventListener('click', openReconcileModal);
     } else if (state.view === 'movements') {
       const mv = state.mv;
@@ -323,7 +356,16 @@
         sel.innerHTML = '<option value="">All categories</option>' + cats.map((c) => `<option value="${esc(c._id)}" ${mv.categoryId === c._id ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
       });
 
-      const reload = () => { state.page = 1; renderMovements(); };
+      const reload = () => { state.page = 1; renderMovements(); const i = document.getElementById('mv-search'); if (i && i._syncClear) i._syncClear(); };
+      const clearAllMv = () => {
+        state.mv = { search: '', categoryId: '', type: '', from: '', to: '' }; state.location = ''; state.productId = ''; state.productName = '';
+        try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+        renderToolbar(); state.page = 1; renderMovements();
+      };
+      attachSearchClear(document.getElementById('mv-search'), {
+        active: () => !!(mv.categoryId || mv.type || mv.from || mv.to || state.location || state.productId),
+        onClear: clearAllMv,
+      });
       document.getElementById('mv-search').addEventListener('input', window.UI.debounce((e) => { mv.search = e.target.value.trim(); reload(); }));
       document.getElementById('mv-category').addEventListener('change', (e) => { mv.categoryId = e.target.value; reload(); });
       document.getElementById('mv-type').addEventListener('change', (e) => { mv.type = e.target.value; reload(); });
@@ -383,9 +425,8 @@
       if (focused) data.items = data.items.filter((r) => String((r.productId && r.productId._id) || r.productId) === String(state.productId));
       const tbody = body.querySelector('tbody');
       if (focused) {
-        body.insertAdjacentHTML('afterbegin', `<div style="display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px var(--space-6);background:#e8f1ff;border-bottom:1px solid #9ec1ff;color:#0b3d91;font-size:14px">
-          <span>Showing stock for <strong>${esc(state.productName || 'this product')}</strong></span>
-          <button type="button" class="btn btn-secondary btn-sm" id="stock-show-all">Show all stock</button></div>`);
+        body.insertAdjacentHTML('afterbegin', `<div style="padding:10px var(--space-6) 0"><span style="display:inline-flex;gap:8px;align-items:center;max-width:100%;padding:4px 6px 4px 12px;background:#e8f1ff;border:1px solid #9ec1ff;border-radius:999px;color:#0b3d91;font-size:13px"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Stock for: <strong>${esc(state.productName || 'this product')}</strong></span>
+          <button type="button" id="stock-show-all" title="Remove product filter" aria-label="Remove product filter" style="flex:none;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:#cfe0ff;color:#0b3d91;font-size:16px;line-height:1;cursor:pointer">&times;</button></span></div>`);
         document.getElementById('stock-show-all').addEventListener('click', () => {
           state.productId = ''; state.productName = ''; state.search = ''; state.page = 1;
           try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
@@ -687,7 +728,7 @@
         tbody.innerHTML = data.items.map((m) => `
           <tr>
             <td class="text-sm">${window.UI.formatDateTime(m.createdAt)}</td>
-            <td class="text-sm">${window.UI.escapeHtml(m.productId?.name || '—')}</td>
+            <td class="text-sm">${m.productId && m.productId._id ? `<button type="button" class="mv-pick" data-pid="${esc(m.productId._id)}" data-pname="${esc(m.productId.name || '')}" title="Show movements for this product only" style="all:unset;cursor:pointer;color:var(--color-primary,#ff6600);font-weight:500;text-decoration:underline dotted;text-underline-offset:3px">${window.UI.escapeHtml(m.productId.name || '—')}</button>` : window.UI.escapeHtml(m.productId?.name || '—')}</td>
             ${showLoc ? `<td>${locBadge(m.location)}${m.location === 'WAREHOUSE' && m.warehouseId?.name ? `<div class="text-sm text-muted">${esc(m.warehouseId.name)}</div>` : ''}</td>` : ''}
             <td><span class="badge badge-neutral">${esc(String(m.type).replace(/_/g, ' '))}</span></td>
             <td class="text-sm" style="color: ${m.quantity > 0 ? 'var(--color-success)' : 'var(--color-danger)'}">${m.quantity > 0 ? '+' : ''}${m.quantity}</td>
@@ -697,6 +738,11 @@
           </tr>
         `).join('');
       }
+      tbody.querySelectorAll('.mv-pick').forEach((b) => b.addEventListener('click', () => {
+        state.productId = b.dataset.pid; state.productName = b.dataset.pname || '';
+        renderToolbar(); state.page = 1; renderMovements();
+        try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* ignore */ }
+      }));
       window.UI.renderPagination(document.getElementById('pagination'), data, (p) => { state.page = p; renderMovements(); });
     } catch (err) {
       if (ticket !== renderMovements.ticket) return;
@@ -1536,4 +1582,4 @@
       }
     });
   }
-})(); 
+})();

@@ -76,12 +76,39 @@
     }
   }
 
+  /** "x" inside a search bar: shows while there is something to clear, one click resets the box (and any filters via onClear). */
+  function attachSearchClear(input, opts) {
+    opts = opts || {};
+    const host = input && input.closest('.input-group');
+    if (!host || input._clearX) return;
+    if (!document.getElementById('sx-clear-style')) {
+      const st = document.createElement('style'); st.id = 'sx-clear-style';
+      st.textContent = '.sx-clear{position:absolute;top:50%;transform:translateY(-50%);width:28px;height:28px;padding:0;border:0;border-radius:50%;background:var(--color-bg,#f1f3f5);color:var(--color-text-muted,#667085);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;line-height:1;z-index:2}.sx-clear:hover{background:var(--color-border,#e4e7ec);color:var(--color-text,#101828)}.sx-clear[hidden]{display:none}';
+      document.head.appendChild(st);
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'sx-clear'; btn.hidden = true;
+    btn.title = 'Clear search and filters'; btn.setAttribute('aria-label', 'Clear search and filters'); btn.innerHTML = '&times;';
+    host.appendChild(btn);
+    const sync = () => {
+      const on = !!input.value || !!(opts.active && opts.active());
+      btn.hidden = !on;
+      const hasCam = !!host.querySelector('.bg-search-scan');
+      btn.style.right = hasCam ? '44px' : '8px';
+      input.style.paddingRight = on ? (hasCam ? '78px' : '40px') : '';
+    };
+    input._clearX = btn; input._syncClear = sync;
+    input.addEventListener('input', sync);
+    btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); input.value = ''; opts.onClear && opts.onClear(); sync(); input.focus(); });
+    setTimeout(sync, 0); // after the camera icon is attached
+  }
+
   /** Barcode scanner is ALWAYS listening on this page: a scan fills the search box and filters the list at once. */
   function bindAlwaysOnScanner() {
     const input = document.getElementById('search-input');
     const run = (code, fromCamera) => {
       if (!fromCamera && document.querySelector('.modal-backdrop')) return; // a form is open: its own barcode field gets the scan
-      input.value = code; state.search = code; state.page = 1;
+      input.value = code; state.search = code; state.page = 1; if (input._syncClear) input._syncClear();
       fetchAndRender({ local: true }).then(() => {
         const rows = document.querySelectorAll('#products-tbody tr[data-id]');
         if (!rows.length && window.PosBoost) {
@@ -95,6 +122,16 @@
     // Camera icon INSIDE the search bar: scan with the phone / webcam, the list filters to that product;
     // if no product has the barcode, the Quick add window opens with the barcode already filled in.
     if (window.BarcodeGuard) window.BarcodeGuard.attachSearchScan(input, { title: 'Scan product barcode', onCode: (code) => run(code, true) });
+    attachSearchClear(input, {
+      active: () => !!(state.search || state.categoryId || state.status),
+      onClear: () => {
+        const hadStatus = !!state.status;
+        state.search = ''; state.categoryId = ''; state.status = ''; state.page = 1;
+        const c = document.getElementById('category-filter'); if (c) c.value = '';
+        const st = document.getElementById('status-filter'); if (st) st.value = '';
+        fetchAndRender(hadStatus ? undefined : { local: true });
+      },
+    });
     input.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       const term = input.value.trim();
@@ -485,12 +522,14 @@
     document.getElementById('status-filter').addEventListener('change', (e) => {
       state.status = e.target.value;
       state.page = 1;
+      { const i = document.getElementById('search-input'); if (i && i._syncClear) i._syncClear(); }
       fetchAndRender(); // archived products live on the server: always a fresh load
     });
 
     document.getElementById('category-filter').addEventListener('change', (e) => {
       state.categoryId = e.target.value;
       state.page = 1;
+      { const i = document.getElementById('search-input'); if (i && i._syncClear) i._syncClear(); }
       fetchAndRender({ local: true });
     });
   }
