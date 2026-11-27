@@ -1346,7 +1346,8 @@
     }
     lines.forEach((i, idx) => {
       if (!wantsBatchRows(i)) return;
-      batches[idx] = [{ batchNumber: '', quantity: qtyOf(i), expiryDate: '', manufacturingDate: '' }];
+      const hint = ((lsGet('pos.pur.rcv.v1', {}) || {})[purchase._id] || {})[`${i.productId}|${i.variantId || ''}`] || {};
+      batches[idx] = [{ batchNumber: hint.batchNumber || '', quantity: qtyOf(i), expiryDate: hint.expiryDate || '', manufacturingDate: '' }];
       renderBatches(idx);
     });
     modal.querySelectorAll('[data-add-batch]').forEach((b) => b.addEventListener('click', () => {
@@ -1484,12 +1485,12 @@
   }
   const serializeItem = (it) => ({
     product: it.product, variant: it.variant || null, quantity: it.quantity, price: it.price, priceMode: it.priceMode, canon: it.canon,
-    pack: it.pack, unitName: it.unitName, customUnit: !!it.customUnit, priceUpdate: it.priceUpdate || null, promptedFor: it.promptedFor || null, discount: Number(it.discount) || 0,
+    pack: it.pack, unitName: it.unitName, customUnit: !!it.customUnit, priceUpdate: it.priceUpdate || null, promptedFor: it.promptedFor || null, discount: Number(it.discount) || 0, batchNo: it.batchNo || '', expiry: it.expiry || '',
   });
   const reviveItem = (o) => ({
     product: o.product, variant: o.variant || null, quantity: Number(o.quantity) || 0, price: Number(o.price) || 0, priceMode: o.priceMode || 'pack',
     canon: o.canon != null ? o.canon : null, pack: o.pack || 1, unitName: o.unitName || 'Piece', customUnit: !!o.customUnit,
-    priceUpdate: o.priceUpdate || null, promptedFor: o.promptedFor || null, discount: Number(o.discount) || 0,
+    priceUpdate: o.priceUpdate || null, promptedFor: o.promptedFor || null, discount: Number(o.discount) || 0, batchNo: o.batchNo || '', expiry: o.expiry || '',
   });
 
   /* supplier memory */
@@ -1944,6 +1945,8 @@
       return { rows, whole, own: rows.reduce((t, r) => t + r.own, 0), t0: rows.reduce((t, r) => t + r.t0, 0), t: rows.reduce((t, r) => t + r.t, 0) };
     }
 
+    const trackB = (it) => !!(it.product && (it.product.trackBatch || it.product.trackExpiry));
+    const trackE = (it) => !!(it.product && it.product.trackExpiry);
     function cardHtml(it, i) {
       const vlabel = it.variant ? Object.values(it.variant.attributes || {}).join(', ') : '';
       const sku = (it.variant ? it.variant.sku : it.product.sku) || '';
@@ -1980,6 +1983,13 @@
         <div class="field" style="margin-top:8px"><label>Supplier discount on this product <span class="text-muted">(total amount taken off, optional)</span></label>
           <input class="input" type="number" min="0" step="0.01" inputmode="decimal" value="${it.discount || ''}" placeholder="0" data-field="discount" data-idx="${i}" />
           <span class="text-xs text-muted">Lowers what you pay the supplier. The product's cost and selling price are not changed.</span></div>
+        ${trackB(it) ? `<div class="pc-grid" style="margin-top:8px;padding:10px;border:1px dashed var(--color-border,#e2e8f0);border-radius:10px">
+          <div class="field"><label>Supplier batch number <span style="color:#d93025">*</span></label>
+            <input class="input" type="text" maxlength="60" autocomplete="off" value="${esc(it.batchNo || '')}" placeholder="e.g. LOT-2411" data-field="batchNo" data-idx="${i}" /></div>
+          ${trackE(it) ? `<div class="field"><label>Expiry date <span style="color:#d93025">*</span></label>
+            <input class="input" type="date" value="${esc(it.expiry || '')}" data-field="expiry" data-idx="${i}" /></div>` : ''}
+          <span class="text-xs text-muted" style="grid-column:1/-1">This product is tracked by ${trackE(it) && it.product.trackBatch ? 'batch and expiry' : trackE(it) ? 'expiry' : 'batch'} - enter it now so it is ready when you receive the stock.</span>
+        </div>` : ''}
         <div class="pc-result" data-calc="${i}"></div>
         <div data-pricebox="${i}" style="margin-top:8px"></div>
         </div></div>
@@ -2024,6 +2034,7 @@
       const it = items[Number(t.dataset.idx)]; if (!it) return;
       const card = t.closest('.pc-card');
       if (f === 'unitName') it.unitName = t.value;
+      else if (f === 'batchNo' || f === 'expiry') it[f] = t.value;
       else it[f] = Number(t.value) || 0;
       if (f === 'price' || f === 'pack') it.canon = null;
       if (f === 'pack') card.querySelectorAll('[data-packset]').forEach((b) => b.classList.toggle('on', Number(b.dataset.packset) === packOf(it)));
@@ -2201,8 +2212,14 @@
         const okZero = await window.UI.confirmDialog({ title: 'Cost is 0', message: `${zero.product.name} has a cost of 0. Is this free stock? Choose Cancel to enter the cost.`, confirmText: 'Yes, cost is 0' });
         if (!okZero) return;
       }
+      const lack = active.find((it) => trackB(it) && (!String(it.batchNo || '').trim() || (trackE(it) && !it.expiry)));
+      if (lack) {
+        flag(lack);
+        return window.UI.toast.error(`${lack.product.name}: enter the supplier batch number${trackE(lack) ? ' and expiry date' : ''}`);
+      }
       const raw = window.UI.serializeForm(form);
       const rate = vat.mode === 'NONE' ? 0 : vat.rate;
+      const plan = discountPlan(); // must exist BEFORE the notes below use it (it was declared later = the button did nothing)
 
       const fd = new FormData();
       fd.append('branchId', branchId);
@@ -2213,7 +2230,6 @@
       if (noteAll) fd.append('notes', noteAll);
       fd.append('vatMode', vat.mode);
       fd.append('vatRate', rate);
-      const plan = discountPlan();
       const planOf = new Map(plan.rows.map((r) => [r.it, r]));
       const costFix = []; // products whose cost must be put back to the undiscounted figure after the purchase is saved
       fd.append('items', JSON.stringify(active.map((it) => {
@@ -2242,7 +2258,17 @@
       const btn = document.getElementById('purchase-save-btn');
       window.UI.setButtonLoading(btn, true, 'Creating…');
       try {
-        await window.Api.upload('/purchases', fd);
+        const created = await window.Api.upload('/purchases', fd);
+        try {
+          const pr = created && created.data && (created.data.purchase || created.data);
+          const pid = pr && pr._id;
+          if (pid) {
+            const st = lsGet('pos.pur.rcv.v1', {}) || {};
+            const o = {};
+            active.forEach((it) => { if (trackB(it)) o[itemKey(it)] = { batchNumber: String(it.batchNo || '').trim(), expiryDate: it.expiry || '' }; });
+            if (Object.keys(o).length) { st[pid] = o; const ks = Object.keys(st); if (ks.length > 40) delete st[ks[0]]; lsSet('pos.pur.rcv.v1', st); }
+          }
+        } catch (e) { /* batch hints are a convenience only */ }
         for (const f of costFix) {
           try {
             const url = f.it.variant ? `/products/${f.it.product._id}/variants/${f.it.variant._id}` : `/products/${f.it.product._id}`;
