@@ -76,6 +76,9 @@
     }
   }
 
+  /** Cost price is for the owner / admin / manager only; staff never get the column. */
+  const canSeeCost = () => { try { const u = window.AppShell.getUser(); return !!u && ['OWNER', 'ADMIN', 'MANAGER'].includes(String(u.role).toUpperCase()); } catch { return false; } };
+
   /** "x" inside a search bar: shows while there is something to clear, one click resets the box (and any filters via onClear). */
   function attachSearchClear(input, opts) {
     opts = opts || {};
@@ -205,6 +208,7 @@
                 <th>Product</th>
                 <th>SKU / Barcode</th>
                 <th>Category</th>
+                ${canSeeCost() ? '<th>Cost</th>' : ''}
                 <th>Price</th>
                 <th>Status</th>
                 <th class="pm-stock-col">Stock</th>
@@ -610,7 +614,7 @@
           }
         }
       } catch { /* fall through to the message */ }
-      tbody.innerHTML = `<tr><td colspan="8">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="${canSeeCost() ? 9 : 8}">${window.UI.emptyStateHtml({ icon: 'alert', title: 'Could not load products', message: err.message })}</td></tr>`;
     }
   }
 
@@ -802,7 +806,7 @@
     const tbody = document.getElementById('products-tbody');
 
     if (!items.length) {
-      tbody.innerHTML = `<tr><td colspan="8">${window.UI.emptyStateHtml({
+      tbody.innerHTML = `<tr><td colspan="${canSeeCost() ? 9 : 8}">${window.UI.emptyStateHtml({
         icon: 'products',
         title: state.search || state.categoryId ? 'No products match your filters' : 'No products yet',
         message: state.search || state.categoryId ? '' : 'Add your first product to start building your catalog.',
@@ -831,6 +835,7 @@
           ${p.barcode ? `<div class="text-xs text-muted">${window.UI.escapeHtml(p.barcode)}</div>` : (p.hasVariants ? '' : '<div class="text-xs"><span class="badge badge-warning">No barcode</span></div>')}
         </td>
         <td class="text-sm">${p.categoryId ? window.UI.escapeHtml(p.categoryId.name) : '<span class="text-muted">Uncategorized</span>'}</td>
+        ${canSeeCost() ? `<td class="text-sm">${p.hasVariants ? '<span class="text-muted">Varies</span>' : window.UI.formatMoney(p.costPrice || 0)}</td>` : ''}
         <td>
           ${p.pricingMode === 'WHOLESALE_FIRST' ? wholesalePriceCell(p) : `
           <div class="cell-primary">${p.hasVariants ? 'Varies' : window.UI.formatMoney(p.sellingPrice)}</div>
