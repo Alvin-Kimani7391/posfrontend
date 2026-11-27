@@ -1958,7 +1958,7 @@
         <div class="pc-head" data-toggle="${i}">
           <span class="pc-num">${i + 1}</span>
           <div class="pc-headmain"><div style="min-width:0">
-            <div class="pc-name">${esc(it.product.name)}${vlabel ? ` <span class="text-muted">(${esc(vlabel)})</span>` : ''}${liquor ? liquorChip(it) : ''}${saved ? '<span class="pc-tag">saved for supplier</span>' : ''}</div>
+            <div class="pc-name">${esc(it.product.name)}${vlabel ? ` <span class="text-muted">(${esc(vlabel)})</span>` : ''}${liquor ? liquorChip(it) : ''}${trackB(it) ? `<span class="pc-tag" style="background:#fff7e6;color:#b45309">${trackE(it) ? 'Batch + expiry' : 'Batch'} required</span>` : ''}${saved ? '<span class="pc-tag">saved for supplier</span>' : ''}</div>
             ${sku ? `<div class="pc-sku">SKU: ${esc(sku)}</div>` : ''}
             <div class="pc-sum" data-sum="${i}"></div>
           </div></div>
@@ -1996,6 +1996,29 @@
       </div>`;
     }
 
+    /** Saved / remembered product copies can be old and miss the tracking flags: read the live product once, then redraw. */
+    const flagCache = new Map();
+    async function hydrateFlags() {
+      const need = items.filter((it) => it.product && it.product._id && !it._flagsOk);
+      if (!need.length) return false;
+      let changed = false;
+      await Promise.all([...new Set(need.map((it) => String(it.product._id)))].map(async (pid) => {
+        if (!flagCache.has(pid)) {
+          flagCache.set(pid, window.Api.get(`/products/${pid}`).then(({ data }) => data.product || data).catch(() => null));
+        }
+        const live = await flagCache.get(pid);
+        need.filter((it) => String(it.product._id) === pid).forEach((it) => {
+          if (live) {
+            const b = !!live.trackBatch; const e = !!live.trackExpiry;
+            if (!!it.product.trackBatch !== b || !!it.product.trackExpiry !== e) changed = true;
+            it.product = Object.assign({}, it.product, { trackBatch: b, trackExpiry: e });
+            it._flagsOk = true;
+          }
+        });
+      }));
+      return changed;
+    }
+
     function renderItems(focusIdx, focusField) {
       if (!items.length) {
         toolsEl.hidden = true;
@@ -2005,6 +2028,7 @@
       toolsEl.hidden = items.length < 2;
       list.innerHTML = items.map(cardHtml).join('');
       refreshCalc();
+      if (items.some((it) => !it._flagsOk)) hydrateFlags().then((changed) => { if (changed && modal.isConnected) { const open = items.map((x) => x._open); renderItems(); items.forEach((x, k) => { x._open = open[k]; }); } }).catch(() => {});
       if (focusIdx != null) {
         const q = list.querySelector(`input[data-field="${focusField || 'quantity'}"][data-idx="${focusIdx}"]`);
         const card = list.querySelector(`[data-row="${focusIdx}"]`);
@@ -2194,6 +2218,7 @@
     modal.querySelector('[data-action="save"]').addEventListener('click', async () => {
       if (!supSel.value) { window.UI.toast.error('Choose a supplier, or add a new one'); supSel.focus(); return; }
       if (!vat.mode) return window.UI.toast.error('Choose the VAT option first');
+      try { if (await hydrateFlags()) { renderItems(); } } catch (e) { /* use what we have */ }
       const active = items.filter(isActive);
       if (!active.length) return window.UI.toast.error(items.length ? 'Enter a quantity for at least one product' : 'Add at least one item');
       const cards = list.querySelectorAll('.pc-card');
