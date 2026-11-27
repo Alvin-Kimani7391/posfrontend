@@ -38,7 +38,7 @@
   const LOCK_MAX_AGE_MS = 12 * 60 * 60 * 1000;
   const STATUS_REQ = new Uint8Array([0x10, 0x04, 0x01]); // DLE EOT 1 (printer status)
 
-  const DEFAULT_CFG = { enabled: false, mode: 'none', pin: 0, baud: 9600, closedBit: null, usb: null };
+  const DEFAULT_CFG = { enabled: false, mode: 'none', pin: 0, baud: 9600, closedBit: null, usb: null, cmd: 'auto', custom: '', flow: 'none' };
 
   const esc = (s) => window.UI.escapeHtml(s == null ? '' : String(s));
 
@@ -48,6 +48,8 @@
   }
 
   let cfg = { ...DEFAULT_CFG, ...(readJson(CFG_KEY) || {}) };
+  if (!(readJson(CFG_KEY) || {}).cmd && cfg.pin === 1) cfg.cmd = 'pin5'; // a till set to "Pin 5" before the command option existed
+  let lastError = '';      // last drawer problem, shown in the setup screen and the top bar until a pulse works again
   let lock = null;
   const listeners = new Set();
 
@@ -93,6 +95,11 @@
       canSense: connected && senseOk && cfg.closedBit != null,
       pin: cfg.pin,
       baud: cfg.baud,
+      cmd: cfg.cmd,
+      custom: cfg.custom,
+      flow: cfg.flow,
+      answering: senseOk,
+      lastError,
     };
   }
 
@@ -119,8 +126,16 @@
   async function rawWrite(bytes) {
     if (!link) throw new Error('Drawer not connected');
     if (link.kind === 'serial') {
+      if (!port || !port.writable) throw new Error('The COM port is closed');
       const writer = port.writable.getWriter();
-      try { await writer.write(bytes); } finally { writer.releaseLock(); }
+      let timer;
+      try {
+        // a printer that never accepts data (wrong speed / flow control / switched off) would make write() wait forever
+        await Promise.race([
+          writer.write(bytes),
+          new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('The printer is not accepting data. Check it is switched on, the cable, the serial speed (baud) and flow control.')), 3000); }),
+        ]);
+      } finally { clearTimeout(timer); try { writer.releaseLock(); } catch { /* a stuck write keeps the lock: the port is re-opened by reconnect */ } }
     } else {
       const res = await usbDev.transferOut(usbEp.out, bytes);
       if (res.status !== 'ok') throw new Error(`USB transfer failed (${res.status})`);
@@ -204,7 +219,16 @@
    * ------------------------------------------------------------------ */
   async function adoptSerial(p, remember = true) {
     await dropLink();
-    await p.open({ baudRate: Number(cfg.baud) || 9600 });
+    try { await p.close(); } catch { /* it was not open */ }
+    try {
+      await p.open({ baudRate: Number(cfg.baud) || 9600, dataBits: 8, stopBits: 1, parity: 'none', flowControl: cfg.flow === 'hardware' ? 'hardware' : 'none', bufferSize: 4096 });
+    } catch (err) {
+      if (err && (err.name === 'NetworkError' || /access denied|busy|in use|failed to open/i.test(String(err.message)))) {
+        throw new Error('The COM port could not be opened. Another program or browser tab is using it (close the printer software / other POS tabs), or the cable was unplugged.');
+      }
+      throw err;
+    }
+    try { await p.setSignals({ dataTerminalReady: true, requestToSend: true }); } catch { /* not every adapter supports it */ }
     port = p;
     link = { kind: 'serial', label: 'Serial / COM printer' };
     startSerialLoop(p);
@@ -275,23 +299,94 @@
   function configure(partial = {}) {
     if (partial.pin != null) cfg.pin = Number(partial.pin) === 1 ? 1 : 0;
     if (partial.baud != null) cfg.baud = Number(partial.baud) || 9600;
+    if (partial.cmd != null) cfg.cmd = ['auto', 'pin2', 'pin5', 'dle', 'bel', 'signal', 'custom'].includes(partial.cmd) ? partial.cmd : 'auto';
+    if (partial.custom != null) cfg.custom = String(partial.custom).slice(0, 80);
+    if (partial.flow != null) cfg.flow = partial.flow === 'hardware' ? 'hardware' : 'none';
     writeJson(CFG_KEY, cfg);
   }
 
   /* ------------------------------------------------------------------ *
    * Open / sense
    * ------------------------------------------------------------------ */
-  async function open() {
-    if (!link) return { ok: false, reason: 'no-device' };
-    try {
-      // ESC p m t1 t2  - m = connector pin (0 = pin 2, 1 = pin 5), pulse 50ms on / 500ms off
-      await write(new Uint8Array([0x1B, 0x70, cfg.pin ? 1 : 0, 25, 250]));
-      return { ok: true };
-    } catch (err) {
-      await dropLink();
-      emit('connection');
-      return { ok: false, reason: 'error', error: err.message };
+  const ESC_INIT = [0x1B, 0x40];
+  const escP = (m) => [0x1B, 0x70, m, 50, 250];      // ESC p m t1 t2: pin 2 (m=0) / pin 5 (m=1), 100 ms on, 500 ms off
+  const dle14 = (m) => [0x10, 0x14, 0x01, m, 0x01];  // DLE DC4 1 m t: the same pulse as a real-time command (works when the printer is busy)
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function commandBytes(cmd) {
+    switch (cmd) {
+      case 'pin2': return [...ESC_INIT, ...escP(0)];
+      case 'pin5': return [...ESC_INIT, ...escP(1)];
+      case 'dle': return [...dle14(0), ...dle14(1)];
+      case 'bel': return [0x07];
+      case 'custom': {
+        const hex = String(cfg.custom || '').replace(/0x/gi, '').replace(/[^0-9a-f]/gi, '');
+        if (hex.length < 2 || hex.length % 2) throw new Error('The custom drawer command is not valid hex (example: 1B 70 00 32 FA).');
+        return (hex.match(/../g) || []).map((h) => parseInt(h, 16));
+      }
+      default: return [...ESC_INIT, ...escP(0), ...escP(1), ...dle14(0), ...dle14(1)]; // auto: both connector pins, both command styles
     }
+  }
+
+  /** Direct RS-232 drawers (no printer in between) open on a change of the DTR / RTS line. */
+  async function pulseSignals() {
+    if (!link || link.kind !== 'serial' || !port || !port.setSignals) throw new Error('Signal pulse needs a Serial / COM connection.');
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+    await sleep(250);
+    await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+    await sleep(250);
+  }
+
+  /** Re-attach to the printer this till already has permission for (unplugged / replugged, sleep, page reload). */
+  async function reconnect() {
+    try {
+      if (cfg.mode === 'serial' && 'serial' in navigator) {
+        const ports = await navigator.serial.getPorts();
+        if (ports[0]) { await adoptSerial(ports[0], false); return !!link; }
+      } else if (cfg.mode === 'usb' && 'usb' in navigator) {
+        const devs = await navigator.usb.getDevices();
+        const dev = devs.find((d) => !cfg.usb || (d.vendorId === cfg.usb.vendorId && d.productId === cfg.usb.productId));
+        if (dev) { await adoptUsb(dev, false); return !!link; }
+      }
+    } catch (err) { console.warn('CashDrawer: reconnect failed', err); }
+    return false;
+  }
+
+  async function sendOpen(cmd) {
+    if (cmd === 'signal') { await pulseSignals(); return; }
+    await write(new Uint8Array(commandBytes(cmd)));
+  }
+
+  /** Sends the open pulse. Never reports success unless the bytes really went to the printer; one automatic reconnect + retry on failure. */
+  async function open(opts = {}) {
+    const cmd = opts.cmd || cfg.cmd || 'auto';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (!link && !(await reconnect())) {
+        lastError = cfg.mode === 'none' ? 'No printer / drawer is connected to this till. Open Cash drawer settings and connect it.' : 'The printer is not connected (unplugged, switched off, or the browser lost permission). Open Cash drawer settings and connect it again.';
+        emit('connection');
+        return { ok: false, reason: 'no-device', error: lastError };
+      }
+      try {
+        await sendOpen(cmd);
+        lastError = '';
+        return { ok: true };
+      } catch (err) {
+        lastError = err.message || 'The drawer command failed';
+        await dropLink();
+        emit('connection');
+        if (attempt === 1) return { ok: false, reason: 'error', error: lastError };
+      }
+    }
+    return { ok: false, reason: 'error', error: lastError };
+  }
+
+  /** Opens the drawer for a sale that needs no change lock (exact cash). Reports a failure so the cashier knows at once. */
+  async function kick(info = {}) {
+    if (!cfg.enabled) return { ok: false, reason: 'disabled' };
+    try { await ready; } catch { /* init errors are already logged */ }
+    const res = await open();
+    if (!res.ok) emit('error', { error: res.error, info });
+    return res;
   }
 
   /** 'open' | 'closed' | 'unknown' - 'unknown' whenever the printer cannot tell us. */
@@ -326,10 +421,10 @@
   }
 
   /** Setup-screen test: kick the drawer, then report what the sensor sees. */
-  async function test() {
-    const res = await open();
+  async function test(opts = {}) {
+    const res = await open(opts);
     if (!res.ok) return { ...res, state: 'unknown' };
-    await new Promise((r) => setTimeout(r, 700));
+    await new Promise((r) => setTimeout(r, 900));
     return { ...res, state: await readState() };
   }
 
@@ -341,7 +436,8 @@
   async function pulseForLock() {
     const res = await open();
     if (!lock) return res; // released while the pulse was in flight
-    lock.phase = res.ok ? 'open' : (res.reason === 'no-device' ? 'manual' : 'failed');
+    lock.phase = res.ok ? 'open' : (res.reason === 'no-device' && cfg.mode === 'none' ? 'manual' : 'failed');
+    if (!res.ok) emit('error', { error: res.error });
     lock.sawOpen = false;
     lock.reading = 'unknown';
     if (res.ok) lock.openedAt = Date.now();
@@ -513,17 +609,37 @@
         <div class="drawer-setup-actions">
           ${st.usbSupported ? '<button class="btn btn-secondary btn-sm" data-act="usb">Connect USB printer</button>' : ''}
           ${st.serialSupported ? '<button class="btn btn-secondary btn-sm" data-act="serial">Connect Serial / COM</button>' : ''}
+          ${st.connected ? '<button class="btn btn-primary btn-sm" data-act="find">Find my drawer</button>' : ''}
           ${st.connected ? '<button class="btn btn-secondary btn-sm" data-act="test">Test open</button>' : ''}
           ${st.connected ? '<button class="btn btn-secondary btn-sm" data-act="calibrate">Calibrate (drawer closed)</button>' : ''}
           ${st.connected ? '<button class="btn btn-ghost btn-sm" data-act="disconnect">Disconnect</button>' : ''}
         </div>
+        ${st.lastError ? `<div class="drawer-setup-note warn" style="margin-top:var(--space-3)"><strong>Drawer problem:</strong> ${esc(st.lastError)}</div>` : ''}
+        ${st.connected && !st.answering ? '<div class="drawer-setup-note warn" style="margin-top:var(--space-3)">The port is open, but the printer is not answering the status request, so the system cannot confirm the drawer opened. Use <strong>Find my drawer</strong> or <strong>Test open</strong> and watch the drawer.</div>' : ''}
         <div class="form-row" style="margin-top:var(--space-4)">
           <div class="field">
-            <label for="cd-pin">Drawer connector</label>
-            <select class="select" id="cd-pin">
-              <option value="0" ${st.pin === 0 ? 'selected' : ''}>Pin 2 (default)</option>
-              <option value="1" ${st.pin === 1 ? 'selected' : ''}>Pin 5</option>
+            <label for="cd-cmd">Open command</label>
+            <select class="select" id="cd-cmd">
+              <option value="auto" ${st.cmd === 'auto' ? 'selected' : ''}>Automatic (ESC/POS, both pins) - recommended</option>
+              <option value="pin2" ${st.cmd === 'pin2' ? 'selected' : ''}>ESC/POS pin 2 only</option>
+              <option value="pin5" ${st.cmd === 'pin5' ? 'selected' : ''}>ESC/POS pin 5 only</option>
+              <option value="dle" ${st.cmd === 'dle' ? 'selected' : ''}>Real-time (DLE DC4)</option>
+              <option value="bel" ${st.cmd === 'bel' ? 'selected' : ''}>Bell character (some serial drawers)</option>
+              <option value="signal" ${st.cmd === 'signal' ? 'selected' : ''}>DTR / RTS signal (drawer wired straight to COM)</option>
+              <option value="custom" ${st.cmd === 'custom' ? 'selected' : ''}>Custom hex bytes</option>
             </select>
+          </div>
+          <div class="field" ${st.cmd === 'custom' ? '' : 'hidden'} id="cd-custom-wrap">
+            <label for="cd-custom">Custom bytes (hex)</label>
+            <input class="input" id="cd-custom" value="${esc(st.custom)}" placeholder="1B 70 00 32 FA" />
+          </div>
+          <div class="field">
+            <label for="cd-flow">Flow control</label>
+            <select class="select" id="cd-flow">
+              <option value="none" ${st.flow !== 'hardware' ? 'selected' : ''}>None (default)</option>
+              <option value="hardware" ${st.flow === 'hardware' ? 'selected' : ''}>Hardware (RTS/CTS)</option>
+            </select>
+            <span class="field-hint">Applied the next time you connect.</span>
           </div>
           <div class="field">
             <label for="cd-baud">Serial speed (baud)</label>
@@ -543,13 +659,39 @@
       body.querySelector('[data-act="test"]')?.addEventListener('click', () => run(async () => {
         const r = await test();
         if (!r.ok) throw new Error(r.error || 'The drawer did not respond.');
-        window.UI.toast.success(r.state === 'open' ? 'Drawer opened - sensor sees it OPEN' : r.state === 'closed' ? 'Pulse sent - sensor still reads CLOSED (recalibrate or check pin)' : 'Pulse sent');
+        if (r.state === 'open') window.UI.toast.success('Drawer opened - the sensor sees it OPEN');
+        else if (r.state === 'closed') window.UI.toast.error('Command sent, but the sensor still reads CLOSED. Try "Find my drawer", another Open command, or recalibrate.');
+        else window.UI.toast.success(window.confirm('Command sent. Did the drawer open?') ? 'Great - the drawer works' : 'Not opened: use "Find my drawer" to try the other settings.');
+      }));
+      // Tries every serial speed (and the Automatic command) and asks after each one whether the drawer popped.
+      body.querySelector('[data-act="find"]')?.addEventListener('click', () => run(async () => {
+        const st0 = status();
+        const bauds = st0.kind === 'serial' ? [...new Set([cfg.baud, 9600, 19200, 38400, 115200, 57600])] : [cfg.baud];
+        const cmds = st0.kind === 'serial' ? ['auto', 'bel', 'signal'] : ['auto', 'dle'];
+        for (const baud of bauds) {
+          if (st0.kind === 'serial' && baud !== cfg.baud) { cfg.baud = baud; writeJson(CFG_KEY, cfg); if (port) await adoptSerial(port, false); }
+          for (const cmd of cmds) {
+            if (!window.confirm(`Trying ${st0.kind === 'serial' ? `${baud} baud, ` : ''}command "${cmd}".\n\nPress OK, then watch the drawer.`)) return;
+            const r = await open({ cmd });
+            if (!r.ok) { window.UI.toast.error(r.error || 'Could not send the command'); continue; }
+            await sleep(900);
+            if (window.confirm('Did the drawer OPEN?')) {
+              configure({ cmd, baud }); lastError = '';
+              window.UI.toast.success(`Found it: ${st0.kind === 'serial' ? `${baud} baud, ` : ''}command "${cmd}" saved.`);
+              emit('connection');
+              return;
+            }
+          }
+        }
+        window.UI.toast.error('The drawer did not open with any setting. Check the cable is in the printer\'s DK / drawer port, the drawer key is not locked, and the drawer has power from the printer.');
       }));
       body.querySelector('[data-act="calibrate"]')?.addEventListener('click', () => run(async () => {
         await calibrate();
         window.UI.toast.success('Calibrated - make sure the drawer was closed. Use Test open to verify.');
       }));
-      body.querySelector('#cd-pin')?.addEventListener('change', (e) => configure({ pin: e.target.value }));
+      body.querySelector('#cd-cmd')?.addEventListener('change', (e) => { configure({ cmd: e.target.value }); const w = body.querySelector('#cd-custom-wrap'); if (w) w.hidden = e.target.value !== 'custom'; });
+      body.querySelector('#cd-custom')?.addEventListener('change', (e) => configure({ custom: e.target.value }));
+      body.querySelector('#cd-flow')?.addEventListener('change', (e) => configure({ flow: e.target.value }));
       body.querySelector('#cd-baud')?.addEventListener('change', (e) => configure({ baud: e.target.value }));
     }
 
@@ -624,6 +766,8 @@
     getLock,
     open,
     reopen,
+    kick,
+    reconnect,
     beginChange,
     release,
     readState,

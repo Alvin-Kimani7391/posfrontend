@@ -50,6 +50,7 @@
       ${owner ? '<div class="card-footer" style="display:flex;justify-content:flex-end"><button class="btn btn-primary btn-sm" id="ofs-save">Save offline policy</button></div>' : ''}</div>`;
     if (!owner) return;
     box.querySelector('#ofs-save').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
       const g = (id) => box.querySelector(`#of_${id}`);
       const payload = {
         enabled: g('enabled').checked, allowManualMpesa: g('allowManualMpesa').checked, allowCard: g('allowCard').checked,
@@ -61,10 +62,10 @@
         maxPendingValueCents: Math.round(Number(g('maxPendingValue').value) * 100), maxManualMpesaCents: Math.round(Number(g('maxManualMpesa').value) * 100),
         defaultDeviceMode: g('defaultDeviceMode').value, manualMpesaApproval: g('manualMpesaApproval').value,
       };
-      window.UI.setButtonLoading(e.currentTarget, true, 'Saving…');
+      window.UI.setButtonLoading(btn, true, 'Saving…');
       try { await window.Api.put('/devices/policy', payload); window.UI.toast.success('Offline policy saved'); }
       catch (err) { window.UI.toast.error(err.message); }
-      finally { window.UI.setButtonLoading(e.currentTarget, false); }
+      finally { window.UI.setButtonLoading(btn, false); }
     });
   }
 

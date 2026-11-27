@@ -950,10 +950,11 @@ window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault()
     const paint = () => {
       const st = drawer.status();
       const locked = drawer.isLocked();
-      const tone = locked ? 'open' : st.connected ? 'ok' : 'off';
-      const label = locked ? 'Drawer open' : !st.enabled ? 'No drawer' : st.connected ? 'Drawer ready' : 'Drawer: manual';
+      const bad = st.enabled && !!st.lastError;
+      const tone = bad || locked ? 'open' : st.connected ? 'ok' : 'off';
+      const label = bad ? 'Drawer error' : locked ? 'Drawer open' : !st.enabled ? 'No drawer' : st.connected ? 'Drawer ready' : 'Drawer: not connected';
       wrap.innerHTML = `
-        <button type="button" class="drawer-chip drawer-chip-${tone}" title="Cash drawer settings">
+        <button type="button" class="drawer-chip drawer-chip-${tone}" title="${bad ? String(st.lastError).replace(/"/g, '&quot;') : 'Cash drawer settings'}">
           ${window.Icons.get('cash')}<span>${label}</span>
         </button>`;
       wrap.querySelector('button').addEventListener('click', () => drawer.openSetup());

@@ -221,15 +221,28 @@
   /* ------------------------------------------------------------------ *
    * Button loading state
    * ------------------------------------------------------------------ */
+  // Buttons currently showing a spinner. Many handlers write setButtonLoading(e.currentTarget, false) AFTER an await, where
+  // event.currentTarget is already null - the spinner then stayed forever. A call without a button now releases every spinner still showing.
+  const loadingButtons = new Set();
+  function restoreButton(button) {
+    button.disabled = false;
+    if (button.dataset.originalHtml) button.innerHTML = button.dataset.originalHtml;
+    delete button.dataset.loading;
+    loadingButtons.delete(button);
+  }
   function setButtonLoading(button, isLoading, loadingText = 'Please wait…') {
-    if (!button) return;
+    if (!button) {
+      if (!isLoading) [...loadingButtons].forEach(restoreButton);
+      return;
+    }
     if (isLoading) {
-      button.dataset.originalHtml = button.innerHTML;
+      if (button.dataset.loading !== '1') button.dataset.originalHtml = button.innerHTML; // never save the spinner as the "original"
+      button.dataset.loading = '1';
       button.disabled = true;
       button.innerHTML = `<span class="spinner"></span> ${escapeHtml(loadingText)}`;
+      loadingButtons.add(button);
     } else {
-      button.disabled = false;
-      if (button.dataset.originalHtml) button.innerHTML = button.dataset.originalHtml;
+      restoreButton(button);
     }
   }
 

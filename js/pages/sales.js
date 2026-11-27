@@ -814,6 +814,9 @@
           { drawerEvent: 'left_open', receiptNumber: ev.lock?.receiptNumber, changeDue: toCents(ev.lock?.change), amountTendered: toCents(ev.lock?.tendered), drawerOpenSeconds: 60 }
         );
         break;
+      case 'error':
+        window.UI.toast.error(`Cash drawer did not open: ${ev.error || 'unknown problem'}. Open it with the No-Sale key and check Drawer settings.`);
+        break;
       case 'unlock':
         hideDrawerLock();
         if (ev.done && ev.done.method !== 'other-tab') window.UI.toast.success('Drawer closed - ready for the next sale');
@@ -4420,6 +4423,8 @@
     if (document.querySelector('.modal-backdrop')) window.UI.closeModal();
     resetCart(); // the till is free for the next customer from this moment
     if (change > 0) window.UI.toast.success(`Give change: ${fm(change)}`);
+    // exact-cash sale on a till with a drawer: pop it at once (do not wait for the server); errors are reported by the drawer module
+    if (window.CashDrawer && window.CashDrawer.isEnabled() && snap.payments.some((p) => p.method === 'CASH')) window.CashDrawer.kick({});
     savingNow += 1; paintSaving();
     $('pos-search')?.focus();
 
@@ -4538,6 +4543,10 @@
       const drawerDriven = change > 0 && !!window.CashDrawer && window.CashDrawer.isEnabled();
       if (drawerDriven) {
         window.CashDrawer.beginChange({ change, tendered, due, receiptNumber: data.sale.receiptNumber, saleId: data.sale._id || '' });
+      }
+      // Cash sale with NO change to give: the drawer still opens by itself (no lock needed). Works whether or not a receipt is printed.
+      if (!drawerDriven && window.CashDrawer && window.CashDrawer.isEnabled() && state.payments.some((p) => p.method === 'CASH')) {
+        window.CashDrawer.kick({ receiptNumber: data.sale.receiptNumber });
       }
       if (document.querySelector('.modal-backdrop')) window.UI.closeModal();
       window.UI.toast.success(data.offline ? `Sale ${data.sale.receiptNumber} saved on this till` : `Sale ${data.sale.receiptNumber} completed${onCredit ? ' (balance on credit)' : ''}`);
